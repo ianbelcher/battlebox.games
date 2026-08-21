@@ -1,0 +1,23 @@
+# Kits — paste build links here, one per line.
+#
+# Run  python3 tools/fetch_kits.py  and anything listed here is downloaded
+# into kits/downloads/, then imported into the game as a stampable Kit.
+#
+# Format:  <url>  |  <name to show in the picker>  |  <who built it>
+#
+# The name and builder are optional but PLEASE fill them in — the builder
+# is shown in the game's Credits tab, and these sites rarely state a
+# licence, so naming the author is the least we can do. Lines starting
+# with # are ignored.
+#
+# Works with:
+#   minecraft-schematics.com  — needs a free login for most downloads, so
+#                               if the fetch is refused, download by hand
+#                               and drop the file straight into
+#                               kits/downloads/ instead. It still gets
+#                               imported.
+#   planetminecraft.com       — .schematic/.schem inside the project zip
+#   a direct link to any .schem / .schematic / .nbt
+#
+# ---------------------------------------------------------------------
+

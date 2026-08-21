@@ -1,0 +1,51 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+
+config_version=5
+
+[application]
+
+config/name="BattleBox"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+config/icon="res://icon.svg"
+boot_splash/show_image=false
+boot_splash/bg_color=Color(0.05, 0.07, 0.1, 1)
+
+[autoload]
+
+Net="*res://src/net.gd"
+Game="*res://src/game.gd"
+Sfx="*res://src/sfx.gd"
+Voice="*res://src/voice.gd"
+
+[audio]
+
+; The microphone does not open at all without this, on any platform, and
+; it fails silently — AudioEffectCapture simply never produces a frame.
+; Voice chat on the native builds depends on it entirely.
+driver/enable_input=true
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="disabled"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+; A browser has one renderer: WebGL2, which Godot calls gl_compatibility.
+; Without this override the web export inherits forward_plus and renders
+; nothing at all.
+renderer/rendering_method.web="gl_compatibility"
+; If Vulkan can't initialize (some Linux driver stacks), fall back to
+; OpenGL instead of crashing on startup; effects auto-degrade.
+rendering_device/fallback_to_opengl3=true
+; Required for the macOS universal/arm64 export (Apple Silicon needs
+; ETC2/ASTC textures imported alongside S3TC).
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=2
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3

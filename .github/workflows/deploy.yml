@@ -1,0 +1,298 @@
+name: build and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # Fast feedback, on a hosted runner, for every push and every pull
+  # request. The image build below is thorough but takes minutes and only
+  # runs on main; this is what tells somebody their change is broken
+  # while they are still looking at it.
+  checks:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GODOT_VERSION: 4.7.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The lobby's own tests
+        # No Godot needed, so this fails in seconds if it is going to.
+        run: python3 -m unittest discover -s lobby -p 'test_*.py' -v
+
+      - name: Cache Godot
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}
+
+      - name: Fetch Godot
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot && cd ~/godot
+          name="Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+          curl -fsSLO "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/${name}.zip"
+          unzip -q "${name}.zip" && mv "${name}" godot && chmod +x godot
+
+      - name: Import
+        # A class_name is invisible to other scripts until the project has
+        # been imported once — every run needs this before anything else.
+        run: ~/godot/godot --headless --path game --import || true
+
+      - name: It compiles
+        # --export-release exits 0 with a parse error in the project, so
+        # booting is the only thing that actually catches one.
+        run: |
+          ~/godot/godot --headless --path game --quit-after 240 > boot.log 2>&1 || true
+          if grep -qiE "SCRIPT ERROR|Parse Error|Compile Error|Failed to load script" boot.log; then
+            grep -iE -A2 "SCRIPT ERROR|Parse Error|Compile Error" boot.log
+            echo "::error::the project does not compile"
+            exit 1
+          fi
+
+      - name: Unit tests
+        run: ~/godot/godot --headless --path game --script res://tests/run_tests.gd
+
+      - name: Things that fail silently
+        run: |
+          ~/godot/godot --headless --path game --script res://tests/ui_glyphs.gd
+          ~/godot/godot --headless --path game --script res://tests/flag_beacons.gd
+
+      # The Minecraft importer, against a generated region file. No maps
+      # are committed, so without this nothing exercises it at all — and a
+      # silently-rotting importer is what this test was: it had been
+      # failing on two stale assertions for as long as anyone had run it.
+      - name: The .mca importer
+        run: |
+          python3 tools/make_mca.py /tmp/mca-fixture
+          WORLD_MCA_DIR=/tmp/mca-fixture \
+            ~/godot/godot --headless --path game -s res://tests/test_mca.gd
+
+      - name: A real client against a real server
+        env:
+          GODOT: /home/runner/godot/godot
+        run: |
+          python3 tools/integration_test.py --seconds 14
+          python3 tools/integration_test.py --seconds 20 --mode battle
+          python3 tools/integration_test.py --seconds 20 --mode ctf
+
+      - name: Rooms, created and reaped
+        env:
+          GODOT: /home/runner/godot/godot
+        run: python3 tools/lobby_test.py
+
+  build-and-deploy:
+    name: Build the image and put it live
+    # Three gates. Never deploy a pull request; never deploy something the
+    # fast checks already called broken; and do nothing at all unless a
+    # deployment has actually been set up for this fork.
+    #
+    # That last one is what makes this repository runnable by anyone: a
+    # clone with no DEPLOY_ENABLED variable gets the tests and stops there,
+    # rather than failing on secrets it was never going to have.
+    #
+    #     gh variable set DEPLOY_ENABLED --body true
+    if: >-
+      github.event_name != 'pull_request'
+      && vars.DEPLOY_ENABLED == 'true'
+    needs: checks
+    # One deploy at a time, and never cancel one half way through: the
+    # host would be left with a rewritten .env and the old containers
+    # still running.
+    #
+    # On the JOB, not the workflow. At workflow level it serialised the
+    # tests too, and GitHub drops all but the newest pending run in a
+    # group — so two pushes close together meant the first one's tests
+    # were cancelled without ever having run.
+    concurrency:
+      # Keyed on the ref rather than a bare constant. Same guarantee — one
+      # deploy of a branch at a time — but a group that is not shared with
+      # every run that has ever existed.
+      #
+      # A bare `deploy` group got wedged: cancelling a run whose deploy job
+      # was still PENDING left the lock held, and the next run sat at
+      # status=pending with no runner and no steps for forty minutes,
+      # while the Tests job beside it on the same label ran fine.
+      group: deploy-${{ github.ref }}
+      cancel-in-progress: false
+    # A HOSTED runner, deliberately, and this is the one line in the file
+    # worth arguing about.
+    #
+    # A self-hosted runner on a public repository is a way into whatever
+    # machine it runs on: a pull request from a fork can add steps to the
+    # workflow, and approving that PR to look at it is enough to run them.
+    # No amount of care in this file closes that, because the fork supplies
+    # the file. A hosted runner is a fresh throwaway VM every time, and
+    # public repositories get them free.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to the registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Docker layer caching, so the Godot download and the export
+      # templates are not fetched again on every push. Without it a hosted
+      # runner spends most of the build on the same 1 GB every time.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push the image
+        run: |
+          docker push "${IMAGE}:${GITHUB_SHA}"
+          docker push "${IMAGE}:latest"
+
+      # The host runs the configuration committed here, not a copy somebody
+      # edited on the box six months ago. Shipping it every deploy is what
+      # keeps those two the same thing.
+      #
+      # Only the generic pair. Anything a particular deployment adds in
+      # front of the game lives in its own docker-compose.override.yml
+      # there, which Compose merges in and this repository never sees.
+      # DEPLOY_ENABLED says "this fork has somewhere to deploy to". If the
+      # secrets that back that up are missing, say so HERE rather than
+      # letting scp fail on an empty key file and an empty hostname, which
+      # comes out as a libcrypto error and a DNS failure and reads like a
+      # broken workflow rather than an unfinished setup.
+      #
+      # The image is already built and pushed by this point, so only the
+      # release to the host is lost.
+      - name: Check the deployment is configured
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+        run: |
+          missing=""
+          [ -n "$SSH_KEY" ]  || missing="$missing DEPLOY_SSH_KEY"
+          [ -n "$HOST" ]     || missing="$missing DEPLOY_HOST"
+          [ -n "$HOST_KEY" ] || missing="$missing DEPLOY_HOST_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::DEPLOY_ENABLED is true but these secrets are not set:$missing"
+            echo "The image built and pushed; only the release to the host was skipped."
+            echo "Set them, or unset DEPLOY_ENABLED to stop this job running at all."
+            exit 1
+          fi
+          echo "deploy secrets present"
+
+      - name: Ship the deploy configuration
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          HOST_KEY: ${{ secrets.DEPLOY_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/battlebox_deploy
+          chmod 600 ~/.ssh/battlebox_deploy
+          # The host key is pinned from a secret rather than accepted on
+          # sight. ssh-keyscan here would trust whatever answered, which is
+          # the whole thing a host key exists to prevent.
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts_battlebox
+          chmod 600 ~/.ssh/known_hosts_battlebox
+          scp -i ~/.ssh/battlebox_deploy \
+              -o UserKnownHostsFile=~/.ssh/known_hosts_battlebox \
+              -o StrictHostKeyChecking=yes \
+              deploy/docker-compose.yml deploy/deploy.sh \
+              "deploy@${HOST}:/srv/battlebox/"
+          ssh -i ~/.ssh/battlebox_deploy \
+              -o UserKnownHostsFile=~/.ssh/known_hosts_battlebox \
+              -o StrictHostKeyChecking=yes \
+              "deploy@${HOST}" "chmod +x /srv/battlebox/deploy.sh"
+
+      # deploy.sh does not just restart things — it pins this exact image,
+      # then checks that the version the site is SERVING is this commit and
+      # that the world server is accepting websockets. It fails the job if
+      # either is untrue, so a green tick here means the build is live.
+      - name: Put it live
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/battlebox_deploy \
+            -o UserKnownHostsFile=~/.ssh/known_hosts_battlebox \
+            -o StrictHostKeyChecking=yes \
+            "deploy@${HOST}" "/srv/battlebox/deploy.sh ${GITHUB_SHA} ${GITHUB_REPOSITORY}"
+
+      - name: Check the public address, not just the box
+        run: |
+          # Everything above was verified from inside the host. This is
+          # the only step that proves DNS and the certificate
+          # are all still doing their jobs — which is what a player meets.
+          want="$(printf '%s' "${GITHUB_SHA}" | cut -c1-12)"
+          for _ in $(seq 1 20); do
+            got="$(curl -fsS --max-time 10 \
+              https://battlebox.games/version.txt 2>/dev/null \
+              | tr -d '[:space:]' || true)"
+            [ "$got" = "$want" ] && break
+            sleep 6
+          done
+          if [ "$got" != "$want" ]; then
+            echo "::error::battlebox.games is serving '$got', expected '$want'"
+            exit 1
+          fi
+          # The browser build is dead without cross-origin isolation, and
+          # nothing else in this pipeline would notice it going missing.
+          hdrs="$(curl -fsSI --max-time 10 https://battlebox.games/)"
+          echo "$hdrs" | grep -qi 'cross-origin-opener-policy: same-origin' \
+            || { echo "::error::COOP header missing on the game at /"; exit 1; }
+          echo "$hdrs" | grep -qi 'cross-origin-embedder-policy: require-corp' \
+            || { echo "::error::COEP header missing on the game at /"; exit 1; }
+
+          # The game socket, all the way through whatever is in front.
+          #
+          # --http1.1 is REQUIRED and is not a style choice. Over HTTP/2 the
+          # Connection and Upgrade headers are illegal, so curl silently
+          # drops them, the request arrives as an ordinary GET, and the
+          # WebSocket server rejects it — you get a 502 and go hunting for a
+          # proxy bug that does not exist. Ask for the protocol a browser
+          # actually opens a websocket on.
+          code="$(curl -s --http1.1 --max-time 8 -o /dev/null -w '%{http_code}' \
+            -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' \
+            -H 'Sec-WebSocket-Key: ZGVwbG95Y2hlY2sxMjM0NQ==' \
+            https://battlebox.games/ws || true)"
+          [ "$code" = "101" ] \
+            || { echo "::error::wss://battlebox.games/ws answered $code, not 101"; exit 1; }
+
+          # The lobby, from outside. A socket that upgrades proves ONE
+          # room is up; this proves people can still find and start games.
+          rooms="$(curl -fsS --max-time 10 https://battlebox.games/api/rooms || true)"
+          case "$rooms" in
+            *'"house"'*) : ;;
+            *) echo "::error::/api/rooms did not list the always-on game: $rooms"; exit 1 ;;
+          esac
+          echo "battlebox.games is serving $got, cross-origin isolated, socket up, lobby listing."
+
+      - name: Clean up the key
+        if: always()
+        run: rm -f ~/.ssh/battlebox_deploy ~/.ssh/known_hosts_battlebox

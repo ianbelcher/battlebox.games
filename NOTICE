@@ -1,0 +1,74 @@
+# Third-party content in BattleBox
+
+The MIT licence in LICENSE covers the code. The art, sounds, fonts and
+building kits were made by other people, under their own terms, and this
+file is the record of which is which.
+
+Nothing is bundled here that its licence does not allow to be
+redistributed. If you believe something is, please open an issue and it
+will be removed the same day.
+
+## Art and sound — Kenney, CC0 1.0 (public domain)
+
+<https://kenney.nl> · <https://creativecommons.org/publicdomain/zero/1.0/>
+
+| Pack | Where it is | What it is |
+| --- | --- | --- |
+| Blocky Characters | `game/assets/models/chars/`, `game/assets/ui/chars/` | The 18 playable characters and their portraits |
+| Cube Pets | `game/assets/models/pets/` | The 11 animals |
+| Blaster Kit | `game/assets/models/blaster-*.glb`, `grenade-a.glb` | The weapon models |
+| Nature Kit | `game/assets/models/nature/` | Flowers, grass, mushrooms, bushes |
+| UI Audio + Impact Sounds | `game/assets/sounds/` | Every sound the game makes |
+
+CC0 asks for nothing. Kenney is credited here, in the game's Credits page
+and in this paragraph anyway, because the game would not look or sound
+like anything without that work.
+
+## Building kits — Silicon23, MIT
+
+<https://github.com/Silicon23/MoreChineseStructures>
+
+The 28 stampable Minecraft builds in `game/src/structures_imported.gd`,
+generated from the structure-block `.nbt` files in `kits/downloads/`.
+Per-build attribution is in `kits/manifest.json` and is shown in the
+game's Credits page.
+
+## Fonts
+
+| Font | Where it is | Licence |
+| --- | --- | --- |
+| DejaVu Sans | `game/assets/fonts/DejaVuSans.ttf` | DejaVu Fonts Licence (Bitstream Vera derivative) |
+| Noto Emoji | `game/assets/fonts/NotoEmoji-Regular.ttf` | SIL Open Font Licence 1.1 — see `NotoEmoji-OFL.txt` |
+| Noto Sans Symbols | `game/assets/fonts/NotoSansSymbols-Regular.ttf` | SIL Open Font Licence 1.1 — see `NotoSansSymbols-OFL.txt` |
+
+## Generated from the above
+
+`game/assets/ui/weapons/w*.png` are hotbar icons rendered from the Kenney
+Blaster Kit models by `game/tests/weapon_icons.gd`, so they carry the same
+CC0 terms. `game/src/structures_imported.gd` is generated from the MIT
+kits by `game/tests/import_structures.gd` and carries theirs.
+
+## Minecraft maps
+
+`maps/` holds Anvil region files for four small worlds, used to exercise
+the `.mca` importer. They are original builds, not redistributed content
+from anyone else's world.
+
+Minecraft is a trademark of Mojang Studios. This project is not
+affiliated with, endorsed by, or connected to Mojang or Microsoft in any
+way. It reads the Anvil file format; it ships no Minecraft code, assets or
+data.
+
+## Engine
+
+Godot Engine, MIT — <https://godotengine.org>. Not vendored here; the
+build downloads it (see `Dockerfile`).
+
+## Art that used to be here and is not
+
+Four purchased voxel animal packs and the "Little People in Voxel"
+characters were once committed as extracted `.glb`/`.obj` files. Using
+purchased assets in a game is ordinarily fine; putting the raw meshes in a
+public repository is redistribution, and nothing in those licences allowed
+it. They were removed in full, along with the creature and character
+entries that referenced them, before this repository was published.

@@ -1,0 +1,391 @@
+class_name InputSlot
+extends RefCounted
+## One local player's physical controls: the keyboard (one player, normal
+## WASD controls) plus any number of gamepads. Everything is polled directly
+## (no InputMap) so slots never fight over actions.
+##
+##           move        jump    dig        place      picker     spin   zoom     1st person  leave(hold)
+## Keyboard  WASD        Space   L-click/G  R-click/F  E          Z / C  X / V    T           Q
+## Gamepad   Left stick  A       B          X          D-pad up   R stick ←→ / ↕  Y      Back/Select
+##
+## The BUMPERS (Tab / Shift+Tab on the keyboard) step through the picker's
+## tabs — blocks, kits and your character — and quick-cycle the held item
+## when no menu is open. E (or X/Start) opens the full picker with names.
+## In first person the right stick looks around; on keyboard the mouse
+## looks. T switches first person and overview.
+
+enum Kind { KEYBOARD_WASD, KEYBOARD_ARROWS, GAMEPAD }
+
+## SMALL, and it can be, because of the look curve below.
+##
+## 0.25 threw away the first quarter of every stick's travel — which is
+## exactly the part you aim with — and on a decent pad it is a quarter of
+## the range spent guarding against drift that pad does not have.
+##
+## 0.10 is safe here specifically BECAUSE `LOOK_CURVE` is steep: a stick
+## resting at 0.13 clears the deadzone but comes out the other side of the
+## curve asking for about a thousandth of full speed, which is nothing.
+## The curve is the drift guard; the deadzone only has to catch the worst
+## of it.
+const DEADZONE := 0.10
+
+var kind: Kind
+var device: int = -1  # joypad device id when kind == GAMEPAD
+
+func _init(p_kind: Kind, p_device: int = -1) -> void:
+	kind = p_kind
+	device = p_device
+
+func describe() -> String:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return "Keyboard WASD"
+		Kind.KEYBOARD_ARROWS:
+			return "Keyboard Arrows"
+		_:
+			return "Gamepad %d" % (device + 1)
+
+## Unique key so the same physical device can't join twice. Also the profile
+## key each device's character is saved under.
+func claim_key() -> String:
+	if kind == Kind.GAMEPAD:
+		# Device NUMBERS shuffle between sessions (plug order) which lost
+		# kids' saved characters — the controller GUID is stable.
+		var guid := Input.get_joy_guid(device)
+		if not guid.is_empty():
+			return "pad:%s" % guid
+		return "pad:%d" % device
+	return "kb:%d" % kind
+
+## The old unstable profile key, for one-time migration of saved data.
+## The buttons this device is holding, as a bitmask, for the twin-pad
+## check in main.gd.
+##
+## A method on the SLOT rather than a direct `Input.is_joy_button_pressed`
+## at the call site, so a simulated pad can answer for itself. It could
+## not before: `WORLD_FAKE_PADS` devices do not exist as far as Input is
+## concerned, so every fake pad reported "no buttons held", every one
+## matched every other, and the join test could never get a second player
+## in — which made the harness useless for exactly the bug it should have
+## caught.
+func button_mask(buttons: Array) -> int:
+	var mask := 0
+	for i in buttons.size():
+		if Input.is_joy_button_pressed(device, int(buttons[i])):
+			mask |= 1 << i
+	return mask
+
+## WHICH PHYSICAL THING THIS IS, for deciding whether it has already
+## joined. Unique per device, always.
+##
+## NOT the same question as `claim_key()`, and conflating them is what
+## stopped a second player joining at all. `claim_key()` answers "whose
+## character is this" and keys off the controller GUID so a child gets
+## their own character back when they pick up the same pad — but a GUID
+## identifies a MODEL, not a unit, so four identical controllers share
+## one. The join code treated that shared key as "already claimed" and
+## skipped every pad after the first: four pads plugged in, one player
+## able to get in.
+##
+## Device numbers are unique within a session, which is all this needs to
+## be right. Profiles keep using `claim_key()`, which already
+## disambiguates identical GUIDs with #1/#2 suffixes of its own.
+func device_key() -> String:
+	if kind == Kind.GAMEPAD:
+		return "dev:pad:%d" % device
+	return "dev:kb:%d" % kind
+
+func legacy_claim_key() -> String:
+	if kind == Kind.GAMEPAD:
+		return "pad:%d" % device
+	return "kb:%d" % kind
+
+func get_move_vector() -> Vector2:
+	var v := Vector2.ZERO
+	match kind:
+		Kind.KEYBOARD_WASD:
+			v.x = _key_axis(KEY_A, KEY_D)
+			v.y = _key_axis(KEY_W, KEY_S)
+		Kind.KEYBOARD_ARROWS:
+			v.x = _key_axis(KEY_LEFT, KEY_RIGHT)
+			v.y = _key_axis(KEY_UP, KEY_DOWN)
+		Kind.GAMEPAD:
+			v.x = Input.get_joy_axis(device, JOY_AXIS_LEFT_X)
+			v.y = Input.get_joy_axis(device, JOY_AXIS_LEFT_Y)
+			if v.length() < DEADZONE:
+				v = Vector2.ZERO
+	return v.limit_length(1.0)
+
+## The big friendly "join" button: Space, Enter, or A. In the world it jumps.
+func is_primary_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_SPACE)
+		Kind.KEYBOARD_ARROWS:
+			return Input.is_physical_key_pressed(KEY_ENTER)
+		_:
+			return Input.is_joy_button_pressed(device, JOY_BUTTON_A)
+
+## Jump / fly up: A, or LB while airborne.
+func is_jump_pressed() -> bool:
+	if kind == Kind.GAMEPAD and Input.is_joy_button_pressed(device, JOY_BUTTON_LEFT_SHOULDER):
+		return true
+	return is_primary_pressed()
+
+## Dig a block, collect a treasure, pet a critter (and zap Grumps).
+func is_dig_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
+				or Input.is_physical_key_pressed(KEY_G)
+		Kind.KEYBOARD_ARROWS:
+			return Input.is_physical_key_pressed(KEY_PERIOD)
+		_:
+			return Input.is_joy_button_pressed(device, JOY_BUTTON_B) \
+				or Input.is_joy_button_pressed(device, JOY_BUTTON_RIGHT_SHOULDER)
+
+## Place the selected block.
+func is_place_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+				or Input.is_physical_key_pressed(KEY_F)
+		Kind.KEYBOARD_ARROWS:
+			return Input.is_physical_key_pressed(KEY_COMMA)
+		_:
+			return Input.get_joy_axis(device, JOY_AXIS_TRIGGER_RIGHT) > 0.5
+
+## Cycle the hotbar selection IN THE WORLD. Returns 0 or +1.
+##
+## RB only, deliberately: LB is JUMP on a pad (see is_jump_pressed), so a
+## backwards bumper here means every jump also changes what you're holding.
+## Stepping backwards belongs to tab_cycle_direction, which only runs with
+## a menu open — and an open menu sets ui_locked, so LB isn't jumping then.
+func cycle_direction() -> int:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			if Input.is_physical_key_pressed(KEY_TAB):
+				return 1
+		Kind.GAMEPAD:
+			if Input.is_joy_button_pressed(device, JOY_BUTTON_RIGHT_SHOULDER):
+				return 1
+	return 0
+
+## Step through the PICKER'S TABS, both ways: LB/RB on a pad, Tab and
+## Shift+Tab on the keyboard. Only polled while the menu is open, which is
+## exactly when the bumpers are free of their in-world jobs.
+func tab_cycle_direction() -> int:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			if Input.is_physical_key_pressed(KEY_TAB):
+				return -1 if Input.is_physical_key_pressed(KEY_SHIFT) else 1
+		Kind.GAMEPAD:
+			var right := Input.is_joy_button_pressed(device, JOY_BUTTON_RIGHT_SHOULDER)
+			var left := Input.is_joy_button_pressed(device, JOY_BUTTON_LEFT_SHOULDER)
+			return (1 if right else 0) - (1 if left else 0)
+	return 0
+
+## Throw an orb (R / middle click / right trigger) — always available.
+func is_shoot_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_R) \
+				or Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)
+		Kind.GAMEPAD:
+			return Input.get_joy_axis(device, JOY_AXIS_TRIGGER_RIGHT) > 0.5
+	return false
+
+## Hotbar slot select: number keys 1-8; D-pad left/right cycles on pads.
+## Returns 0-7 direct, -1 none, 10/11 cycle prev/next.
+func slot_pick() -> int:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			for i in 8:
+				if Input.is_physical_key_pressed(KEY_1 + i):
+					return i
+		Kind.GAMEPAD:
+			if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_LEFT):
+				return 10
+			if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_RIGHT):
+				return 11
+	return -1
+
+## Open the tabbed menu (Esc / Start).
+## Open this player's BUILD menu: X on a pad, E on the keyboard. Escape
+## is no longer here — it belongs to the whole-table world menu.
+func is_menu_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return false
+		Kind.GAMEPAD:
+			return Input.is_joy_button_pressed(device, JOY_BUTTON_START) \
+				or Input.is_joy_button_pressed(device, JOY_BUTTON_X)
+	return false
+
+## Open/close the block & structure picker (E / D-pad up).
+func is_picker_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_E)
+		Kind.GAMEPAD:
+			return false  # pads open the menu with X/Start
+	return false
+
+## Directional input for navigating the picker grid. D-pad left/right is
+## reserved for the weapon hotbar (even with a menu open), so the grid
+## navigates with the stick plus D-pad up/down.
+func get_ui_vector() -> Vector2:
+	if kind == Kind.GAMEPAD:
+		var v := Vector2.ZERO
+		if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_DOWN):
+			v.y = 1.0
+		if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_UP):
+			v.y = -1.0
+		if v == Vector2.ZERO:
+			v = get_move_vector()
+		return v
+	return get_move_vector()
+
+## Sprint is retired — walking is the normal pace now.
+## Triggers cycle the menu's TOP-LEVEL group (Build / Game / Options).
+func is_sprint_pressed() -> bool:
+	return false
+
+## Creep like Minecraft sneak: slow and SILENT (Shift / click left stick).
+func is_sneak_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_SHIFT)
+		Kind.GAMEPAD:
+			return Input.is_joy_button_pressed(device, JOY_BUTTON_LEFT_STICK)
+	return false
+
+## Descend while flying (Shift / left trigger).
+func is_descend_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_SHIFT)
+		Kind.GAMEPAD:
+			return Input.get_joy_axis(device, JOY_AXIS_TRIGGER_LEFT) > 0.5
+	return false
+
+## Toggle between the isometric view and first person (T / gamepad Y).
+func is_view_toggle_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_T)
+		Kind.GAMEPAD:
+			return Input.is_joy_button_pressed(device, JOY_BUTTON_Y)
+	return false
+
+## First-person look input per frame (gamepad right stick; the keyboard
+## looks with the mouse, handled by the player via input events).
+## HOW SHARPLY THE LOOK STICK RAMPS UP. 1.0 is the raw linear stick.
+##
+## Linear is the problem: just past the deadzone the stick is already
+## asking for a third of full speed, so the smallest nudge you can
+## physically make swings the camera well past what you were aiming at.
+## Squaring it (2.6 is a little past squared) means a small push is a
+## genuinely small movement — a quarter push asks for about a twentieth of
+## full speed — while a full push is untouched, so whipping round to look
+## behind you is exactly as fast as it was.
+## 3.0, up from 2.6, after watching a nine-year-old overshoot everything
+## he aimed at. Flatter still near the middle, unchanged at the top.
+const LOOK_CURVE := 3.0
+
+func get_look_vector() -> Vector2:
+	if kind != Kind.GAMEPAD:
+		return Vector2.ZERO
+	var v := Vector2(
+		Input.get_joy_axis(device, JOY_AXIS_RIGHT_X),
+		Input.get_joy_axis(device, JOY_AXIS_RIGHT_Y))
+	var mag := v.length()
+	if mag < DEADZONE:
+		return Vector2.ZERO
+	# Rescale from the deadzone edge so the curve starts at nothing rather
+	# than at a step: without this the first registered input is already
+	# DEADZONE-sized and the fine control is gone before it starts.
+	var t := clampf((mag - DEADZONE) / (1.0 - DEADZONE), 0.0, 1.0)
+	return v.normalized() * pow(t, LOOK_CURVE)
+
+## Spin the camera a quarter turn. Returns -1, 0 or +1 (caller edge-latches).
+func rotate_direction() -> int:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			if Input.is_physical_key_pressed(KEY_Z):
+				return -1
+			if Input.is_physical_key_pressed(KEY_X):
+				return 1
+		Kind.KEYBOARD_ARROWS:
+			if Input.is_physical_key_pressed(KEY_SEMICOLON):
+				return -1
+			if Input.is_physical_key_pressed(KEY_APOSTROPHE):
+				return 1
+		Kind.GAMEPAD:
+			var x := Input.get_joy_axis(device, JOY_AXIS_RIGHT_X)
+			if x < -0.6:
+				return -1
+			if x > 0.6:
+				return 1
+	return 0
+
+## Step the zoom. Returns -1 (out), 0 or +1 (in); caller edge-latches.
+func zoom_direction() -> int:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			if Input.is_physical_key_pressed(KEY_C):
+				return -1
+			if Input.is_physical_key_pressed(KEY_V):
+				return 1
+		Kind.KEYBOARD_ARROWS:
+			if Input.is_physical_key_pressed(KEY_BRACKETLEFT):
+				return -1
+			if Input.is_physical_key_pressed(KEY_BRACKETRIGHT):
+				return 1
+		Kind.GAMEPAD:
+			if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_UP):
+				return 1
+			if Input.is_joy_button_pressed(device, JOY_BUTTON_DPAD_DOWN):
+				return -1
+	return 0
+
+## Leave is HELD (not tapped) so a stray press never drops a kid's character.
+func is_leave_pressed() -> bool:
+	match kind:
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_Q)
+		Kind.KEYBOARD_ARROWS:
+			return Input.is_physical_key_pressed(KEY_BACKSPACE)
+		_:
+			return Input.is_joy_button_pressed(device, JOY_BUTTON_BACK)
+
+func _key_axis(neg: Key, pos: Key) -> float:
+	var v := 0.0
+	if Input.is_physical_key_pressed(neg):
+		v -= 1.0
+	if Input.is_physical_key_pressed(pos):
+		v += 1.0
+	return v
+
+## WORLD_FAKE_PADS=<n>: pretend n gamepads are plugged in, each holding A.
+## Controller regressions are invisible to the bot-driven smoke tests —
+## BotSlot overrides every button — so this drives the REAL gamepad code
+## through the real join path with no hardware attached.
+static var fake_pads: int = -1
+
+static func _fake_pad_count() -> int:
+	if fake_pads < 0:
+		var env := OS.get_environment("WORLD_FAKE_PADS")
+		fake_pads = env.to_int() if env.is_valid_int() else 0
+	return fake_pads
+
+## All slots that could join right now (used by the drop-in poller).
+## One keyboard player only — the arrows layout confused everyone.
+static func candidate_slots() -> Array[InputSlot]:
+	var slots: Array[InputSlot] = []
+	slots.append(InputSlot.new(Kind.KEYBOARD_WASD))
+	for device_id in Input.get_connected_joypads():
+		slots.append(InputSlot.new(Kind.GAMEPAD, device_id))
+	for i in _fake_pad_count():
+		slots.append(FakePad.new(i))
+	return slots

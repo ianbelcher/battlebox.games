@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#3e8fe0"/><stop offset="1" stop-color="#a8d4f0"/>
+</linearGradient>
+</defs>
+<rect width="128" height="128" rx="24" fill="url(#sky)"/>
+<circle cx="96" cy="30" r="13" fill="#ffe08a"/>
+<circle cx="96" cy="30" r="18" fill="#ffe08a" opacity="0.35"/>
+<!-- big grass block -->
+<polygon points="64,34 106,55 64,76 22,55" fill="#7fb84e"/>
+<polygon points="22,55 64,76 64,118 22,97" fill="#5d8f43"/>
+<polygon points="106,55 64,76 64,118 106,97" fill="#4a7334"/>
+<!-- dirt hint on right face -->
+<polygon points="106,72 64,93 64,118 106,97" fill="#8a6242"/>
+<polygon points="22,72 64,93 64,118 22,97" fill="#6e4f36"/>
+<!-- flower -->
+<rect x="61" y="46" width="6" height="12" fill="#4a7334" transform="rotate(25 64 52)"/>
+<circle cx="76" cy="44" r="6" fill="#e2574c"/>
+<circle cx="70" cy="40" r="4" fill="#ffd166"/>
+</svg>

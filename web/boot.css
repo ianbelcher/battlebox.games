@@ -1,0 +1,109 @@
+/* THE LOADING SCREEN: the video, and nothing else.
+ *
+ * No wordmark, no progress bar, no text of any kind. It had all three
+ * once and they sat on top of the video looking like a web page over a
+ * trailer — and worse, the game itself came up BEHIND them part-loaded,
+ * so you watched a half-built world through a title card. The video is
+ * the whole screen now, it holds on its last frame, and it does not
+ * budge until the player presses something. See boot.js.
+ *
+ * This is served in Godot's generated shell (html/head_include in
+ * export_presets.cfg) and runs with no engine and none of our fonts. */
+
+html, body, #canvas { background: #000; }
+
+/* While the overlay is up, Godot's own status line and progress bar are
+ * hidden outright rather than merely covered. A letterboxed frame or a
+ * video that fails to fill would otherwise leak them back onto the
+ * screen, which is the exact thing being removed. Undone with the class
+ * when the overlay goes. */
+body.bb-booting #status { display: none !important; }
+
+#bb-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  background: #000;
+  overflow: hidden;
+  transition: opacity .7s ease;
+}
+#bb-boot.bb-gone { opacity: 0; pointer-events: none; }
+
+/* Fills the screen and is CROPPED rather than letterboxed: black bars
+ * around a loading screen read as a broken player. */
+#bb-boot video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+/* ---- the gate ------------------------------------------------------
+ *
+ * Shown the instant the page appears, in front of everything, with one
+ * button on it. It exists for ONE reason: a browser will not play sound
+ * without a user gesture first, so somebody has to click something before
+ * the video can be heard. Rather than a muted intro and an apology, the
+ * click is made part of the show.
+ *
+ * The game and the video both start downloading immediately behind this —
+ * the gate costs nothing but the moment it takes to press it. */
+#bb-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(28px, 5vh, 60px);
+  background: radial-gradient(120% 90% at 50% 35%, #16213a, #080b12 70%);
+  transition: opacity .45s ease;
+}
+#bb-gate.bb-gone { opacity: 0; pointer-events: none; }
+
+/* A block, turning. Six faces in CSS — no library, nothing fetched, and
+ * COEP blocks anything from a CDN anyway. */
+.bb-stage { perspective: 640px; }
+.bb-cube {
+  position: relative;
+  width: 132px; height: 132px;
+  transform-style: preserve-3d;
+  animation: bb-spin 9s linear infinite;
+}
+.bb-cube div {
+  position: absolute;
+  width: 132px; height: 132px;
+  border: 2px solid rgba(255, 255, 255, .10);
+  box-shadow: inset 0 0 44px rgba(0, 0, 0, .45);
+}
+/* Grass-block colours, because that is what the game is made of. */
+.bb-cube .t { background: #7fb84e; transform: rotateX( 90deg) translateZ(66px); }
+.bb-cube .b { background: #6b4a30; transform: rotateX(-90deg) translateZ(66px); }
+.bb-cube .n { background: #8a6242; transform: rotateY(  0deg) translateZ(66px); }
+.bb-cube .s { background: #7d5739; transform: rotateY(180deg) translateZ(66px); }
+.bb-cube .e { background: #966a48; transform: rotateY( 90deg) translateZ(66px); }
+.bb-cube .w { background: #74502f; transform: rotateY(-90deg) translateZ(66px); }
+@keyframes bb-spin {
+  from { transform: rotateX(-24deg) rotateY(0deg); }
+  to   { transform: rotateX(-24deg) rotateY(360deg); }
+}
+
+#bb-enter {
+  font-family: 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif;
+  font-weight: 800;
+  letter-spacing: .2em;
+  font-size: clamp(16px, 2.2vw, 24px);
+  color: #14202f;
+  background: linear-gradient(180deg, #ffd166, #f0a93c);
+  border: 0;
+  border-radius: 999px;
+  padding: clamp(14px, 2vh, 20px) clamp(40px, 6vw, 74px);
+  cursor: pointer;
+  box-shadow: 0 8px 0 #8a6216, 0 14px 34px rgba(0, 0, 0, .5);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+#bb-enter:hover { transform: translateY(-2px); }
+#bb-enter:active { transform: translateY(5px); box-shadow: 0 3px 0 #8a6216; }

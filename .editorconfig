@@ -1,0 +1,31 @@
+# Godot's own conventions, so an editor gets it right without being told.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.gd]
+indent_style = tab
+indent_size = 4
+max_line_length = 120
+
+[*.{py,yml,yaml,json}]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.{html,css,js}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+# Two trailing spaces are a line break in Markdown.
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

@@ -1,0 +1,24 @@
+# Working files for art: the archive an asset pack arrived in, a
+# MagicaVoxel source, a Blender scene. What ships is the exported result
+# under game/assets/, and it has to be redistributable — see NOTICE.
+source-art/
+
+# kits/downloads/ is NOT ignored: those files are the source of truth the
+# kits are generated from, and they're small. Only the fetcher's scratch
+# is ignored.
+kits/downloads/*.part
+
+# Spare cuts of the loading-screen video. Only web/demo.mp4 is the one
+# that ships; anything else beside it is a working file and does not
+# belong in git — twice now a `git add -A` has quietly committed a
+# multi-megabyte spare because nothing was stopping it.
+web/demo_*.mp4
+
+# Personal tool settings. The shared ones (if any) belong in
+# .claude/settings.json; the .local one is whatever this machine has been
+# asked to allow and means nothing to anybody else.
+.claude/settings.local.json
+
+# Python bytecode from the lobby and the test drivers.
+__pycache__/
+*.pyc
