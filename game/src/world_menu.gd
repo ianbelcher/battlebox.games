@@ -637,6 +637,7 @@ func _build_game_tab() -> void:
 
 func _build_players_tab() -> void:
 	var box := _tab("Players")
+	_build_invite_card(box)
 	var manage_card := _section(box, "Teams and computer players")
 	# Two per row, not four: at four across, "Add a computer player" was
 	# wider than its column and lost its last word. Plain ASCII +/− on
@@ -859,6 +860,53 @@ func _team_cell(id: String, t: int, current: int, cell_w: int) -> Button:
 		Sfx.play("tick", -8.0))
 	return cell
 
+
+## How anybody else gets in here — FIRST in this tab, because it is the
+## only question in this menu whose answer you cannot work out by looking
+## at the game.
+##
+## A private room is reachable by exactly one route: somebody says the
+## code out loud or sends the link. If you cannot find it again after the
+## moment you made it, the room is a dead end — so it lives somewhere
+## permanent, and the card on the way in points here.
+func _build_invite_card(box: Control) -> void:
+	var code := Game.joined_code
+	if code.is_empty() or code == Room.HOUSE_CODE:
+		# The always-on world. There is nothing to give anybody, because
+		# the plain address already lands here — and showing a code would
+		# imply this game is private when it is the opposite.
+		var open_card := _section(box, "Joining in",
+			"Anyone can play. Send them the address and they land here.")
+		var open_link := Room.link_for(Game.web_origin(), Room.HOUSE_CODE)
+		if not open_link.is_empty():
+			open_card.add_child(_font(_copyable(open_link), UiTheme.T_BODY))
+		return
+
+	var card := _section(box, "Invite a friend",
+		"Give them this and they land straight in this game.")
+	var code_label := Label.new()
+	code_label.text = code
+	code_label.add_theme_color_override("font_color", UiTheme.ACCENT)
+	card.add_child(_font(code_label, UiTheme.T_TITLE))
+	var link := Room.link_for(Game.web_origin(), code)
+	if not link.is_empty():
+		var note := Label.new()
+		note.text = "Or send this link:"
+		note.add_theme_color_override("font_color", UiTheme.INK_DIM)
+		card.add_child(_font(note, UiTheme.T_NOTE))
+		card.add_child(_font(_copyable(link), UiTheme.T_BODY))
+
+## Text somebody can actually get out of the game. A Label cannot be
+## selected, and copying is the only thing anyone wants to do with a link,
+## so this is a LineEdit that happens to be read-only.
+func _copyable(text: String) -> LineEdit:
+	var field := LineEdit.new()
+	field.text = text
+	field.editable = false
+	field.select_all_on_focus = true
+	field.add_theme_color_override("font_uneditable_color", UiTheme.INK)
+	_min(field, 320, 40)
+	return field
 
 # ------------------------------------------------------------------
 # Video / Credits

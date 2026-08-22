@@ -121,6 +121,13 @@ func _ready() -> void:
 		_web_loading_done_soon()
 	else:
 		_room_code = wanted
+		# Arriving by link is still JOINING that room, so record it the
+		# way _join_room would. Without this the player who was invited
+		# is the one person who cannot pass the invitation on: the world
+		# menu would tell them they are in the open house game, and the
+		# code they arrived through would be nowhere on screen.
+		Game.joined_code = wanted
+		Game.joined_name = wanted
 		_show_screen(_connect_screen)
 		_address_edit.text = Game.server_url()
 		_dial()
@@ -231,10 +238,32 @@ func _build_lobby_screen() -> void:
 func _join_room(code: String, display_name: String) -> void:
 	_room_code = code
 	_room_name = display_name
+	Game.joined_code = code
+	Game.joined_name = display_name
 	_attempts = 0
 	_want_url = ""
+	_put_room_in_the_address_bar(code)
 	_show_screen(_connect_screen)
 	_dial()
+
+## Make the address bar the share button.
+##
+## Every browser already has "copy this link and send it to someone", and
+## a parent knows how to use it. So the room a player is in goes into the
+## URL, and that URL is then exactly the thing that puts a friend in the
+## same game — main.gd reads `?room=` back on launch.
+##
+## replaceState, not pushState: joining a game is not a page a Back button
+## should return to. Back should leave the site, the way it did before
+## there was more than one room.
+func _put_room_in_the_address_bar(code: String) -> void:
+	if not OS.has_feature("web"):
+		return
+	var link := Room.link_for(Game.web_origin(), code)
+	if link.is_empty():
+		return
+	JavaScriptBridge.eval("window.history.replaceState({}, '', %s)"
+		% JSON.stringify(link), true)
 
 ## Back to the lobby, because the room we were in is not there any more.
 ## Distinct from a dropped link, which keeps retrying the same game.
@@ -257,6 +286,11 @@ func _back_to_lobby(message: String) -> void:
 	_connecting = false
 	_retry_at_ms = 0
 	_room_code = ""
+	Game.joined_code = ""
+	Game.joined_name = ""
+	# Back to the front page, address and all: a link to a game that just
+	# ended should not be what somebody copies out of the bar.
+	_put_room_in_the_address_bar("")
 	_want_url = ""
 	_show_screen(_lobby_screen)
 	_web_loading_done_soon()

@@ -56,6 +56,28 @@ func _init() -> void:
 func is_house() -> bool:
 	return code == HOUSE_CODE
 
+## The address that drops somebody else straight into a given game.
+##
+## STATIC AND PURE so it can be tested, and so the client can call it —
+## this is the one place that knows a room is addressed by `?room=`, which
+## main.gd also parses on launch. Two spellings of that would mean links
+## that open the wrong game, and nothing would report it: you would land
+## in the house world, which looks exactly like a game that is simply
+## empty.
+##
+## The house game is the bare address on purpose. It is the default, so a
+## link to it should be the thing people already have written down.
+static func link_for(origin: String, room_code: String) -> String:
+	var base := origin.strip_edges()
+	if base.is_empty():
+		return ""
+	while base.ends_with("/"):
+		base = base.substr(0, base.length() - 1)
+	var want := room_code.strip_edges().to_lower()
+	if want.is_empty() or want == HOUSE_CODE:
+		return base + "/"
+	return "%s/?room=%s" % [base, want.uri_encode()]
+
 ## One line the lobby can read off this process's stdout to know what it
 ## started. Printed once at boot, before anyone can connect.
 func describe() -> String:

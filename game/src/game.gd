@@ -150,6 +150,26 @@ var local_inputs: Dictionary = {}
 ## a client is told the room by the lobby and does not host one.
 var room: Room = null
 
+## Which room this machine JOINED (client side). The mirror of `room`
+## above: a client does not host a room but does need to be able to say
+## which one it is in, because that code is the only way a friend gets
+## here. Set by main.gd on the way into a game and cleared on the way out.
+var joined_code := ""
+var joined_name := ""
+
+## Where this build is being served from, or "" anywhere that is not a
+## browser. Only useful for building a link to hand somebody — see
+## Room.link_for, which returns "" when there is no origin.
+func web_origin() -> String:
+	if not OS.has_feature("web"):
+		return ""
+	return str(JavaScriptBridge.eval("window.location.origin", true))
+
+## The address of the game this machine is in, ready to be read out or
+## copied. "" off the web, where there is nothing to link to.
+func joined_link() -> String:
+	return Room.link_for(web_origin(), joined_code)
+
 ## The world, at /root/Game/World on every peer. Typed rather than a bare
 ## Node: it used to be reached through has_method() guards, which meant a
 ## renamed method quietly degraded into a no-op instead of a parse error.

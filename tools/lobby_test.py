@@ -186,8 +186,19 @@ def _exercise(args, base: str, port: int, checks: Checks,
                  WORLD_ROOM="no-such-game",
                  WORLD_SELFCHECK="26"),
         capture_output=True, text=True, timeout=180)
-    checks.that(_last_selfcheck(gone.stdout + gone.stderr).get("screen") == "lobby",
+    back = _last_selfcheck(gone.stdout + gone.stderr)
+    checks.that(back.get("screen") == "lobby",
                 "a finished game puts the player back on the lobby")
+    # The one press the whole first screen is built around. Nothing else
+    # can see this: focus is not drawn in any log, only in a stylebox a
+    # person has to notice, and when it lands on the wrong control the
+    # front page still looks perfect. It has gone wrong twice — once on a
+    # node that was not in the tree yet, once on a button inside a hidden
+    # panel, which would have joined a game with no code.
+    checks.that(back.get("focus", "").endswith("Play"),
+                f"Play holds focus, so Space and A work (focus={back.get('focus')})")
+    checks.that(back.get("room") == "-",
+                f"leaving a game forgets its code (room={back.get('room')})")
 
     print(f"  waiting {IDLE_EXIT + 20}s for the empty games to close...")
     time.sleep(IDLE_EXIT + 20)

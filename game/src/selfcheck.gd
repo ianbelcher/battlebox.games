@@ -54,6 +54,26 @@ func _huds_built() -> int:
 			count += 1
 	return count
 
+## Which control the keyboard and the gamepad are currently pointed at.
+##
+## Reported because the one-press path is otherwise unverifiable without a
+## person looking at a screenshot and judging a stylebox. It is not a
+## detail: if nothing holds focus, Space and Ⓐ do nothing at all, and if
+## the WRONG thing holds it they do something nobody asked for. Both have
+## happened here, and neither logged a thing.
+func _focused() -> String:
+	var vp := get_viewport()
+	if vp == null:
+		return "-"
+	var owner := vp.gui_get_focus_owner()
+	if owner == null:
+		return "none"
+	# The text, when there is any, because that is what a person reading
+	# the line is trying to confirm — "Play", not "@Button@37".
+	if owner is Button and not (owner as Button).text.strip_edges().is_empty():
+		return (owner as Button).text.strip_edges().replace(" ", "_")
+	return owner.name
+
 func _report() -> Array[String]:
 	var world: WorldNode = Game.world
 	var fields: Array[String] = []
@@ -61,6 +81,9 @@ func _report() -> Array[String]:
 	if not Net.is_server:
 		var shell := get_parent() as Main
 		fields.append("screen=%s" % (shell.current_screen() if shell != null else "?"))
+		fields.append("focus=%s" % _focused())
+		fields.append("room=%s" % (Game.joined_code if not Game.joined_code.is_empty()
+			else "-"))
 	if world == null:
 		fields.append("world=none")
 		return fields

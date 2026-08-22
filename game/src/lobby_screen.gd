@@ -13,6 +13,16 @@ extends Control
 ## Anything a child is expected to hit is at least CONTROL_HEIGHT tall
 ## here, and anything they are expected to read is at least T_BODY.
 ##
+## And everything here is REACHABLE WITHOUT A MOUSE. Every control on this
+## screen was FOCUS_NONE, which meant a gamepad could do exactly one thing
+## with it: press Play. Starting a game, making it private, picking one
+## out of the list and typing a code were all mouse-only — on the first
+## screen of a game whose players are mostly holding controllers.
+##
+## The screen has TWO states. The chooser, and — after making a private
+## game — the code. See _build_code_panel for why the code gets a screen
+## of its own rather than a line of status text.
+##
 ## Emits `join_requested` with a room code. It connects to nothing itself:
 ## main.gd owns the socket and the reconnect loop, and a second one here
 ## is how you end up with two.
@@ -37,6 +47,14 @@ var _code_edit: LineEdit
 var _public_toggle: CheckBox
 var _create_button: Button
 var _house_players: Label
+var _chooser: Control
+var _code_panel: Control
+var _code_label: Label
+var _link_label: LineEdit
+var _link_group: Control
+var _go_button: Button
+var _made_code := ""
+var _made_name := ""
 var _refresh_at := 0.0
 var _busy := false
 
@@ -53,7 +71,10 @@ func _ready() -> void:
 	refresh()
 
 func _process(delta: float) -> void:
-	if not visible:
+	# `visible` is this whole screen; `_chooser` is the half with the list
+	# on it. Once the code is up there is nothing on screen a refresh
+	# could change, and the only thing left to do is press the button.
+	if not visible or _chooser == null or not _chooser.visible:
 		return
 	_refresh_at -= delta
 	if _refresh_at <= 0.0:
@@ -77,6 +98,10 @@ func _build() -> void:
 	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	add_child(scroll)
+	# Everything below is the CHOOSER. It gets swapped out wholesale when
+	# a private game is made, because at that moment there is exactly one
+	# thing worth reading on the screen and it is not a list of options.
+	_chooser = scroll
 	var centre := CenterContainer.new()
 	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centre.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -124,6 +149,104 @@ func _build() -> void:
 	var tail := Control.new()
 	tail.custom_minimum_size = Vector2(0, _px(24))
 	column.add_child(tail)
+
+	_code_panel = _build_code_panel()
+	_code_panel.visible = false
+	add_child(_code_panel)
+
+## Made a private game — so stop, and say the code.
+##
+## THIS SCREEN EXISTS BECAUSE THE MESSAGE DID NOT WORK. The code used to
+## go into the status line, one call before the screen was swapped for the
+## connecting screen: it was set and then hidden in the same frame, so it
+## drew for exactly zero frames. A private game whose code nobody can read
+## is a game nobody else can ever join, which is the entire feature gone —
+## and it looked completely fine, because the label was definitely there.
+##
+## So the code gets a screen of its own that waits for a press. That is
+## not friction; for a private game the code IS the thing you just made.
+func _build_code_panel() -> Control:
+	var centre := CenterContainer.new()
+	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiTheme.card_box(_scale))
+	centre.add_child(card)
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", _px(10))
+	for side: String in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		inner.add_theme_constant_override(side, _px(26))
+	inner.custom_minimum_size = Vector2(_px(COLUMN_WIDTH), 0)
+	card.add_child(inner)
+
+	inner.add_child(_text("YOUR GAME IS READY", UiTheme.T_NOTE, UiTheme.INK_FAINT))
+	inner.add_child(_text("Nobody can join unless you give them this:",
+		UiTheme.T_BODY, UiTheme.INK_DIM))
+	# The code, as big as the title on the front page. It is meant to be
+	# read out across a room to somebody holding a tablet.
+	_code_label = _text("", UiTheme.T_TITLE + 8, UiTheme.ACCENT, 6)
+	inner.add_child(_code_label)
+
+	# And the same thing as a link, because on the web that is what people
+	# actually send each other. Selectable, so it can be copied — a Label
+	# cannot be, and "copy" is the only thing anyone wants to do with it.
+	# Grouped, so the whole idea can be hidden at once off the web rather
+	# than leaving a caption over an empty box.
+	_link_group = VBoxContainer.new()
+	_link_group.add_theme_constant_override("separation", _px(6))
+	_link_group.add_child(_gap(4))
+	_link_group.add_child(_text("Or send them this link:",
+		UiTheme.T_LABEL, UiTheme.INK_DIM))
+	_link_label = _field("")
+	_link_label.editable = false
+	_link_label.add_theme_color_override("font_uneditable_color", UiTheme.INK)
+	_link_group.add_child(_link_label)
+	inner.add_child(_link_group)
+
+	inner.add_child(_gap(6))
+	var go := Button.new()
+	go.text = "  Start playing  "
+	go.custom_minimum_size = Vector2(0, _px(68))
+	go.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE, _scale))
+	var rest := UiTheme.flat(UiTheme.ACCENT, UiTheme.R_CARD, _scale)
+	var hot := UiTheme.flat(UiTheme.ACCENT.lightened(0.16), UiTheme.R_CARD, _scale)
+	for state: String in ["normal", "hover", "pressed", "focus"]:
+		go.add_theme_stylebox_override(state, rest if state == "normal" else hot)
+	for state: String in ["font_color", "font_hover_color", "font_pressed_color",
+			"font_focus_color"]:
+		go.add_theme_color_override(state, UiTheme.ON_ACCENT)
+	go.pressed.connect(func() -> void: _join(_made_code, _made_name))
+	inner.add_child(go)
+	inner.add_child(_text("You can read it again from the world menu (G) at any time.",
+		UiTheme.T_NOTE, UiTheme.INK_FAINT))
+	_go_button = go
+	return centre
+
+## Swap the chooser for the code. Not a dialog on top: there is nothing
+## else to do on this screen now, and a child pressing a button behind an
+## overlay is a bug waiting to happen.
+func _show_code(code: String, display_name: String) -> void:
+	_made_code = code
+	_made_name = display_name
+	_code_label.text = code
+	var link := Room.link_for(Game.web_origin(), code)
+	# Off the web there is no address to hand anybody, so the link half of
+	# the card would just be an empty box promising something it has not
+	# got. The code above it still works.
+	_link_label.text = link
+	_link_group.visible = not link.is_empty()
+	_chooser.visible = false
+	_code_panel.visible = true
+	# Focus moves HERE, and only now.
+	#
+	# It used to be grabbed while this panel was being built, which is the
+	# same frame Play grabs it — and this one ran second, so the front
+	# page ended up with its focus on a button inside a hidden panel.
+	# Space or Ⓐ, the one press the whole screen is designed around, would
+	# then have joined a room with no code. Nothing about that is visible:
+	# the front page looks right, and the button that answers is off
+	# screen.
+	_go_button.grab_focus()
 
 ## The always-on game: one big button, and how many people are in it.
 func _house_card() -> Control:
@@ -183,7 +306,6 @@ func _build_create() -> Control:
 	_public_toggle = CheckBox.new()
 	_public_toggle.text = "  Anyone can join it"
 	_public_toggle.button_pressed = true
-	_public_toggle.focus_mode = Control.FOCUS_NONE
 	_public_toggle.add_theme_font_size_override("font_size",
 		UiTheme.px(UiTheme.T_LABEL, _scale))
 	_public_toggle.add_theme_color_override("font_color", UiTheme.INK_DIM)
@@ -237,7 +359,6 @@ func _room_row(entry: Dictionary) -> Button:
 	var display_name := str(entry.get("name", code))
 	var players := int(entry.get("players", 0))
 	var row := Button.new()
-	row.focus_mode = Control.FOCUS_NONE
 	row.custom_minimum_size = Vector2(0, _px(CONTROL_HEIGHT + 6))
 	row.add_theme_stylebox_override("normal",
 		UiTheme.flat(UiTheme.SURFACE_2, UiTheme.R_CONTROL, _scale))
@@ -318,9 +439,8 @@ func _on_created(room: Dictionary) -> void:
 		_set_status("The game would not start — try again")
 		return
 	if not bool(room.get("public", true)):
-		# Say the code before the screen goes away: it is the only way
-		# anybody else gets in.
-		_set_status("Your code is %s — tell your friends!" % code)
+		_show_code(code, str(room.get("name", code)))
+		return
 	_join(code, str(room.get("name", code)))
 
 func _on_lookup(code: String, room: Dictionary) -> void:
@@ -417,13 +537,18 @@ func _field(placeholder: String) -> LineEdit:
 func _chunky_button(label: String) -> Button:
 	var button := Button.new()
 	button.text = "  %s  " % label
-	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = Vector2(0, _px(CONTROL_HEIGHT))
 	button.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, _scale))
 	button.add_theme_color_override("font_color", UiTheme.INK)
 	button.add_theme_stylebox_override("normal",
 		UiTheme.flat(UiTheme.SURFACE_2, UiTheme.R_CONTROL, _scale, 1.0, UiTheme.LINE))
-	for state: String in ["hover", "pressed"]:
+	# "focus" is in this list, and that is the whole point of the list.
+	# Every button on this screen used to be FOCUS_NONE, which meant a
+	# gamepad could do exactly one thing here: press Play. Starting a
+	# game, making it private, picking one out of the list and typing a
+	# code were all mouse-only, on the first screen of a game designed to
+	# be played on controllers by children who cannot read.
+	for state: String in ["hover", "pressed", "focus"]:
 		button.add_theme_stylebox_override(state,
 			UiTheme.flat(UiTheme.SURFACE_3, UiTheme.R_CONTROL, _scale, 1.0, UiTheme.ACCENT))
 	return button
