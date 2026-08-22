@@ -51,13 +51,22 @@ const SECONDS = parseInt(process.argv[3] || '90', 10);
   // This used to be "wait for the client to auto-connect, then click".
   // The client does not auto-connect any more; it opens a lobby and waits
   // to be told which game.
+  // The ENTER gate first, BY SELECTOR. A click at a fixed coordinate is
+  // not the same thing: boot.js only starts watching for the skip press
+  // once that button has been clicked, so missing it leaves the video up
+  // forever and looks exactly like the bug this check exists to find.
+  //
+  // A browser hands out pointer lock and audio only after a real user
+  // gesture. Synthetic CDP input counts as one, so this is a genuine test
+  // of that path rather than a bypass of it.
+  await page.waitForSelector('#bb-enter', { timeout: 60000 });
+  await page.click('#bb-enter');
+  await new Promise(r => setTimeout(r, 2000));
+
   let dismissed = false;
   for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Space');
     await new Promise(r => setTimeout(r, 1000));
-    // A browser hands out pointer lock and audio only after a real user
-    // gesture. Synthetic CDP input counts as one, so this is a genuine
-    // test of that path rather than a bypass of it.
-    await page.mouse.click(640, 400);
     dismissed = await page.evaluate(() =>
       !document.body.classList.contains('bb-booting'));
     if (dismissed) { break; }
