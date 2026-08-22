@@ -222,9 +222,6 @@ func _room_on_launch() -> String:
 func _build_lobby_screen() -> void:
 	_lobby_screen = LobbyScreen.new()
 	_lobby_screen.visible = false
-	_lobby_screen.add_child(_gradient_bg())
-	# The gradient is added first but ends up on top; push it behind.
-	_lobby_screen.move_child(_lobby_screen.get_child(_lobby_screen.get_child_count() - 1), 0)
 	_lobby_screen.join_requested.connect(_join_room)
 	add_child(_lobby_screen)
 
