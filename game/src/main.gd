@@ -118,6 +118,7 @@ func _ready() -> void:
 	if wanted.is_empty() and OS.get_environment("WORLD_AUTOCONNECT").is_empty():
 		_show_screen(_lobby_screen)
 		_address_edit.text = Game.server_url()
+		_web_loading_done_soon()
 	else:
 		_room_code = wanted
 		_show_screen(_connect_screen)
@@ -240,6 +241,20 @@ func _join_room(code: String, display_name: String) -> void:
 
 ## Back to the lobby, because the room we were in is not there any more.
 ## Distinct from a dropped link, which keeps retrying the same game.
+## Tell a browser's loading screen that the game is up.
+##
+## THE LOBBY SCREEN IS "READY". It used to be the connect handler that
+## said so, because the client dialled a server the moment it launched and
+## either got in or failed. The lobby connects to nothing and waits for a
+## choice, so nothing said it at all: the loading video sat over a
+## perfectly good screen, a press was recorded but never acted on, and the
+## only way in was the 90-second failsafe.
+##
+## Deferred a beat so the overlay never lifts onto a canvas that has not
+## drawn the lobby yet.
+func _web_loading_done_soon() -> void:
+	get_tree().create_timer(0.15).timeout.connect(Game.web_loading_done)
+
 func _back_to_lobby(message: String) -> void:
 	Net.go_offline()
 	_connecting = false
@@ -247,6 +262,7 @@ func _back_to_lobby(message: String) -> void:
 	_room_code = ""
 	_want_url = ""
 	_show_screen(_lobby_screen)
+	_web_loading_done_soon()
 	_lobby_screen.refresh()
 	_lobby_screen.call("_set_status", message)
 

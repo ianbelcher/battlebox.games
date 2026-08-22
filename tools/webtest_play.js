@@ -41,17 +41,40 @@ const SECONDS = parseInt(process.argv[3] || '90', 10);
   const started = Date.now();
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
 
-  // Poll until the game says it connected, or we run out of patience.
+  // THE REAL PATH A PLAYER TAKES, in order. It is three presses, not one,
+  // and skipping any of them tests nothing:
+  //
+  //   1. a press takes the loading video down (boot.js swallows this one)
+  //   2. Play — focused, so Enter hits it — joins the always-on game
+  //   3. a press claims a seat in it
+  //
+  // This used to be "wait for the client to auto-connect, then click".
+  // The client does not auto-connect any more; it opens a lobby and waits
+  // to be told which game.
+  let dismissed = false;
+  for (let i = 0; i < 40; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    // A browser hands out pointer lock and audio only after a real user
+    // gesture. Synthetic CDP input counts as one, so this is a genuine
+    // test of that path rather than a bypass of it.
+    await page.mouse.click(640, 400);
+    dismissed = await page.evaluate(() =>
+      !document.body.classList.contains('bb-booting'));
+    if (dismissed) { break; }
+  }
+  // Let the fade finish before anything is aimed at the game behind it.
+  await new Promise(r => setTimeout(r, 2000));
+
+  // Play has focus on the lobby screen, so Enter is the whole of what a
+  // child has to do.
+  await page.keyboard.press('Enter');
+
   let connected = false;
   for (let i = 0; i < SECONDS; i++) {
     await new Promise(r => setTimeout(r, 1000));
     if (log.some(l => /Connected to world server/i.test(l))) { connected = true; break; }
   }
 
-  // Actually join. A browser hands out pointer lock and audio only after
-  // a real user gesture, so this clicks the canvas first — exactly what a
-  // player does. Synthetic CDP input counts as a gesture, so this is a
-  // genuine test of that path, not a bypass of it.
   await page.mouse.click(640, 400);
   await new Promise(r => setTimeout(r, 1000));
   await page.keyboard.press('Space');
@@ -76,6 +99,16 @@ const SECONDS = parseInt(process.argv[3] || '90', 10);
       const c = document.querySelector('canvas');
       return c ? `${c.width}x${c.height}` : 'no canvas';
     })(),
+    // DID THE LOADING SCREEN GET TOLD THE GAME IS UP?
+    //
+    // web/boot.js holds its video over everything until GDScript calls
+    // window.bbLoadingDone(), and only then does a press take it down. If
+    // nothing calls it the player sits on a frozen last frame, clicking,
+    // until a 90-second failsafe lets them out — and NOTHING else in this
+    // file notices: the canvas is there, the socket is open, the console
+    // is clean. That is exactly how it shipped once.
+    bootOverlayUp: window.bbBootUp === true,
+    stillBooting: document.body.classList.contains('bb-booting'),
   }));
 
   await page.screenshot({ path: process.argv[4] || 'shot.png' });
@@ -93,6 +126,8 @@ const SECONDS = parseInt(process.argv[3] || '90', 10);
   console.log('crossOriginIso :', state.isolated);
   console.log('SharedArrayBuf :', state.hasSAB);
   console.log('canvas         :', state.canvas);
+  console.log('loading screen :', state.stillBooting ? 'STILL UP (never told)' : 'lifted');
+  console.log('lobby dismissed:', dismissed);
   console.log('pointerLocked  :', joined.pointerLocked);
   console.log('connected      :', connected, `(after ${Math.round((Date.now()-started)/1000)}s)`);
   // Chunks are meshed on worker threads. A handful of stalls under a
@@ -113,7 +148,8 @@ const SECONDS = parseInt(process.argv[3] || '90', 10);
   }
   await browser.close();
 
-  const ok = state.isolated && state.hasSAB && connected && scriptErrors.length === 0;
+  const ok = state.isolated && state.hasSAB && connected
+    && !state.stillBooting && scriptErrors.length === 0;
   console.log(ok ? '\nWEB PLAY: PASS' : '\nWEB PLAY: FAIL');
   process.exit(ok ? 0 : 1);
 })();
