@@ -192,7 +192,7 @@ func _update_viewmodel(cell: Dictionary, player: Player) -> void:
 		if item.kind != "empty":
 			var model := ItemFactory.build(str(item.kind), int(item.id))
 			model.scale = Vector3(0.9, 0.9, 0.9)
-			var vm_layer := 1 << (10 + player.slot)
+			var vm_layer := RenderLayers.viewmodel_of(player.slot)
 			for node in model.find_children("*", "VisualInstance3D", true, false):
 				(node as VisualInstance3D).layers = vm_layer
 			cam.add_child(model)
@@ -204,11 +204,7 @@ func _update_viewmodel(cell: Dictionary, player: Player) -> void:
 			model.rotation_degrees = Vector3(0, 6, 0)
 			cell.vm = model
 			cell.vm_base = base
-	# camera masks: see own viewmodel layer, never others'
-	var all_vm := 0
-	for i in 4:
-		all_vm |= 1 << (10 + i)
-	cam.cull_mask = (((1 << 20) - 1) & ~player.render_layer_bit() & ~all_vm) | (1 << (10 + player.slot))
+	cam.cull_mask = RenderLayers.camera_mask(player.slot)
 
 func _find_player(slot: int) -> Player:
 	if world == null or world.players == null:
@@ -380,11 +376,7 @@ func _process(delta: float) -> void:
 			cam.projection = Camera3D.PROJECTION_PERSPECTIVE
 			cam.fov = lerpf(cam.fov, FP_FOVS[cell.fp_zoom], 0.25)
 			cam.near = 0.05
-			var fp_vm := 0
-			for vm_i in 4:
-				fp_vm |= 1 << (10 + vm_i)
-			cam.cull_mask = (((1 << 20) - 1) & ~player.render_layer_bit() \
-				& ~fp_vm) | (1 << (10 + player.slot))
+			cam.cull_mask = RenderLayers.camera_mask(player.slot)
 			var eye: Vector3 = player.position + Vector3(0, Player.EYE_HEIGHT, 0)
 			cam.look_at_from_position(eye, eye + player.look_dir(), Vector3.UP)
 			_update_viewmodel(cell, player)
@@ -422,10 +414,7 @@ func _process(delta: float) -> void:
 			continue
 		cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 		cam.near = 0.5
-		var all_vm := 0
-		for i in 4:
-			all_vm |= 1 << (10 + i)
-		cam.cull_mask = ((1 << 20) - 1) & ~all_vm
+		cam.cull_mask = RenderLayers.camera_mask(-1)
 		if cell.get("vm") != null and is_instance_valid(cell.vm):
 			cell.vm.queue_free()
 			cell.vm = null
@@ -524,7 +513,7 @@ func _update_xray(cell: Dictionary, player: Player) -> void:
 					mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 					mat.no_depth_test = true
 					marker.material_override = mat
-					marker.layers = 1 << (10 + player.slot)
+					marker.layers = RenderLayers.viewmodel_of(player.slot)
 					add_child(marker)
 					markers[child.player_id] = marker
 				marker.position = child.position + Vector3(0, 1.5, 0)

@@ -6,11 +6,29 @@ extends Node3D
 ## replicated positions. The avatar visual is the shared blob model.
 
 const GRAVITY := 22.0
+## HOLD THE LEFT TRIGGER AND GO UP. Brisk enough to clear a wall while you
+## hold it, and gravity takes over the instant you let go — unlike flying,
+## which parks you in mid-air.
+const LIFT_SPEED := 6.0
+## WALK INTO A WALL AND CLIMB IT, one block a second.
+##
+## Auto-hop already handles a single step up. Anything taller than that
+## was a trap: a four-year-old who dug straight down could not get out of
+## the hole they had just made, and the only way back was an adult. Slow
+## on purpose — it is a way out, not a way to scale a tower quickly.
+const WALL_CLIMB_SPEED := 1.0
 ## How much HEIGHT a bouncy block adds per bounce, and how high it will
-## ever throw you. Twenty blocks is a long way up and a long way down —
-## far enough to see the whole base from, short enough to survive.
+## ever throw you. Forty blocks is half the world's height: high enough to
+## see the whole island, and a long enough fall back that the trampoline
+## is the point of it rather than a way to get somewhere.
+##
+## Doubled from twenty, which topped out sooner than the children playing
+## with it wanted. Nothing else has to change for that: the settling
+## behaviour below is a property of the arithmetic, not of the number —
+## once a bounce reaches the ceiling, the fall back arrives with exactly
+## the energy for that same height, at any ceiling.
 const BOUNCE_GAIN_BLOCKS := 1.0
-const BOUNCE_CEILING_BLOCKS := 20.0
+const BOUNCE_CEILING_BLOCKS := 40.0
 const JUMP_VELOCITY := 8.6
 const WALK_SPEED := 4.6
 const SWIM_SPEED := 3.0
@@ -328,7 +346,6 @@ func refresh_from_roster(entry: Dictionary) -> void:
 		_avatar = AvatarFactory.build_character(style)
 		_avatar.scale = Vector3(1.15, 1.15, 1.15)
 		_avatar.rotation = old.rotation
-		_avatar.visible = not (is_local and fp_mode)
 		add_child(_avatar)
 		old.queue_free()
 		_apply_render_layer()
@@ -339,7 +356,7 @@ func refresh_from_roster(entry: Dictionary) -> void:
 ## Local players' visuals live on a per-slot render layer so their own
 ## first-person camera can cull them (everyone else still sees them).
 func render_layer_bit() -> int:
-	return 1 << (1 + slot)
+	return RenderLayers.body_of(slot)
 
 func _apply_render_layer() -> void:
 	if not is_local:
@@ -352,11 +369,14 @@ func set_fp(enabled: bool) -> void:
 	if fp_mode == enabled:
 		return
 	fp_mode = enabled
-	# In first person your entire body simply doesn't render for you —
-	# belt and braces on top of the per-camera layer culling, which
-	# missed late-added pieces like hats.
+	# NOT `_avatar.visible = false`. Your body is hidden from YOUR camera
+	# by its render layer (see SplitScreen.cull_mask_for) — `visible` is a
+	# property of the node, so it would hide you from the person sitting
+	# next to you too, and two players on one screen could not see each
+	# other. Re-apply the layer instead, which also covers anything added
+	# to the avatar since it was built.
 	if is_local and _avatar != null:
-		_avatar.visible = not enabled
+		_apply_render_layer()
 	if enabled:
 		look_yaw = atan2(-heading.x, -heading.z)
 		look_pitch = -0.2
@@ -671,23 +691,31 @@ func _local_move(delta: float) -> void:
 		fly_mode = false  # no flying away from raids or matches (ghosts may)
 	if world != null and world.match_phase == "SETUP":
 		dropping = true
-	if fly_mode:
+	# KNOCKED OUT: drift up out of the fight, Tom-and-Jerry fashion.
+	#
+	# Its own branch, first, and not a special case buried inside flying.
+	# It used to be the third option inside `if fly_mode`, below jump and
+	# descend — so any input at all cancelled it, a menu open meant
+	# _local_move never ran, and the line below this one threw the whole
+	# rise away the instant fly_mode was false for a frame. What a player
+	# saw was a jump, not a drift.
+	#
+	# Constant speed, not a lerp toward one: ten blocks over three seconds
+	# is the promise, and a ramp makes it nine and a bit.
+	if _ghost_rise > 0.0:
+		_ghost_rise = maxf(0.0, _ghost_rise - delta)
+		velocity.x = 0.0
+		velocity.z = 0.0
+		velocity.y = GHOST_RISE_BLOCKS / GHOST_RISE_SECONDS
+		on_floor = false
+		anim = Anim.FLY
+	elif fly_mode:
 		var vert := 0.0
 		if jump_now:
 			vert = 5.5
 		elif input.is_descend_pressed():
 			vert = -5.5
-		elif _ghost_rise > 0.0:
-			# Drifting up out of the fight, Tom-and-Jerry fashion. The
-			# player's OWN input wins the moment they give any — the two
-			# branches above are checked first — so this never takes the
-			# controls away, it just gives somebody who has been knocked
-			# out something to watch instead of a body on the floor.
-			_ghost_rise -= delta
-			vert = GHOST_RISE_BLOCKS / GHOST_RISE_SECONDS
 		velocity.y = lerpf(velocity.y, vert, minf(1.0, delta * 8.0))
-	if _ghost_rise > 0.0 and not fly_mode:
-		_ghost_rise = 0.0     # picked back up on the way; forget it
 	elif in_water:
 		if carry_time > 0.0:
 			# Grapple zips still yank you out of the water.
@@ -701,6 +729,12 @@ func _local_move(delta: float) -> void:
 			elif input.is_sprint_pressed() or input.is_descend_pressed():
 				swim = -3.4
 			velocity.y = lerpf(velocity.y, swim, minf(1.0, delta * 5.0))
+	elif input.is_lift_pressed() and not downed:
+		# Held: rise. Released: this branch stops running and the plain
+		# gravity below takes over, so you drop rather than hover.
+		velocity.y = lerpf(velocity.y, LIFT_SPEED, minf(1.0, delta * 10.0))
+		on_floor = false
+		anim = Anim.FLY
 	elif held().kind == "weapon" and int(held().id) == 11 and velocity.y < 0.5 and not on_floor:
 		# Wings held: glide. Gentle fall, big reach — and no shooting hand.
 		velocity.y = maxf(velocity.y - GRAVITY * delta * 0.12, -1.6)
@@ -774,13 +808,31 @@ func _local_move(delta: float) -> void:
 	next.z = clampf(next.z, -half, half)
 	# Kid-friendly auto-hop: walking into a single block steps you up it —
 	# and swimming into a bank hops you out of the water.
-	if blocked_h and (on_floor or in_water) and dir.length_squared() > 0.01:
+	if blocked_h and dir.length_squared() > 0.01:
 		var up_attempt := next + Vector3(velocity.x * delta, 1.05, velocity.z * delta)
-		if not _collides(up_attempt) and not _collides(next + Vector3(0, 1.05, 0)):
+		var can_step := not _collides(up_attempt) \
+			and not _collides(next + Vector3(0, 1.05, 0))
+		if can_step and (on_floor or in_water):
+			# One block up: hop it, the way you always could.
 			velocity.y = 7.2
+		elif not can_step and not downed and not fly_mode and not in_water:
+			# Taller than a step, and you are still pushing into it: climb.
+			# Deliberately not gated on on_floor — the second block of a
+			# climb is not on the floor, and stopping there is the hole a
+			# child could not get out of.
+			velocity.y = maxf(velocity.y, WALL_CLIMB_SPEED)
+			on_floor = false
+			anim = Anim.FLY
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
-	if _collides(v_attempt):
+	if _ghost_rise > 0.0:
+		# Straight through the roof. Somebody knocked out inside their own
+		# fort would otherwise be pinned against its ceiling for the whole
+		# three seconds, which is the opposite of a graceful exit — and
+		# they are already invisible to everyone still playing.
+		next = v_attempt
+		on_floor = false
+	elif _collides(v_attempt):
 		var impact := velocity.y
 		if velocity.y < 0.0:
 			if not on_floor and velocity.y < -8.0:

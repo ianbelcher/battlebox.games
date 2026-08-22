@@ -610,6 +610,20 @@ func sv_pos(slot: int, pos: Vector3, yaw: float, anim: int) -> void:
 	player_state[id] = state
 	cl_pos.rpc(id, pos, yaw, anim)
 
+## PUT IT BACK. A client applies its own edits the instant they are made,
+## without waiting for this server to agree — digging has to feel
+## immediate. When the server then REFUSES one, that prediction is left
+## standing: the block is still here, and gone on the screen of whoever
+## tried to dig it.
+##
+## That is what made a lit Boom Block vanish and leave its sparks hanging
+## in the air. Clicking one lights the fuse instead of digging it, which
+## is a refusal, and nothing ever told the client so.
+##
+## Cheap: one cell, to one peer, only when an edit did not happen.
+func _refuse_edit(peer: int, pos: Vector3i) -> void:
+	cl_edits.rpc_id(peer, [[pos, store.get_block(pos)]])
+
 @rpc("any_peer", "reliable")
 func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 	if not multiplayer.is_server():
@@ -626,6 +640,7 @@ func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 	var current := store.get_block(pos)
 	if block == Blocks.AIR:
 		if not can_carve(pos, current):
+			_refuse_edit(peer, pos)
 			return
 		# Clicking a Boom Block LIGHTS it. Once lit it stays lit.
 		#
@@ -639,9 +654,13 @@ func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 		if current == Blocks.BOOM:
 			for entry: Dictionary in terrain._bombs:
 				if entry.pos == pos:
+					_refuse_edit(peer, pos)
 					return          # already counting down; leave it be
 			terrain._bombs.append({"pos": pos, "at_msec": Time.get_ticks_msec() + 2500})
 			cl_fuse_fx.rpc(pos)
+			# The digger predicted this block away. It is still here — it
+			# is a lit bomb — so tell them.
+			_refuse_edit(peer, pos)
 			return
 		if Blocks.is_collectible(current):
 			state.treasures = int(state.treasures) + 1
@@ -649,10 +668,15 @@ func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 			cl_treasures.rpc(id, state.treasures)
 	else:
 		if not (block in Blocks.HOTBAR):
+			_refuse_edit(peer, pos)
 			return
 		if current != Blocks.AIR and not Blocks.is_cross(current) \
 				and not Blocks.is_liquid(current):
-			return  # cross plants are soft: build straight through them
+			# Cross plants are soft: build straight through them. Anything
+			# else is occupied, and the placer has already drawn a block
+			# there that is not going to exist.
+			_refuse_edit(peer, pos)
+			return
 		var supported := false
 		for off in [Vector3i(1, 0, 0), Vector3i(-1, 0, 0), Vector3i(0, 1, 0),
 				Vector3i(0, -1, 0), Vector3i(0, 0, 1), Vector3i(0, 0, -1)]:
@@ -660,6 +684,7 @@ func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 				supported = true
 				break
 		if not supported:
+			_refuse_edit(peer, pos)
 			return
 		match block:
 			Blocks.SAPLING:
@@ -1900,6 +1925,11 @@ func cl_eliminated(id: String) -> void:
 	match_score_changed.emit()
 	for child in players.get_children():
 		if child is Player and child.player_id == id:
+			# Everyone sees the knockout, including whoever caused it —
+			# see WorldFx.knockout for why that matters.
+			if fx != null:
+				fx.knockout(child.position + Vector3(0, 0.9, 0))
+			Sfx.play("pop", -2.0)
 			if child.is_local:
 				# Out, but not gone: stay where you fell and wander. You
 				# can fly, you cannot touch anything, and nobody can see

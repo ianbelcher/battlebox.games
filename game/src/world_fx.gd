@@ -213,6 +213,73 @@ func flash_light(center: Vector3, color: Color, energy: float,
 	tween.tween_callback(func() -> void:
 		if is_instance_valid(flash):
 			flash.queue_free())
+## SOMEBODY WENT DOWN, AND THE PERSON WHO DID IT SHOULD KNOW.
+##
+## A knockout used to be silent to the shooter: the body simply stopped
+## being there. Across a field, with a storm closing, you could not tell a
+## hit from a miss — so you kept shooting at a player who had already
+## gone, and never learned which of your shots had worked.
+##
+## A white burst, big and brief. Deliberately white rather than a team
+## colour: it reads as "gone" at any distance and against any terrain,
+## and it is the one effect in the game that means that. It touches no
+## blocks — nothing here is an explosion, it is an announcement.
+func knockout(center: Vector3) -> void:
+	var sparks := CPUParticles3D.new()
+	sparks.position = center
+	sparks.amount = 64
+	sparks.lifetime = 0.9
+	sparks.one_shot = true
+	sparks.explosiveness = 1.0
+	sparks.spread = 180.0
+	sparks.initial_velocity_min = 4.0
+	sparks.initial_velocity_max = 11.0
+	sparks.gravity = Vector3(0, -6, 0)
+	sparks.scale_amount_min = 0.6
+	sparks.scale_amount_max = 1.4
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.11
+	mesh.height = 0.22
+	mesh.radial_segments = 6
+	mesh.rings = 3
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1, 1, 1)
+	mat.emission_enabled = true
+	mat.emission = Color(1, 1, 1)
+	mat.emission_energy_multiplier = 4.0
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material = mat
+	sparks.mesh = mesh
+	add_child(sparks)
+	sparks.emitting = true
+
+	# A soft shell that swells and fades, so the moment reads even when
+	# the individual sparks are too small to pick out at distance.
+	var shell := MeshInstance3D.new()
+	var ball := SphereMesh.new()
+	ball.radius = 0.5
+	ball.height = 1.0
+	shell.mesh = ball
+	var shell_mat := StandardMaterial3D.new()
+	shell_mat.albedo_color = Color(1, 1, 1, 0.75)
+	shell_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shell_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shell_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	shell.material_override = shell_mat
+	shell.position = center
+	add_child(shell)
+	var swell := create_tween()
+	swell.set_parallel(true)
+	swell.tween_property(shell, "scale", Vector3.ONE * 7.0, 0.45)
+	swell.tween_property(shell_mat, "albedo_color:a", 0.0, 0.45)
+
+	flash_light(center, Color(1, 1, 1), 7.0, 1.4)
+	get_tree().create_timer(1.6).timeout.connect(func() -> void:
+		if is_instance_valid(sparks):
+			sparks.queue_free()
+		if is_instance_valid(shell):
+			shell.queue_free())
+
 func burst(pos: Vector3i, color: Color) -> void:
 	var particles := CPUParticles3D.new()
 	particles.position = Vector3(pos) + Vector3(0.5, 0.5, 0.5)

@@ -22,11 +22,11 @@ enum Kind { KEYBOARD_WASD, KEYBOARD_ARROWS, GAMEPAD }
 ## exactly the part you aim with — and on a decent pad it is a quarter of
 ## the range spent guarding against drift that pad does not have.
 ##
-## 0.10 is safe here specifically BECAUSE `LOOK_CURVE` is steep: a stick
-## resting at 0.13 clears the deadzone but comes out the other side of the
-## curve asking for about a thousandth of full speed, which is nothing.
-## The curve is the drift guard; the deadzone only has to catch the worst
-## of it.
+## 0.10 is safe here specifically BECAUSE `look_response()` is steep at
+## the bottom: a stick resting at 0.13 clears the deadzone but comes out
+## the other side asking for well under a hundredth of full speed, which
+## is nothing. The curve is the drift guard; the deadzone only has to
+## catch the worst of it.
 const DEADZONE := 0.10
 
 var kind: Kind
@@ -126,10 +126,13 @@ func is_primary_pressed() -> bool:
 		_:
 			return Input.is_joy_button_pressed(device, JOY_BUTTON_A)
 
-## Jump / fly up: A, or LB while airborne.
+## Jump / fly up: A.
+##
+## LB used to jump as well, which meant the bumpers could not be a matched
+## pair — RB stepped the hotbar forward and LB could not step it back,
+## because every jump would have changed what you were holding. LB is the
+## backward step now and jumping is A alone, the way it reads on the pad.
 func is_jump_pressed() -> bool:
-	if kind == Kind.GAMEPAD and Input.is_joy_button_pressed(device, JOY_BUTTON_LEFT_SHOULDER):
-		return true
 	return is_primary_pressed()
 
 ## Dig a block, collect a treasure, pet a critter (and zap Grumps).
@@ -155,12 +158,10 @@ func is_place_pressed() -> bool:
 		_:
 			return Input.get_joy_axis(device, JOY_AXIS_TRIGGER_RIGHT) > 0.5
 
-## Cycle the hotbar selection IN THE WORLD. Returns 0 or +1.
+## Cycle the hotbar selection IN THE WORLD. Returns -1, 0 or +1.
 ##
-## RB only, deliberately: LB is JUMP on a pad (see is_jump_pressed), so a
-## backwards bumper here means every jump also changes what you're holding.
-## Stepping backwards belongs to tab_cycle_direction, which only runs with
-## a menu open — and an open menu sets ui_locked, so LB isn't jumping then.
+## Both bumpers, as a pair: RB forward, LB back — the same thing the D-pad
+## does sideways. LB could not do this while it also jumped.
 func cycle_direction() -> int:
 	match kind:
 		Kind.KEYBOARD_WASD:
@@ -169,6 +170,8 @@ func cycle_direction() -> int:
 		Kind.GAMEPAD:
 			if Input.is_joy_button_pressed(device, JOY_BUTTON_RIGHT_SHOULDER):
 				return 1
+			if Input.is_joy_button_pressed(device, JOY_BUTTON_LEFT_SHOULDER):
+				return -1
 	return 0
 
 ## Step through the PICKER'S TABS, both ways: LB/RB on a pad, Tab and
@@ -260,13 +263,25 @@ func is_sneak_pressed() -> bool:
 			return Input.is_joy_button_pressed(device, JOY_BUTTON_LEFT_STICK)
 	return false
 
-## Descend while flying (Shift / left trigger).
+## Descend while flying (Shift). The left trigger used to do this too and
+## is the LIFT now — it cannot mean both up and down.
 func is_descend_pressed() -> bool:
 	match kind:
 		Kind.KEYBOARD_WASD:
 			return Input.is_physical_key_pressed(KEY_SHIFT)
+	return false
+
+## LIFT: hold the left trigger and rise. Let go and you FALL — this is not
+## flying, and that is the point of it. Flying (double-tap A) leaves you
+## hanging in the air when you stop pressing, which is a fine way to build
+## and a poor way to get out of a hole in a hurry. Hold, rise, release,
+## drop.
+func is_lift_pressed() -> bool:
+	match kind:
 		Kind.GAMEPAD:
 			return Input.get_joy_axis(device, JOY_AXIS_TRIGGER_LEFT) > 0.5
+		Kind.KEYBOARD_WASD:
+			return Input.is_physical_key_pressed(KEY_CTRL)
 	return false
 
 ## Toggle between the isometric view and first person (T / gamepad Y).
@@ -280,18 +295,41 @@ func is_view_toggle_pressed() -> bool:
 
 ## First-person look input per frame (gamepad right stick; the keyboard
 ## looks with the mouse, handled by the player via input events).
-## HOW SHARPLY THE LOOK STICK RAMPS UP. 1.0 is the raw linear stick.
+## HOW THE LOOK STICK RESPONDS, in two zones.
 ##
 ## Linear is the problem: just past the deadzone the stick is already
 ## asking for a third of full speed, so the smallest nudge you can
-## physically make swings the camera well past what you were aiming at.
-## Squaring it (2.6 is a little past squared) means a small push is a
-## genuinely small movement — a quarter push asks for about a twentieth of
-## full speed — while a full push is untouched, so whipping round to look
-## behind you is exactly as fast as it was.
-## 3.0, up from 2.6, after watching a nine-year-old overshoot everything
-## he aimed at. Flatter still near the middle, unchanged at the top.
-const LOOK_CURVE := 3.0
+## physically make swings the camera past what you were aiming at. A
+## power curve (this was t^3) fixes the very bottom but leaves the MIDDLE
+## hot — half a stick still asked for an eighth of 223 degrees a second,
+## which is where a child actually holds it while lining a shot up.
+##
+## So: most of the stick's travel is a precision zone that tops out at a
+## tenth of full speed, and the last third ramps from there to the whole
+## lot. Fine aiming happens in the part of the range you can hold
+## steadily; whipping round to look behind you happens at the edge, and
+## is EXACTLY as fast as it was — response(1.0) is 1.0, by construction.
+const LOOK_PRECISION_EDGE := 0.70
+## Speed at that edge, as a fraction of full.
+const LOOK_PRECISION_SPEED := 0.10
+
+## Stick travel (0..1, already deadzone-corrected) -> fraction of full
+## look speed. Pure maths, so tests/unit/aim_curve_test.gd can check the
+## shape rather than anyone having to feel for it.
+static func look_response(travel: float) -> float:
+	var t := clampf(travel, 0.0, 1.0)
+	if t <= 0.0:
+		return 0.0
+	if t <= LOOK_PRECISION_EDGE:
+		# CUBED inside the precision zone, not squared. Squared made the
+		# bottom of the stick very slightly hotter than the old curve did
+		# — a fifth of a degree a second either way, so nothing anyone
+		# could feel, but "gentler for small movements" should mean all of
+		# them and the test says so.
+		var fine := t / LOOK_PRECISION_EDGE
+		return LOOK_PRECISION_SPEED * fine * fine * fine
+	var fast := (t - LOOK_PRECISION_EDGE) / (1.0 - LOOK_PRECISION_EDGE)
+	return lerpf(LOOK_PRECISION_SPEED, 1.0, fast * fast)
 
 func get_look_vector() -> Vector2:
 	if kind != Kind.GAMEPAD:
@@ -306,7 +344,7 @@ func get_look_vector() -> Vector2:
 	# than at a step: without this the first registered input is already
 	# DEADZONE-sized and the fine control is gone before it starts.
 	var t := clampf((mag - DEADZONE) / (1.0 - DEADZONE), 0.0, 1.0)
-	return v.normalized() * pow(t, LOOK_CURVE)
+	return v.normalized() * look_response(t)
 
 ## Spin the camera a quarter turn. Returns -1, 0 or +1 (caller edge-latches).
 func rotate_direction() -> int:
