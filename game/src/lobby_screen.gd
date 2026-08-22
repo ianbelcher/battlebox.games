@@ -148,7 +148,12 @@ func _house_card() -> Control:
 		play.add_theme_color_override(state, UiTheme.ON_ACCENT)
 	play.pressed.connect(func() -> void: _join(Room.HOUSE_CODE, "BattleBox"))
 	inner.add_child(play)
-	play.grab_focus()
+	# DEFERRED, because this card is not in the tree yet — it is being
+	# built and gets added by the caller. grab_focus() on a node outside
+	# the tree logs an error and does nothing, which quietly cost Play its
+	# focus and with it the whole point of the screen: Space, Enter or Ⓐ
+	# doing the obvious thing without anyone reading a word.
+	play.call_deferred("grab_focus")
 
 	_house_players = _text("the world everyone shares", UiTheme.T_NOTE, UiTheme.INK_FAINT)
 	inner.add_child(_house_players)

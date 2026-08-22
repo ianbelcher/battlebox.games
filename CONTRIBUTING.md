@@ -46,7 +46,54 @@ python3 tools/make_mca.py /tmp/fixture
 WORLD_MCA_DIR=/tmp/fixture godot --headless --path game -s res://tests/test_mca.gd
 ```
 
-Two more need a real window and so are not in CI. Run them if you are
+## Looking at it
+
+Anything visual — a menu, the lobby, a HUD change, a block icon — should
+be **looked at**, not reasoned about. You do not need a screen for that:
+
+```sh
+tools/screenshot.sh /tmp/shots          # the first screen
+```
+
+That runs the real client under a virtual X server and saves a PNG every
+1.5 seconds. Then open the PNGs. Skip the first two or three — they catch
+the window mid-build.
+
+Point it wherever you need by setting the same environment variables a
+normal run takes:
+
+```sh
+# the lobby, against a lobby you have running
+WORLD_SERVER_URL=ws://127.0.0.1:9080/ws tools/screenshot.sh /tmp/shots
+
+# in the world, in a particular room, with two bots for company
+WORLD_SERVER_URL=ws://127.0.0.1:9080/ws WORLD_ROOM=brave-otter \
+  WORLD_AUTOTEST=2 tools/screenshot.sh /tmp/shots 60
+```
+
+**Do this before you ship an interface change.** A UI bug is invisible to
+everything else here: the unit tests pass, the integration run reaches the
+world, the console is clean, and the screen is unreadable. Three real ones
+turned up this way in one sitting — a first screen whose text boxes were
+twelve pixels tall, a symbol that drew as an empty box, and a `grab_focus`
+on a node that was not in the tree yet, which silently cost the Play
+button its focus and with it the whole one-press path.
+
+Things worth knowing:
+
+- **`--rendering-method gl_compatibility` is not optional** and the script
+  passes it. The default is Forward+, which with no GPU falls to lavapipe,
+  and lavapipe *aborts* this project on startup with a C++ backtrace and
+  no hint that the renderer is the problem. It is also what the browser
+  build uses, so what you photograph is what most players see.
+- **Software rendering is slow**, and slowest once local players have
+  joined: every chunk is meshed on the CPU behind two or four SubViewports.
+  With `WORLD_AUTOTEST` set, give it 60 seconds or you will get two
+  screenshots.
+- **The log is full of ALSA errors.** There is no sound card. Ignore them;
+  the script tells you if there were real script errors.
+
+Two more checks need a real window and so are not in CI. Run them if you are
 changing menus or controls — synthetic input goes through the display
 server, and headless has none, so both report failure on good code:
 

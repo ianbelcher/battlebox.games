@@ -85,7 +85,8 @@ game/tests/      headless harnesses — map renders, the .mca importer test,
                  the kit importer
 lobby/           the room registry: registry, process supervisor and
                  websocket proxy, standard-library Python
-tools/           the test drivers (integration_test.py, lobby_test.py) and
+tools/           the test drivers (integration_test.py, lobby_test.py),
+                 screenshot.sh for looking at the UI without a screen, and
                  offline generators (make_mca.py, fetch_kits.py)
 maps/            optional Minecraft saves, one folder each (see its README)
 web/             the loading screen the browser build is wrapped in
@@ -132,6 +133,17 @@ python3 tools/lobby_test.py
 python3 tools/make_mca.py /tmp/fixture
 WORLD_MCA_DIR=/tmp/fixture godot --headless --path game -s res://tests/test_mca.gd
 ```
+
+For anything you can see, take a picture of it — no screen required:
+
+```sh
+tools/screenshot.sh /tmp/shots
+```
+
+That runs the real client under a virtual X server and saves a PNG every
+1.5 seconds, so an interface change can be checked rather than guessed at.
+`CONTRIBUTING.md` has the details, including why the renderer flag it
+passes is load-bearing.
 
 The last two matter more than they look. Booting the project proves the
 scripts compile; it does not prove the game works, because an RPC sent to a
