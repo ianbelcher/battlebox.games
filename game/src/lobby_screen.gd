@@ -343,7 +343,8 @@ func _show_rooms(rooms: Array) -> void:
 	for entry: Dictionary in rooms:
 		if str(entry.get("code", "")) == Room.HOUSE_CODE:
 			if _house_players != null:
-				_house_players.text = _crowd(int(entry.get("players", 0)))
+				var who := _people_in(entry)
+				_house_players.text = _crowd(who[0], who[1])
 		else:
 			others.append(entry)
 	if others.is_empty():
@@ -357,7 +358,9 @@ func _show_rooms(rooms: Array) -> void:
 func _room_row(entry: Dictionary) -> Button:
 	var code := str(entry.get("code", ""))
 	var display_name := str(entry.get("name", code))
-	var players := int(entry.get("players", 0))
+	var who := _people_in(entry)
+	var humans: int = who[0]
+	var bots: int = who[1]
 	var row := Button.new()
 	row.custom_minimum_size = Vector2(0, _px(CONTROL_HEIGHT + 6))
 	row.add_theme_stylebox_override("normal",
@@ -387,11 +390,14 @@ func _room_row(entry: Dictionary) -> Button:
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	line.add_child(name_label)
 	var count := Label.new()
-	count.text = _crowd(players)
+	count.text = _crowd(humans, bots)
 	count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	count.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_NOTE, _scale))
+	# Lit for PEOPLE only. A room full of bots is not a room worth
+	# highlighting, and colouring it as though it were is the same lie the
+	# number used to tell.
 	count.add_theme_color_override("font_color",
-		UiTheme.ACCENT if players > 0 else UiTheme.INK_FAINT)
+		UiTheme.ACCENT if humans > 0 else UiTheme.INK_FAINT)
 	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	line.add_child(count)
 	row.add_child(line)
@@ -399,12 +405,36 @@ func _room_row(entry: Dictionary) -> Button:
 
 ## "3 playing" reads better than "3", and "waiting for players" better
 ## than "0 playing", which sounds like something is broken.
-static func _crowd(players: int) -> String:
-	if players <= 0:
-		return "waiting for players"
-	if players == 1:
-		return "1 playing"
-	return "%d playing" % players
+##
+## PEOPLE AND COMPUTER PLAYERS ARE COUNTED SEPARATELY, because the number
+## is there to answer one question — is anybody in there? — and a total
+## answers it wrongly. A room holding one child and eighteen bots said
+## "19 playing", which is what a busy game looks like and is the reason
+## somebody would choose it.
+##
+## So people lead, and the bots are an aside. A game with nobody in it
+## says so even when it is full of them.
+static func _crowd(humans: int, bots: int) -> String:
+	var tail := ""
+	if bots == 1:
+		tail = " + 1 computer player"
+	elif bots > 1:
+		tail = " + %d computer players" % bots
+	if humans <= 0:
+		return "waiting for players" + tail
+	if humans == 1:
+		return "1 playing" + tail
+	return "%d playing" % humans + tail
+
+## What the lobby said, tolerating a room that only reported a total.
+static func _people_in(entry: Dictionary) -> Array:
+	var total := int(entry.get("players", 0))
+	# `humans` is missing from a room old enough not to know about bots.
+	# Counting its players as people is the right guess: the alternative
+	# shows a busy game as empty.
+	var humans := int(entry.get("humans", total))
+	var bots := int(entry.get("bots", 0))
+	return [humans, bots]
 
 # ------------------------------------------------------------------
 # Actions

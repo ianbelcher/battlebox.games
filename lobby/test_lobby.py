@@ -158,3 +158,39 @@ class _FakeProcess:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlayerCountTests(unittest.TestCase):
+    """What a room says about who is in it, and what the lobby makes of it.
+
+    The count is what somebody picks a game by, so a room holding one
+    child and eighteen computer players must not advertise "19 playing".
+    """
+
+    def parse(self, line):
+        match = lobby._PLAYERS_LINE.match(line)
+        self.assertIsNotNone(match, f"did not match: {line!r}")
+        total = int(match.group(1))
+        return total, int(match.group(2) or total), int(match.group(3) or 0)
+
+    def test_people_and_computer_players_are_read_separately(self):
+        self.assertEqual(
+            self.parse("ROOM brave-otter players=19 humans=1 bots=18"),
+            (19, 1, 18))
+
+    def test_an_empty_room(self):
+        self.assertEqual(self.parse("ROOM house players=0 humans=0 bots=0"),
+                         (0, 0, 0))
+
+    def test_a_room_that_only_reports_a_total_still_counts(self):
+        # The line grew these fields; a room that predates them must not
+        # read as empty, so its players are taken to be people.
+        self.assertEqual(self.parse("ROOM house players=4"), (4, 4, 0))
+
+    def test_the_json_carries_both(self):
+        room = lobby.Room("brave-otter", "Ian's game", False, 9100)
+        room.players, room.humans, room.bots = 19, 1, 18
+        blob = room.as_json()
+        self.assertEqual(blob["players"], 19)
+        self.assertEqual(blob["humans"], 1)
+        self.assertEqual(blob["bots"], 18)

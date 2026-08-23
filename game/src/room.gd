@@ -88,12 +88,29 @@ func describe() -> String:
 ## changes. The lobby reads this to show "3 playing" beside a public game;
 ## it cannot count sockets instead, because one machine's socket can carry
 ## up to four players sharing a screen.
+##
+## PEOPLE AND COMPUTER PLAYERS SEPARATELY. A single number could not tell
+## them apart, so a room with two children and seventeen bots in it
+## advertised "19 playing" — which reads as a busy game and is the reason
+## somebody would pick it, and is wrong. Bots are not company.
 func _report_players() -> void:
-	var count := Game.roster.size()
-	if count == _said_players:
+	var humans := 0
+	var bots := 0
+	for id: String in Game.roster:
+		if bool(Game.roster[id].get("bot", false)):
+			bots += 1
+		else:
+			humans += 1
+	var count := humans + bots
+	# Keyed on the pair: a child leaving as a bot is added would otherwise
+	# hold the total still and never be reported.
+	var stamp := humans * 1000 + bots
+	if stamp == _said_players:
 		return
-	_said_players = count
-	print("ROOM %s players=%d" % [code, count])
+	_said_players = stamp
+	# `players` stays the total, and stays FIRST, so an older lobby reading
+	# this line keeps working unchanged.
+	print("ROOM %s players=%d humans=%d bots=%d" % [code, count, humans, bots])
 
 func _process(delta: float) -> void:
 	_poll += delta

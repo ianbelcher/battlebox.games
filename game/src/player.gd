@@ -17,6 +17,22 @@ const LIFT_SPEED := 6.0
 ## the hole they had just made, and the only way back was an adult. Slow
 ## on purpose — it is a way out, not a way to scale a tower quickly.
 const WALL_CLIMB_SPEED := 1.0
+## The push that gets you OVER the top once the wall has been cleared.
+##
+## Without it the climb stopped dead at the lip and buzzed there. The
+## climb only pushes while you are pressed against something, so the
+## moment your body cleared the top there was nothing holding you up but
+## one block per second of rise — gravity won immediately, you dropped
+## back against the wall, the climb re-engaged, and you shook at the top
+## of every wall you tried to get out of rather than getting out.
+##
+## So clearing the wall is its own event, and it hands over a real hop.
+## Big enough to beat gravity outright, which is what makes it decisive:
+## anything gentler leaves the same oscillation running, just slower.
+const WALL_TOP_HOP := 5.4
+## True while pressed against a wall and rising up it. Read on the frame
+## the wall STOPS blocking, which is the moment worth acting on.
+var _climbing := false
 ## How much HEIGHT a bouncy block adds per bounce, and how high it will
 ## ever throw you. Forty blocks is half the world's height: high enough to
 ## see the whole island, and a long enough fall back that the trampoline
@@ -69,6 +85,24 @@ const GHOST_FLY_SPEED := 11.0
 const GHOST_RISE_BLOCKS := 10.0
 const GHOST_RISE_SECONDS := 3.0
 var _ghost_rise := 0.0
+## Climbing clear of the map, once your whole team is out and there is
+## nobody left down there to watch. Height to reach, or INF for "stay
+## where you are".
+##
+## A RISE, NOT A TELEPORT. This used to be `teleport()` straight to the
+## spectator height, fired by the HUD the same instant you were knocked
+## out — so the graceful ten-block drift was real, ran correctly, and was
+## instantly overwritten by a jump of twenty-odd blocks. What a player saw
+## was a red screen and then a snap, which is exactly the "the rise is not
+## happening at all" it was reported as. It is the same journey now, taken
+## at a speed a person can follow.
+var _lift_to := INF
+const SPECTATOR_LIFT_SPEED := 7.0
+
+## Go up and watch from there. Takes effect after any ghost rise already
+## running, because that one is the one with the timing promise on it.
+func lift_clear_to(height: float) -> void:
+	_lift_to = height
 
 ## ARE WE HELD STILL BY A REVIVE? True for the player being picked up AND
 ## for the team-mate picking them up, so the pair of them stand there for
@@ -107,6 +141,16 @@ func begin_capture_hold(seconds: float) -> void:
 
 func begin_ghost_rise() -> void:
 	_ghost_rise = GHOST_RISE_SECONDS
+	# A grapple in flight OUTLIVES you otherwise, and a zip is a teleport:
+	# it snaps you to its last waypoint at sixty blocks a second, so being
+	# knocked out mid-swing threw the body across the map and started the
+	# ten-block drift from wherever it landed. Seen as a jump of twenty-odd
+	# blocks in a single frame, half way through the rise.
+	grapple_time = 0.0
+	carry_time = 0.0
+	_grapple_path.clear()
+	_climbing = false
+	_lift_to = INF
 const HALF_WIDTH := 0.4
 const HEIGHT := 1.8   # Minecraft's exact player height
 const SEND_HZ := 12.0
@@ -709,6 +753,19 @@ func _local_move(delta: float) -> void:
 		velocity.y = GHOST_RISE_BLOCKS / GHOST_RISE_SECONDS
 		on_floor = false
 		anim = Anim.FLY
+	elif _lift_to < INF and position.y < _lift_to:
+		# Still climbing out. Nothing else to decide while this runs: you
+		# are out of the game and on your way to the seats.
+		velocity.x = 0.0
+		velocity.z = 0.0
+		velocity.y = SPECTATOR_LIFT_SPEED
+		on_floor = false
+		anim = Anim.FLY
+		if position.y >= _lift_to - 0.5:
+			# Arrived. Hand the controls back — a spectator can fly about
+			# and follow whoever is still in it.
+			_lift_to = INF
+			fly_mode = true
 	elif fly_mode:
 		var vert := 0.0
 		if jump_now:
@@ -815,6 +872,7 @@ func _local_move(delta: float) -> void:
 		if can_step and (on_floor or in_water):
 			# One block up: hop it, the way you always could.
 			velocity.y = 7.2
+			_climbing = false
 		elif not can_step and not downed and not fly_mode and not in_water:
 			# Taller than a step, and you are still pushing into it: climb.
 			# Deliberately not gated on on_floor — the second block of a
@@ -823,9 +881,26 @@ func _local_move(delta: float) -> void:
 			velocity.y = maxf(velocity.y, WALL_CLIMB_SPEED)
 			on_floor = false
 			anim = Anim.FLY
+			_climbing = true
+	elif _climbing:
+		# THE TOP. Nothing is in the way any more and you are still walking
+		# forward, so the wall has been climbed — take the last step onto
+		# it rather than letting go one block short.
+		#
+		# Everything needed is already true here: the horizontal sweep has
+		# been allowed through this frame, so you are moving over the edge
+		# already, and this only stops you sagging back off it. Setting the
+		# velocity here rather than next frame matters — the vertical sweep
+		# is a few lines below, so the hop lands on the frame that earned
+		# it, with nothing in between for gravity to undo.
+		_climbing = false
+		if dir.length_squared() > 0.01 and not downed and not fly_mode:
+			velocity.y = maxf(velocity.y, WALL_TOP_HOP)
+			on_floor = false
+			anim = Anim.FLY
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
-	if _ghost_rise > 0.0:
+	if _ghost_rise > 0.0 or _lift_to < INF:
 		# Straight through the roof. Somebody knocked out inside their own
 		# fort would otherwise be pinned against its ceiling for the whole
 		# three seconds, which is the opposite of a graceful exit — and

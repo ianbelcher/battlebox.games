@@ -1879,6 +1879,23 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 			child.downed = is_down
 			child.set_ghost(is_down)
 			child.visible = (not is_down) or _my_team_has(id)
+			if is_down:
+				# THE KNOCKOUT IS SEEN HERE, not only at elimination.
+				#
+				# It used to fire from `cl_eliminated` alone — which in a
+				# battle is not the moment anybody is knocked out. Shooting
+				# somebody DOWNS them; elimination is what happens later,
+				# when they bleed out or nobody could reach them. So the
+				# burst played for the last player of a round and almost
+				# nobody else: a whole match of knockouts with two puffs
+				# of smoke in it, which is exactly what was reported.
+				#
+				# It fires for everyone, including whoever caused it —
+				# that is the entire point. You shot someone; you should
+				# be able to see that you did.
+				if fx != null:
+					fx.knockout(child.position + Vector3(0, 0.9, 0))
+				Sfx.play("pop", -4.0)
 			if child.is_local and is_down:
 				Sfx.play("drop", -4.0)
 	_refresh_overheads()
@@ -1918,6 +1935,8 @@ func cl_feed(attacker_name: String, attacker_team: int,
 
 @rpc("authority", "reliable")
 func cl_eliminated(id: String) -> void:
+	var was_down := client_downed.has(id)
+	client_downed.erase(id)
 	hearts[id] = 0
 	hearts_changed.emit()
 	ghost_ids[id] = true
@@ -1925,11 +1944,14 @@ func cl_eliminated(id: String) -> void:
 	match_score_changed.emit()
 	for child in players.get_children():
 		if child is Player and child.player_id == id:
-			# Everyone sees the knockout, including whoever caused it —
-			# see WorldFx.knockout for why that matters.
-			if fx != null:
-				fx.knockout(child.position + Vector3(0, 0.9, 0))
-			Sfx.play("pop", -2.0)
+			# Only when this is the FIRST anyone heard of it. A player who
+			# was already down has had their burst — bleeding out is not a
+			# second knockout, and playing it again drew an explosion over
+			# a body that had been lying there for half a minute.
+			if not was_down:
+				if fx != null:
+					fx.knockout(child.position + Vector3(0, 0.9, 0))
+				Sfx.play("pop", -2.0)
 			if child.is_local:
 				# Out, but not gone: stay where you fell and wander. You
 				# can fly, you cannot touch anything, and nobody can see

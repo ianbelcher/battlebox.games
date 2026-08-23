@@ -49,7 +49,10 @@ MAX_NAME = 32
 # short enough that an abandoned room does not hold a slot for long.
 DEFAULT_IDLE_EXIT = 90
 
-_PLAYERS_LINE = re.compile(r"^ROOM \S+ players=(\d+)", re.MULTILINE)
+# `humans` and `bots` are optional so that a room built before they
+# existed still reports its total rather than looking empty.
+_PLAYERS_LINE = re.compile(
+    r"^ROOM \S+ players=(\d+)(?: humans=(\d+))?(?: bots=(\d+))?", re.MULTILINE)
 
 
 @dataclass
@@ -60,6 +63,8 @@ class Room:
     port: int
     process: asyncio.subprocess.Process | None = None
     players: int = 0
+    humans: int = 0
+    bots: int = 0
     started_at: float = field(default_factory=time.monotonic)
     house: bool = False
 
@@ -69,6 +74,8 @@ class Room:
             "name": self.display_name,
             "public": self.is_public,
             "players": self.players,
+            "humans": self.humans,
+            "bots": self.bots,
             "house": self.house,
             "age": int(time.monotonic() - self.started_at),
         }
@@ -162,6 +169,11 @@ class Lobby:
             match = _PLAYERS_LINE.match(line)
             if match:
                 room.players = int(match.group(1))
+                # A room that only reports a total is old enough not to
+                # know about bots; treating its players as people is the
+                # right guess, and better than showing nobody.
+                room.humans = int(match.group(2) or match.group(1))
+                room.bots = int(match.group(3) or 0)
                 continue
             if line:
                 print(f"[{room.code}] {line}", flush=True)

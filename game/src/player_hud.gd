@@ -20,6 +20,9 @@ var _treasure_label: Label
 var _storm_label: Label
 var _death_note: Label
 var _death_flash: ColorRect
+## The colour draining out of the screen while you are out of the fight.
+var _grey: ColorRect
+var _grey_amount := 0.0
 var _death_t := 0.0
 var _was_down := false
 var _was_out := false
@@ -399,6 +402,17 @@ func _build_storm_line() -> void:
 func _build_death_wash() -> void:
 	# Dying deserves more than silently falling over: a red wash plus a
 	# big center card, cleared after a couple of seconds.
+	# FIRST, so everything added after this draws on top of it and keeps
+	# its colour. The world goes grey; the HUD telling you why does not.
+	_grey = ColorRect.new()
+	_grey.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_grey.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_grey.visible = false
+	var grey_mat := ShaderMaterial.new()
+	grey_mat.shader = load("res://shaders/knocked_out.gdshader")
+	grey_mat.set_shader_parameter("amount", 0.0)
+	_grey.material = grey_mat
+	add_child(_grey)
 	_death_flash = ColorRect.new()
 	_death_flash.color = Color(0.75, 0.05, 0.05, 0.0)
 	_death_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -2611,9 +2625,11 @@ func _refresh_notices(player: Player, delta: float) -> void:
 					break
 			if not mate_left:
 				_team_gone_lifted = true
-				player.teleport(Vector3(player.position.x,
-					float(WorldGen.CHUNK_H) - 26.0, player.position.z))
-				player.fly_mode = true
+				# ASK, do not teleport. A jump straight to the spectator
+				# height landed on the same frame the ten-block knockout
+				# drift started, so the drift ran perfectly and was never
+				# seen — see Player.lift_clear_to.
+				player.lift_clear_to(float(WorldGen.CHUNK_H) - 26.0)
 				player.visible = false
 		elif not out_now:
 			_team_gone_lifted = false
@@ -2622,6 +2638,28 @@ func _refresh_notices(player: Player, delta: float) -> void:
 		_death_t = maxf(0.0, _death_t - delta)
 		_death_note.visible = _death_t > 0.0
 		_death_flash.color.a = (minf(_death_t / 2.6, 1.0) * 0.4) if _death_t > 0.0 else 0.0
+		_drain_colour(down_now or out_now, delta)
+
+## Out of the fight, so the fight stops looking like something you are in.
+##
+## Both states, not just elimination: DOWNED is the one people spend time
+## in, and it is the one that looked like nothing more than a bad moment.
+## Eased rather than switched, because a hard cut to grey reads as the
+## renderer breaking, and eased back the same way for a revive — which is
+## the colour rushing back in, and worth having.
+func _drain_colour(out_of_it: bool, delta: float) -> void:
+	if _grey == null:
+		return
+	var want := 1.0 if out_of_it else 0.0
+	if is_equal_approx(_grey_amount, want):
+		# Nothing to do, and the pass is skipped entirely while you are
+		# playing — this shader reads the whole screen back, so it should
+		# not be running for anybody who is still in the game.
+		_grey.visible = _grey_amount > 0.001
+		return
+	_grey_amount = move_toward(_grey_amount, want, delta * 1.6)
+	_grey.visible = _grey_amount > 0.001
+	(_grey.material as ShaderMaterial).set_shader_parameter("amount", _grey_amount)
 
 ## The team panel, the scoreline, the low-health vignette and the
 ## damage flash.
