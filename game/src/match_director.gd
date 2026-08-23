@@ -237,7 +237,10 @@ func drop_everyone() -> void:
 			world.ctf_lost[t] = 0
 		world.ctf.build_all_bases()
 	else:
-		world.ctf._flags.clear()
+		# No flags in this mode — so there are none in the world either.
+		# Clearing the bookkeeping alone left last round's poles standing
+		# where a battle royale had no use for them.
+		world.ctf.strip_flags()
 		world.store.no_carve = []
 
 	var i := 0

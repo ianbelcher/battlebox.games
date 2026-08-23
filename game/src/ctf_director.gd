@@ -144,6 +144,42 @@ func build_all_bases() -> void:
 		where.append("%d@%v" % [team_i, _flags[team_i].home])
 	print("CTF: %d mounds raised | %s" % [_flags.size(), ", ".join(where)])
 
+## Take every flag pole down, for a round in a mode that has no flags.
+##
+## A FLAG IS A BLOCK, not a marker, so clearing `_flags` — which is all a
+## battle royale used to do — left every team's glowing pole standing in
+## the world. Anybody who played capture the flag and then a battle in the
+## same world found the map dotted with flags belonging to a game that was
+## not running: they cannot be picked up, they cannot be scored, and they
+## look exactly like something you are supposed to go for.
+##
+## The mound underneath is left alone. It is terrain, it is walkable, and a
+## small coloured hill is not a promise about the rules the way a beacon
+## is.
+##
+## Found by SEARCHING for them rather than from a remembered list. Bases
+## are built at a fixed spot per team, but the process that built them may
+## be long gone — a server restart keeps the world and forgets everything
+## else — so a list would take down the poles it happened to raise and
+## leave the ones it inherited.
+func strip_flags() -> void:
+	var pairs: Array = []
+	for team_i: int in world.battle.team_site.keys():
+		var centre: Vector3 = world.battle.team_site[team_i]
+		var cx := int(round(centre.x))
+		var cz := int(round(centre.z))
+		# One column each: a pole is one block wide and stands on the
+		# summit, so the whole search is a strip of the world's height.
+		for y in range(0, WorldGen.CHUNK_H):
+			var here := Vector3i(cx, y, cz)
+			var found := world.store.get_block(here)
+			if found >= Blocks.BEACON_TEAM and found < Blocks.BEACON_TEAM + 8:
+				put(here, Blocks.AIR, pairs)
+	if not pairs.is_empty():
+		world.cl_edits.rpc(pairs)
+	_flags.clear()
+	broadcast_flags()
+
 ## Tell the chunk store which ground a blast's exit ramp may not cut
 ## through. Everything else that breaks a block asks `can_carve`, but the
 ## ramp is carved down inside ChunkStore where flags do not exist.

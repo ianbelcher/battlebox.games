@@ -202,9 +202,24 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 		var n: Vector3i = face[0]
 		var neighbor := _block_at(x + n.x, y + n.y, z + n.z)
 		if translucent:
-			# Translucent faces show against air/plants only — never against
-			# the same material (no internal water walls) or opaque blocks.
+			# Translucent faces show against AIR only — never against the
+			# same material (no internal water walls), never against an
+			# opaque block, and never against a plant.
+			#
+			# A PLANT USED TO COUNT AS AIR HERE, and that is what put a
+			# blue box around every piece of seaweed. A plant standing in
+			# water is a cell that is not water, so all six neighbouring
+			# water blocks drew a face pointing at it — a complete
+			# water-skinned cube around the plant, which read as the plant
+			# being in a little air pocket at the bottom of the sea. Most
+			# obvious in Isles, which is mostly sea.
+			#
+			# Water simply carries on through it now. The plant's own
+			# crossed quads still draw, so it is a weed in the water
+			# rather than a weed in a box.
 			if neighbor == block or Blocks.LK_OPAQUE[neighbor] == 1:
+				continue
+			if Blocks.LK_CROSS[neighbor] == 1:
 				continue
 			if is_liquid and neighbor == Blocks.ICE:
 				continue
