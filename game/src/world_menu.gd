@@ -787,13 +787,16 @@ func _build_flying_card(box: Control) -> void:
 	var everyone := _row(card)
 	for spec in [["Everyone", "all", true], ["Nobody", "all", false],
 			["All computers", "bots", true], ["No computers", "bots", false]]:
+		# Wide enough for the longest of them. At 150 "No computers" lost
+		# its last letter and read as "No computer", which is a different
+		# and wrong instruction.
 		var scope := str(spec[1])
 		var on: bool = spec[2]
 		var btn := _button(str(spec[0]), func() -> void:
 			if Game.world != null:
 				Game.world.sv_set_fly.rpc_id(1, scope, -1, on)
 			Sfx.play("pop", -6.0))
-		_min(btn, 150, 44)
+		_min(btn, 178, 44)
 		everyone.add_child(btn)
 
 	var teams := _row(card)
@@ -971,11 +974,17 @@ func _build_invite_card(box: Control) -> void:
 		# The always-on world. There is nothing to give anybody, because
 		# the plain address already lands here — and showing a code would
 		# imply this game is private when it is the opposite.
+		var open_link := Room.link_for(Game.web_origin(), Room.HOUSE_CODE)
+		if open_link.is_empty():
+			# Off the web there is no address to hand anybody, so the card
+			# would be an empty rounded box under a heading — which is
+			# what it was, and it reads as something that failed to load.
+			# The heading on its own still says the useful part.
+			_heading(box, "Joining in", "Anyone can play — this game is open.")
+			return
 		var open_card := _section(box, "Joining in",
 			"Anyone can play. Send them the address and they land here.")
-		var open_link := Room.link_for(Game.web_origin(), Room.HOUSE_CODE)
-		if not open_link.is_empty():
-			open_card.add_child(_font(_copyable(open_link), UiTheme.T_BODY))
+		open_card.add_child(_font(_copyable(open_link), UiTheme.T_BODY))
 		return
 
 	var card := _section(box, "Invite a friend",
