@@ -66,20 +66,6 @@ const BOUNCE_CEILING_BLOCKS := 40.0
 const JUMP_VELOCITY := 8.6
 const WALK_SPEED := 4.6
 const SWIM_SPEED := 3.0
-## Dragging yourself along the floor after a knockdown.
-##
-## The number is a balance between two failures, and it has been on the
-## wrong side of both. At full walking speed (where it started) a downed
-## player moved exactly as fast as the person trying to reach them, so a
-## revive — three unbroken seconds inside 3 blocks — could never be
-## completed on anybody who kept moving. At 1.5 it was so slow that being
-## downed meant sitting there: too slow to reach your own flag, too slow to
-## get behind anything, just waiting.
-##
-## 2.6 leaves a rescuer walking 1.8x faster than you, which is plenty to
-## catch and hold station, while still letting you drag yourself into cover
-## or the last stretch home.
-const DOWNED_CRAWL_SPEED := 2.6
 
 ## How fast you fly once you are OUT of the round.
 ##
@@ -102,19 +88,11 @@ const GHOST_FLY_SPEED := 11.0
 ## and any input of your own takes over immediately.
 const GHOST_RISE_BLOCKS := 10.0
 const GHOST_RISE_SECONDS := 3.0
-## KNOCKED OUT AND IN THE AIR: hold jump to go up, let go and sink gently.
-##
-## The way back down had to work on a CONTROLLER, and flying does not.
-## Godot's descend is bound to Shift on a WASD keyboard and to nothing at
-## all on a gamepad or the arrow keys — so a child knocked out on a pad
-## would have floated ten blocks up, hovered, and stayed there until they
-## bled out, unrescuable, which is worse than the problem the rise fixes.
-##
-## Sinking by default also means the way back needs no instruction: let go
-## and you drift down to your team, hold jump if you overshot. Nothing to
-## learn, nothing to press, and it is the same on every input there is.
-const DOWNED_RISE := 4.2
-const DOWNED_SINK := 1.8
+## Being knocked out leaves you FLYING, at the top of the rise. Coming
+## back down is the two things flight already does and every player
+## already knows: double-tap Ⓐ to stop flying and drop, or hold the left
+## trigger and let go of it. No separate falling mode to learn, and no
+## mode that only exists while you are knocked out.
 var _ghost_rise := 0.0
 ## Climbing clear of the map, once your whole team is out and there is
 ## nobody left down there to watch. Height to reach, or INF for "stay
@@ -816,7 +794,12 @@ func _local_move(delta: float) -> void:
 		var now := Time.get_ticks_msec()
 		# The world's setting, unless this player has been given their own
 		# answer — see WorldNode.fly_allowed_for.
-		var fly_allowed: bool = world.fly_allowed_for(player_id)
+		#
+		# BEING KNOCKED OUT GRANTS IT. Going down lifts you ten blocks
+		# clear of the fight and leaves you flying, so the double-tap has
+		# to work while you are down — it is how you turn flight off and
+		# drop back to whoever might pick you up.
+		var fly_allowed: bool = downed or world.fly_allowed_for(player_id)
 		# 650ms, up from 480. A double-tap is a thing a nine-year-old has
 		# to do on purpose with a thumb, not a mouse, and under half a
 		# second was tighter than it needed to be.
@@ -919,12 +902,6 @@ func _local_move(delta: float) -> void:
 		velocity.y = GHOST_RISE_BLOCKS / GHOST_RISE_SECONDS
 		on_floor = false
 		anim = Anim.FLY
-	elif downed and not on_floor:
-		# The float back down. See DOWNED_SINK — this branch is what makes
-		# being knocked out survivable on a gamepad.
-		velocity.y = lerpf(velocity.y, DOWNED_RISE if jump_now else -DOWNED_SINK,
-			minf(1.0, delta * 6.0))
-		anim = Anim.FLY
 	elif _lift_to < INF and position.y < _lift_to:
 		# Still climbing out. Nothing else to decide while this runs: you
 		# are out of the game and on your way to the seats.
@@ -958,7 +935,7 @@ func _local_move(delta: float) -> void:
 			elif input.is_sprint_pressed() or input.is_descend_pressed():
 				swim = -3.4
 			velocity.y = lerpf(velocity.y, swim, minf(1.0, delta * 5.0))
-	elif input.is_lift_pressed() and not downed:
+	elif input.is_lift_pressed():
 		# Held: rise. Released: this branch stops running and the plain
 		# gravity below takes over, so you drop rather than hover.
 		velocity.y = lerpf(velocity.y, LIFT_SPEED, minf(1.0, delta * 10.0))

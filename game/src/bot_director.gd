@@ -1188,45 +1188,29 @@ func _bot_sap(id: String, bot: Dictionary, pos: Vector3) -> void:
 		return
 	_bot_dig_out(id, bot, pos, ahead.normalized())
 
-## WHERE A KNOCKED-DOWN COMPUTER PLAYER FLOATS, or INF for "on the
-## ground like everything else".
+## WHERE A KNOCKED-DOWN COMPUTER PLAYER IS VERTICALLY — or INF for "on
+## the ground, like everything else".
 ##
-## The same sequence a person gets: ten blocks up, out of the fight. Most
-## of the players in a room ARE computer players, so leaving them lying in
-## the scrap would have fixed the confusion for the handful of humans and
-## left it exactly as it was for everybody else.
+## THE SAME SEQUENCE A PERSON GETS, and no more than that. Ten blocks up
+## over three seconds, then back down. A person comes down by stopping
+## flying; a computer player has nothing to press, so the end of the rise
+## is when it comes down — and it uses the descent already here for the
+## drop, at the same three blocks a second a person glides at.
 ##
-## They HOLD up there rather than drifting back down, because coming
-## straight back is coming back into the fray. They only descend when
-## somebody who could pick them up is close enough to be worth coming down
-## for — which is what makes them reachable without putting them back in
-## the middle of it.
-const DOWNED_HOVER := 10.0
-const DOWNED_COME_DOWN := 13.0
-
-func _bot_downed_y(id: String, floor_y: float, pos: Vector3,
-		delta: float) -> float:
+## It had an arrangement of its own for a while: hover at ten until a
+## rescuer came within thirteen blocks, then descend to meet them. It
+## worked, and it was a second set of rules for the players who make up
+## most of a room. One set now.
+func _bot_downed_y(id: String, pos: Vector3, delta: float) -> float:
 	if not world.downed_ids.has(id):
 		return INF
-	var want := floor_y + DOWNED_HOVER
-	# A rescuer in reach: come down to be picked up. Their goal is this
-	# body, so they walk in under it and then it drops to meet them.
-	for other: String in world.match_alive.keys():
-		if other == id or world.downed_ids.has(other) \
-				or world.teams_differ(id, other):
-			continue
-		var st: Dictionary = world.player_state.get(other, {})
-		if st.is_empty():
-			continue
-		if Vector3(st.pos).distance_to(pos) < DOWNED_COME_DOWN:
-			want = floor_y
-			break
-	# The rise is the death sequence, so it runs at the sequence's pace;
-	# coming back down is not, so it can be quicker.
-	var rate := Player.GHOST_RISE_BLOCKS / Player.GHOST_RISE_SECONDS
-	if want < pos.y:
-		rate *= 2.0
-	return move_toward(pos.y, want, rate * delta)
+	var down_for := float(Time.get_ticks_msec()
+		- int(world.downed_ids.get(id, 0))) * 0.001
+	if down_for >= Player.GHOST_RISE_SECONDS:
+		# The rise is done. INF hands the way down back to the ordinary
+		# ground handling, which glides anything above the floor down.
+		return INF
+	return pos.y + (Player.GHOST_RISE_BLOCKS / Player.GHOST_RISE_SECONDS) * delta
 
 func _bot_settle_ground(id: String, bot: Dictionary, delta: float) -> void:
 	var pos: Vector3 = bot.pos
@@ -1237,7 +1221,7 @@ func _bot_settle_ground(id: String, bot: Dictionary, delta: float) -> void:
 	if _water_at(floori(pos.x), floori(pos.z)):
 		# Chest deep — see the note in the movement step.
 		floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) - 1.1)
-	var down_y := _bot_downed_y(id, floor_y, pos, delta)
+	var down_y := _bot_downed_y(id, pos, delta)
 	if down_y < INF:
 		pos.y = down_y
 		bot.pos = pos
@@ -1372,7 +1356,7 @@ func tick(delta: float) -> void:
 			# A DOWNED BOT CRAWLS. It used to be frozen solid — the whole
 			# steering block was gated on `not downed` — so a knocked-down
 			# computer player lay in the open, in the middle of whatever
-			# had just shot it, until it was finished off or bled out. It
+			# had just shot it, until its whole team went down with it. It
 			# gets the same deal a person gets now: drag yourself out of
 			# the line of fire and towards someone who can help.
 			#
@@ -1383,7 +1367,13 @@ func tick(delta: float) -> void:
 			# get is digging: you cannot tunnel while you are on the floor.
 			if downed:
 				if dir != Vector2.ZERO:
-					var crawl := Player.DOWNED_CRAWL_SPEED
+					# THE SAME PACE AS ANYBODY ELSE. Computer players used
+					# to crawl at 2.6 while a knocked-out person walked
+					# about at full speed — one rule for them and another
+					# for everyone else, which is the kind of special
+					# handling that makes a room of fifty behave like two
+					# different games.
+					var crawl: float = float(bot.get("speed", 3.4))
 					pos.x += dir.x * crawl * delta
 					pos.z += dir.y * crawl * delta
 					bot.yaw = atan2(-dir.x, -dir.y)
@@ -1501,7 +1491,7 @@ func tick(delta: float) -> void:
 			# "most players walk on water" was. Chest deep now, so the
 			# head and shoulders are out and the rest is under.
 			floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) - 1.1)
-		var down_y := _bot_downed_y(id, floor_y, pos, delta)
+		var down_y := _bot_downed_y(id, pos, delta)
 		var cruise_y := _bot_cruise_y(id, bot, flat, floor_y, delta)
 		if down_y < INF:
 			pos.y = down_y

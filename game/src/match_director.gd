@@ -465,7 +465,8 @@ func eliminate(id: String, attacker := "") -> void:
 	check_win()
 
 ## One feed line per knockout — downs included (that IS the kill as far
-## as the scrap that caused it goes; bleed-outs don't double-report).
+## as the scrap that caused it goes; being counted out when your whole
+## team goes down doesn't double-report).
 func _emit_feed(id: String, attacker := "") -> void:
 	# Only an ENEMY knockout scores. Falling in the storm, or a teammate's
 	# stray rocket, is nobody's point.
@@ -602,13 +603,17 @@ func _tick_regen() -> void:
 		world.cl_hearts.rpc(id, state.hp)
 
 func tick_revives(delta: float) -> void:
-	var now := Time.get_ticks_msec()
 	for id: String in world.downed_ids.keys().duplicate():
-		# NOBODY LEFT TO PICK YOU UP? Then you are out NOW. Waiting the
-		# full bleed-out for a player no team-mate could possibly reach
-		# is why a won battle sat there for twenty seconds before anyone
-		# was told: the last team was still "in" because one of its
-		# players was lying there with nobody standing.
+		# THERE IS NO BLEEDING OUT. Being knocked out is not a countdown:
+		# you stay down until a team-mate picks you up, and in capture the
+		# flag you can also get yourself back by reaching your own flag.
+		# The ONE way to be out for good is for your whole team to be down
+		# at the same time, because then there is nobody left who could
+		# ever come for you.
+		#
+		# It used to be both — no rescuer OR forty-five seconds on the
+		# floor — and the timer was the part that made being knocked out
+		# feel like waiting to be told off. It has gone.
 		var team := int(Game.roster.get(id, {}).get("team", -1))
 		var rescuer := false
 		for other: String in world.match_alive.keys():
@@ -616,7 +621,7 @@ func tick_revives(delta: float) -> void:
 					and int(Game.roster.get(other, {}).get("team", -2)) == team:
 				rescuer = true
 				break
-		if not rescuer or now - int(world.downed_ids[id]) > 45_000:
+		if not rescuer:
 			world.downed_ids.erase(id)
 			revive_progress.erase(id)
 			world.ctf._flag_progress.erase(id)
@@ -760,7 +765,7 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	if world.match_phase != "BATTLE" or not world.match_alive.has(id):
 		return
 	if world.downed_ids.has(id):
-		return  # ghosts are untouchable — revive or bleed out, nothing else
+		return  # ghosts are untouchable — get back in, or stay out
 	var now := Time.get_ticks_msec()
 	var mercy := 250 if world.bots.roster.has(id) else 800
 	if now - int(_last_hit_ms.get(id, -mercy)) < mercy:

@@ -2050,11 +2050,11 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 			# GOING DOWN IS THE DEATH SEQUENCE, and it happens here.
 			#
 			# It used to be: you fell over, stayed where you were, and the
-			# ten-block rise came much later, at elimination — after
-			# bleeding out. So the moment that should read as "that player
-			# is out of this" read as nothing at all, and a scrap with
-			# eight people in it was impossible to follow, because the
-			# ones lying in it looked much like the ones still in it.
+			# ten-block rise came much later, when your whole team went
+			# down with you. So the moment that should read as "that
+			# player is out of this" read as nothing at all, and a scrap
+			# with eight people in it was impossible to follow, because
+			# the ones lying in it looked much like the ones still in it.
 			#
 			# Now the knockout lifts you clear of the fight straight away.
 			# You are grey, you are half transparent, you are ten blocks up
@@ -2076,7 +2076,7 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				# It used to fire from `cl_eliminated` alone — which in a
 				# battle is not the moment anybody is knocked out. Shooting
 				# somebody DOWNS them; elimination is what happens later,
-				# when they bleed out or nobody could reach them. So the
+				# when the last of their team goes down too. So the
 				# burst played for the last player of a round and almost
 				# nobody else: a whole match of knockouts with two puffs
 				# of smoke in it, which is exactly what was reported.
@@ -2084,18 +2084,7 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				# It fires for everyone, including whoever caused it —
 				# that is the entire point. You shot someone; you should
 				# be able to see that you did.
-				# ...but NOT to the person it happened to. They are
-				# getting the colour drained out of their screen and a
-				# ten-block rise; a bang in their own face on top of that
-				# is noise. It is for everyone else, which is what it is
-				# for: knowing who has just gone out.
-				#
-				# All or nothing on a shared screen — this is a real
-				# effect in the world, not something a single viewport
-				# can be shown — so a split-screen partner loses it too.
-				# They still watch their team-mate go grey and rise, which
-				# is a longer and clearer signal than the flash.
-				if fx != null and not child.is_local:
+				if fx != null:
 					fx.knockout(child.position + Vector3(0, 0.9, 0))
 				Sfx.play("pop", -4.0)
 			if child.is_local and is_down:
@@ -2103,13 +2092,10 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				# same rise elimination used to give, moved to the moment
 				# it means something.
 				#
-				# NOT flight afterwards: flying has no descend on a gamepad
-				# (see Player.DOWNED_SINK), so it would have left a child
-				# on a pad hovering ten blocks up with no way back to
-				# anybody who could pick them up. They sink gently instead,
-				# and hold jump if they want to stay up.
+				# Flying at the top of it: double-tap Ⓐ to stop and drop,
+				# or the left trigger, which is what flight already does.
 				child.velocity = Vector3.ZERO
-				child.fly_mode = false
+				child.fly_mode = true
 				child.begin_ghost_rise()
 				Sfx.play("drop", -4.0)
 	_refresh_overheads()
@@ -2159,7 +2145,7 @@ func cl_eliminated(id: String) -> void:
 	for child in players.get_children():
 		if child is Player and child.player_id == id:
 			# Only when this is the FIRST anyone heard of it. A player who
-			# was already down has had their burst — bleeding out is not a
+			# was already down has had their burst — being counted out is not a
 			# second knockout, and playing it again drew an explosion over
 			# a body that had been lying there for half a minute.
 			if not was_down:
@@ -2168,7 +2154,7 @@ func cl_eliminated(id: String) -> void:
 				Sfx.play("pop", -2.0)
 			if child.is_local:
 				# Already down and already ten blocks up? Then the rise
-				# has been had. Doing it twice sends somebody who bled out
+				# has been had. Doing it twice sends somebody already up there
 				# another ten blocks into the sky for no reason.
 				if not was_down:
 					child.begin_ghost_rise()
