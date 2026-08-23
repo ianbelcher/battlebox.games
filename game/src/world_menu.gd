@@ -455,6 +455,25 @@ func _build_map_tab() -> void:
 		_min(btn, 70, 42)
 		_size_btns[arena] = btn
 
+	# BOATS AND CARS. Put where the grown-up is standing, because "here"
+	# is the only place anybody ever wants one — and a boat asked for on
+	# dry land walks itself to the nearest water rather than sitting in a
+	# field looking broken.
+	var ride_card := _section(box, "Boats and cars",
+		"Stand where you want one and press. Step on to drive; "
+		+ "anyone else aboard comes along for the ride.")
+	var ride_row := _row(ride_card)
+	for spec in [["Put a boat here", VehicleGeom.KIND_BOAT],
+			["Put a car here", VehicleGeom.KIND_CAR]]:
+		var kind: int = spec[1]
+		var btn := _choice(ride_row, str(spec[0]), func() -> void:
+			if Game.world == null:
+				return
+			for slot: int in Game.local_inputs.keys():
+				Game.world.sv_vehicle_here.rpc_id(1, slot, kind)
+				return)
+		_min(btn, 190, 44)
+
 	var fly_card := _section(box, "Flying",
 		"Double-tap jump to fly. Applies in both modes.")
 	var fly_row := _row(fly_card)

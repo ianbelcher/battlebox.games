@@ -1195,8 +1195,8 @@ func _bot_settle_ground(bot: Dictionary, delta: float) -> void:
 		gy = world.store.surface_y(floori(pos.x), floori(pos.z))
 	var floor_y := float(gy) + 1.0
 	if _water_at(floori(pos.x), floori(pos.z)):
-		# Bots swim: ride the surface instead of sinking to the seabed.
-		floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) + 0.4)
+		# Chest deep — see the note in the movement step.
+		floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) - 1.1)
 	if pos.y > floor_y + 3.0:
 		# Still airborne (the drop): glide down at human pace (-3,
 		# matching Player's drop glide exactly).
@@ -1208,7 +1208,18 @@ func _bot_settle_ground(bot: Dictionary, delta: float) -> void:
 func _bot_send_pos(id: String, bot: Dictionary, _delta: float) -> void:
 	if float(bot.get("send_t", 0.0)) <= 0.0:
 		bot.send_t = 1.0 / 15.0
-		world.cl_pos.rpc(id, Vector3(bot.pos), float(bot.yaw), 1)
+		# WALK unless they are in the water or in the air, in which case
+		# say so. Everything was sent as WALK, so a computer player in the
+		# sea ran on the spot with its head above the waves — half of what
+		# made them look like they were walking on it.
+		var pose := Player.Anim.WALK
+		var here: Vector3 = bot.pos
+		if bool(bot.get("flying", false)):
+			pose = Player.Anim.FLY
+		elif _water_at(floori(here.x), floori(here.z)) \
+				and here.y < float(WorldGen.SEA_LEVEL):
+			pose = Player.Anim.SWIM
+		world.cl_pos.rpc(id, here, float(bot.yaw), int(pose))
 
 ## Is this computer player mid-way through picking somebody up? The same
 ## test the people use: a downed team-mate with a revive already running,
@@ -1438,7 +1449,13 @@ func tick(delta: float) -> void:
 		var floor_y := float(gy) + 1.0
 		if _water_at(floori(pos.x), floori(pos.z)):
 			# Bots swim: ride the surface instead of sinking to the seabed.
-			floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) + 0.4)
+			#
+			# IN it, not ON it. This sat them at sea level plus a little,
+			# which puts a whole body clear of the water — a field of
+			# computer players walking across the sea, which is what
+			# "most players walk on water" was. Chest deep now, so the
+			# head and shoulders are out and the rest is under.
+			floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) - 1.1)
 		var cruise_y := _bot_cruise_y(id, bot, flat, floor_y, delta)
 		if cruise_y < INF:
 			pos.y = cruise_y

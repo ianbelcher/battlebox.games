@@ -85,9 +85,10 @@ game/tests/      headless harnesses — map renders, the .mca importer test,
                  the kit importer
 lobby/           the room registry: registry, process supervisor and
                  websocket proxy, standard-library Python
-tools/           the test drivers (integration_test.py, lobby_test.py),
-                 screenshot.sh for looking at the UI without a screen, and
-                 offline generators (make_mca.py, fetch_kits.py)
+tools/           the test drivers (integration_test.py, lobby_test.py,
+                 boot_test.js), screenshot.sh for looking at the UI
+                 without a screen, and offline generators (make_mca.py,
+                 fetch_kits.py)
 maps/            optional Minecraft saves, one folder each (see its README)
 web/             the loading screen the browser build is wrapped in
 deploy/          a compose file for running it yourself

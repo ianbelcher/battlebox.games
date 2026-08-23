@@ -73,8 +73,17 @@ back-reference, none declaring an RPC:
 | `World/Terrain` | `terrain_sim.gd` | Water, fire, growth, explosions |
 | `World/Critters` | `critter_director.gd` | Where animals live and where they wander |
 | `World/Survival` | `survival_director.gd` | Grump raids and supply crates |
+| `World/Vehicles` | `vehicle_director.gd` | Boats and cars: the fleet, the ids, one driver each |
 | `World/Probes` | `world_probes.gd` | The `WORLD_*_TEST` dev hooks |
 | `World/Fx` | `world_fx.gd` | Client-side bangs and sparkles |
+
+Three files carry no state at all and exist purely so the awkward part of
+a subsystem can be tested: `render_layers.gd` (who sees whose body on a
+split screen), `bot_squads.gd` (how computer players deal themselves into
+attacking groups), and `vehicle_geom.gd` (where a boat goes, and where
+somebody standing on it ends up when it turns). None of them touches an
+autoload, because a `--script` run has none — which is exactly why the
+logic worth checking has to live somewhere that needs nothing.
 
 The rule the split follows: **if both ends need to know it, the world owns
 it; if only the server needs it to run the simulation, the director owns

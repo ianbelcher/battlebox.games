@@ -134,6 +134,9 @@ func _ready() -> void:
 	# WORLD_MENU_PROBE=1: drive the world menu with synthetic input.
 	if OS.get_environment("WORLD_MENU_PROBE") == "1":
 		add_child(load("res://tests/menu_probe.gd").new())
+	# WORLD_BOAT_TEST=1: stand a player on a boat and move it under them.
+	if OS.get_environment("WORLD_BOAT_TEST") == "1":
+		add_child(load("res://tests/boat_probe.gd").new())
 	_arm_selfcheck()
 	# WORLD_SHOTS=<dir>: save a screenshot every 1.5s (visual debugging).
 	var shots_dir := OS.get_environment("WORLD_SHOTS")

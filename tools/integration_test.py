@@ -112,6 +112,14 @@ class Checks:
             self.passed += 1
             print(f"  ok  {role} {key}={actual} (>= {minimum})")
 
+    def truth(self, held: bool, what: str) -> None:
+        """A plain claim, for the checks that are not a number in a report."""
+        if held:
+            self.passed += 1
+            print(f"  ok  {what}")
+        else:
+            self.failures.append(what)
+
     def equal(self, report: dict[str, str], key: str, expected: str, role: str) -> None:
         actual = report.get(key)
         if actual != expected:
@@ -210,7 +218,19 @@ def run(argv: list[str] | None = None) -> int:
                     timeout=max(30, args.seconds + 45),
                 )
                 client_log = client.stdout + client.stderr
+                # A SECOND CLIENT, on the same live world, for the one
+                # thing the first cannot report on: whether standing on a
+                # boat actually carries you. See game/tests/boat_probe.gd
+                # — it puts a player on a deck and moves the deck.
+                boat_env = dict(client_env)
+                boat_env.pop("WORLD_SELFCHECK", None)
+                boat_env["WORLD_BOAT_TEST"] = "1"
+                boat_env["WORLD_AUTOTEST"] = "1"
+                boat = subprocess.run(base, env=boat_env, capture_output=True,
+                                      text=True, timeout=120)
+                boat_log = boat.stdout + boat.stderr
             except subprocess.TimeoutExpired as expired:
+                boat_log = ""
                 print("the client did not report in time; killing both")
                 client_log = (expired.stdout or b"").decode("utf-8", "replace") + \
                     (expired.stderr or b"").decode("utf-8", "replace")
@@ -257,6 +277,21 @@ def run(argv: list[str] | None = None) -> int:
     # interface refactor visible to a headless run at all: without it, a
     # HUD that silently stopped building would not fail anything here.
     checks.at_least(client_report, "huds", 2, "client")
+    # BOATS AND CARS, on both sides. The server puts a few out when the
+    # world is made; the client has to have been told about them, because
+    # its copy is also what a player's feet stand on. A fleet the server
+    # has and nobody can see is a bug that errors nowhere: the world is
+    # right, the picture of it is empty, and you swim past a boat that is
+    # not drawn.
+    checks.at_least(server_report, "vehicles", 4, "server")
+    checks.at_least(client_report, "vehicles", 4, "client")
+    # And riding one works. The probe prints its own lines; this turns
+    # them into a single check so a failure fails the run.
+    for line in boat_log.splitlines():
+        if line.startswith("BOAT: ") and " probe armed" not in line:
+            print("  " + line)
+    checks.truth("BOAT: all checks passed" in boat_log,
+                 "riding a boat works (see game/tests/boat_probe.gd)")
 
     # A round has to have actually started, and people have to be in it.
     # Without this the battle code — a third of what the server does — is

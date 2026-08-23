@@ -95,6 +95,13 @@ func _report() -> Array[String]:
 	fields.append("alive=%d" % world.match_alive.size())
 	fields.append("spawn=%d,%d,%d" % [world.spawn_pos.x, world.spawn_pos.y,
 		world.spawn_pos.z])
+	# Boats and cars, counted on BOTH sides. A fleet the server has and no
+	# client can see is the exact failure this line exists to catch: the
+	# world is right, the picture of it is empty, and nothing errors.
+	fields.append("vehicles=%d" % (world.vehicles.vehicles.size()
+		if Net.is_server and world.vehicles != null
+		else (world.vehicle_view.vehicles.size()
+			if world.vehicle_view != null else -1)))
 	if Net.is_server:
 		fields.append("chunks=%d" % world.store.cached_count())
 		fields.append("critters=%d" % world.critters_sim.count())

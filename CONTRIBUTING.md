@@ -92,6 +92,11 @@ Things worth knowing:
   screenshots.
 - **The log is full of ALSA errors.** There is no sound card. Ignore them;
   the script tells you if there were real script errors.
+- **Emoji only render because the fonts are bundled.** They are installed
+  everywhere except macOS and Windows, which have their own — so what you
+  photograph on Linux is what a browser draws. That was not always true:
+  the bundled fonts were web-only, and every screenshot taken here showed
+  a tofu box where the game shows a trophy.
 
 One check needs a real browser, because what it tests is entirely about
 what a browser will and will not permit:

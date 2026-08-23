@@ -215,6 +215,11 @@ var fx: WorldFx = null
 var chunks: ChunkView = null
 var players: Node3D = null
 var critter_view: CritterView = null
+## The boats and cars. `vehicles` is the server's list; `vehicle_view` is
+## every client's copy of it, and is also what a Player asks whether there
+## is a deck under its feet.
+var vehicles: VehicleDirector = null
+var vehicle_view: VehicleView = null
 var monster_view: MonsterView = null
 var orbs: OrbView = null
 var crates: CrateView = null
@@ -285,6 +290,10 @@ func _server_setup() -> void:
 	critters_sim.name = "Critters"
 	critters_sim.world = self
 	add_child(critters_sim)
+	vehicles = VehicleDirector.new()
+	vehicles.name = "Vehicles"
+	vehicles.world = self
+	add_child(vehicles)
 	survival = SurvivalDirector.new()
 	survival.name = "Survival"
 	survival.world = self
@@ -299,6 +308,8 @@ func _server_setup() -> void:
 	clock = _random_clock()
 	print("World spawn at %s, clock %.2f" % [spawn_pos, clock])
 	_load_battle_setup()
+	if vehicles != null:
+		vehicles.stock_world()
 	# SOMEBODY TO PLAY AGAINST, without anybody having to go and ask for
 	# them. A fresh world had nobody in it at all, so the first child in
 	# is alone in a field until an adult opens the world menu and presses
@@ -412,6 +423,8 @@ func sv_hello() -> void:
 	for crate_id: int in crates_by_id.keys():
 		payload.append([crate_id, crates_by_id[crate_id].weapon, crates_by_id[crate_id].pos])
 	cl_crates.rpc_id(peer, payload)
+	if vehicles != null:
+		cl_vehicles.rpc_id(peer, vehicles.payload())
 	# THE ROUND AS IT STANDS. Everything above describes the world; none of
 	# it says whether a game is being played in it, and a round that is
 	# already running is exactly what somebody joining a server that has
@@ -1615,6 +1628,82 @@ func sv_set_fly(scope: String, team: int, on: bool, who := "") -> void:
 	Game.cl_roster.rpc(Game.roster)
 	_save_battle_setup()
 
+# ------------------------------------------------------------------
+# Boats and cars
+#
+# The driver's own machine moves the thing and reports where it got to,
+# exactly as every player already does with their own body. The server
+# owns the list, the ids and the one-driver rule. See VehicleDirector.
+# ------------------------------------------------------------------
+
+## Put one where the asker is standing. The position comes from the
+## SERVER'S picture of where they are, not from the message — otherwise
+## anybody could drop a boat anywhere on the map from across it.
+@rpc("any_peer", "reliable")
+func sv_vehicle_here(slot: int, kind: int) -> void:
+	if not multiplayer.is_server() or vehicles == null:
+		return
+	var id := Game.player_id(multiplayer.get_remote_sender_id(), slot)
+	if not _is_host(multiplayer.get_remote_sender_id()):
+		return
+	var where: Dictionary = player_state.get(id, {})
+	if where.is_empty():
+		return
+	var at_pos: Vector3 = where.pos
+	if not store.inside_world(floori(at_pos.x), floori(at_pos.z), 2):
+		return
+	vehicles.spawn(clampi(kind, 0, 1), vehicles.settle(clampi(kind, 0, 1), at_pos))
+
+@rpc("any_peer", "reliable")
+func sv_vehicle_board(vid: String, slot: int) -> void:
+	if not multiplayer.is_server() or vehicles == null:
+		return
+	vehicles.board(vid, Game.player_id(multiplayer.get_remote_sender_id(), slot))
+
+@rpc("any_peer", "reliable")
+func sv_vehicle_leave(vid: String, slot: int) -> void:
+	if not multiplayer.is_server() or vehicles == null:
+		return
+	vehicles.leave(vid, Game.player_id(multiplayer.get_remote_sender_id(), slot))
+
+## Unreliable, and for the same reason player positions are: this arrives
+## fifteen times a second and the next one is always more use than a
+## resend of the last.
+@rpc("any_peer", "unreliable")
+func sv_vehicle_moved(vid: String, slot: int, at_pos: Vector3, yaw: float) -> void:
+	if not multiplayer.is_server() or vehicles == null:
+		return
+	vehicles.moved(vid, Game.player_id(multiplayer.get_remote_sender_id(), slot),
+		at_pos, yaw)
+
+@rpc("authority", "reliable")
+func cl_vehicle_new(vid: String, kind: int, at_pos: Vector3, yaw: float,
+		driver: String) -> void:
+	if vehicle_view == null:
+		return
+	vehicle_view.add_one(vid, kind, at_pos, yaw, driver)
+	vehicle_view.set_driver(vid, driver)
+
+@rpc("authority", "reliable")
+func cl_vehicle_gone(vid: String) -> void:
+	if vehicle_view != null:
+		vehicle_view.remove_one(vid)
+
+@rpc("authority", "reliable")
+func cl_vehicle_helm(vid: String, driver: String) -> void:
+	if vehicle_view != null:
+		vehicle_view.set_driver(vid, driver)
+
+@rpc("authority", "unreliable")
+func cl_vehicle_at(vid: String, at_pos: Vector3, yaw: float) -> void:
+	if vehicle_view != null:
+		vehicle_view.heard_at(vid, at_pos, yaw)
+
+@rpc("authority", "reliable")
+func cl_vehicles(payload: Array) -> void:
+	if vehicle_view != null:
+		vehicle_view.set_all(payload)
+
 @rpc("any_peer", "reliable")
 func sv_match_config(minutes: int, loot: int, size: int = -1, fly: int = -1) -> void:
 	# No phase guard: the grown-up gets to re-size the arena, allow flying
@@ -2168,6 +2257,10 @@ func _client_setup() -> void:
 	critter_view = CritterView.new()
 	critter_view.name = "Critters"
 	add_child(critter_view)
+	vehicle_view = VehicleView.new()
+	vehicle_view.name = "Vehicles"
+	vehicle_view.world = self
+	add_child(vehicle_view)
 	monster_view = MonsterView.new()
 	monster_view.name = "Monsters"
 	add_child(monster_view)

@@ -17,6 +17,24 @@ const LIFT_SPEED := 6.0
 ## the hole they had just made, and the only way back was an adult. Slow
 ## on purpose — it is a way out, not a way to scale a tower quickly.
 const WALL_CLIMB_SPEED := 1.0
+## THE BOAT OR CAR UNDER THIS PLAYER'S FEET, if any, and where they are
+## standing on it in the vehicle's own frame.
+##
+## Keeping the spot in the VEHICLE's frame rather than the world's is what
+## makes "everyone stays where they were standing" work when it turns: the
+## spot is remembered as "two blocks aft, one to port" and turned back
+## into a world position after the vehicle has moved. Doing it as a plain
+## position delta carries people along fine in a straight line and slides
+## them off the side in a turn.
+var ride_id := ""
+## Where the vehicle was last physics frame, so this frame's motion can be
+## worked out and applied to whoever is standing on it.
+var _ride_was := ""
+var _ride_was_pos := Vector3.ZERO
+var _ride_was_yaw := 0.0
+## Sent to the server about as often as a position is.
+var _ride_send := 0.0
+const RIDE_SEND_HZ := 15.0
 ## The push that gets you OVER the top once the wall has been cleared.
 ##
 ## Without it the climb stopped dead at the lip and buzzed there. The
@@ -605,6 +623,101 @@ func _solid_at(pos: Vector3) -> bool:
 	return Blocks.is_solid(_chunks().get_block(Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))))
 
 ## Any solid block overlapping the AABB at a candidate position?
+## The deck we are standing on or about to land on, or INF for none.
+func _deck_floor(from: Vector3, to: Vector3) -> float:
+	if world == null or world.vehicle_view == null:
+		return INF
+	var found: Dictionary = world.vehicle_view.deck_under(to)
+	if found.is_empty():
+		return INF
+	var deck: float = found.deck_y
+	# Coming down through it, or already standing on it. Not while rising
+	# through it — you can jump up out of a boat.
+	if from.y >= deck - 0.05 or absf(from.y - deck) < 0.35:
+		return deck
+	return INF
+
+## STANDING ON A BOAT, AND POSSIBLY DRIVING IT.
+##
+## Runs after this player's own movement, so what it does is add the
+## vehicle's motion on top: your walking about the deck is yours, and the
+## deck moving under you is the boat's. Both, every frame, which is what
+## lets somebody walk to the bow of a boat that is already under way.
+##
+## The carry is done through the VEHICLE'S OWN FRAME rather than as a
+## position delta. In a straight line the two are identical; in a turn the
+## delta version slides everybody off the side, because the stern travels
+## further than the bow.
+func _ride(delta: float) -> void:
+	if not is_local or world == null or world.vehicle_view == null:
+		_ride_was = ""
+		return
+	var view: VehicleView = world.vehicle_view
+	# CARRY FIRST, ASK AFTERWARDS.
+	#
+	# This used to look for a deck under the player and only then carry
+	# them, which quietly means "you are carried as long as the boat has
+	# not gone anywhere" — the deck has to still be under your feet at the
+	# moment it is looked for. At walking pace that is true and it works.
+	# It stops being true the moment the boat covers more ground in one
+	# frame than you were standing from the edge, which is a lag spike, or
+	# a fast boat, or a passenger near the rail. Then the rider is dropped
+	# into the sea and the boat sails off.
+	#
+	# Being carried is a consequence of having been aboard LAST frame, so
+	# that is what it is based on. Walking off is then still walking off:
+	# the deck test below runs on the carried position and finds nothing.
+	if not _ride_was.is_empty():
+		var was: Dictionary = view.at(_ride_was)
+		if was.is_empty():
+			_ride_was = ""
+		else:
+			if view.driver_of(_ride_was) == player_id:
+				var helm := input.get_move_vector()
+				# Stick forward is throttle, stick sideways is helm.
+				# Nothing to learn and nothing to press.
+				view.drive_mine(_ride_was, -helm.y, helm.x, delta)
+				_ride_send -= delta
+				if _ride_send <= 0.0:
+					_ride_send = 1.0 / RIDE_SEND_HZ
+					world.sv_vehicle_moved.rpc_id(1, _ride_was, slot,
+						Vector3(was.pos), float(was.yaw))
+			var spot := VehicleGeom.to_local(_ride_was_pos, _ride_was_yaw,
+				position)
+			position = VehicleGeom.to_world(Vector3(was.pos), float(was.yaw),
+				spot)
+	var found: Dictionary = view.deck_under(position)
+	var now_id := str(found.get("id", ""))
+	if now_id != ride_id:
+		# Stepping off frees the helm; stepping on asks for it. The server
+		# decides — see VehicleDirector.board — and it is first aboard,
+		# because a five-year-old standing on a boat expects it to go
+		# rather than expecting to find a seat and press something.
+		if not ride_id.is_empty():
+			world.sv_vehicle_leave.rpc_id(1, ride_id, slot)
+		ride_id = now_id
+		if not ride_id.is_empty():
+			world.sv_vehicle_board.rpc_id(1, ride_id, slot)
+	if ride_id.is_empty():
+		_ride_was = ""
+		return
+	var v: Dictionary = view.at(ride_id)
+	if v.is_empty():
+		ride_id = ""
+		_ride_was = ""
+		return
+	# Remembered for next frame's carry: where she was when we last stood
+	# on her, in her own frame.
+	_ride_was = ride_id
+	_ride_was_pos = v.pos
+	_ride_was_yaw = v.yaw
+
+## At the helm of the thing we are standing on.
+func driving() -> bool:
+	if ride_id.is_empty() or world == null or world.vehicle_view == null:
+		return false
+	return world.vehicle_view.driver_of(ride_id) == player_id
+
 func _collides(at: Vector3) -> bool:
 	var min_x := floori(at.x - HALF_WIDTH)
 	var max_x := floori(at.x + HALF_WIDTH)
@@ -632,6 +745,12 @@ func _local_move(delta: float) -> void:
 		camera_yaw = look_yaw
 	var move := input.get_move_vector()
 	var dir := Vector3(move.x, 0, move.y).rotated(Vector3.UP, camera_yaw)
+	# AT THE HELM, the stick steers the boat instead of walking you about
+	# on it — otherwise the driver spends the whole voyage trying to walk
+	# off the front of their own boat. Everyone else aboard keeps their
+	# legs and can move around the deck while it is under way.
+	if driving():
+		dir = Vector3.ZERO
 	var feet := Vector3i(floori(position.x), floori(position.y + 0.3), floori(position.z))
 	in_water = Blocks.is_liquid(_chunks().get_block(feet))
 
@@ -901,6 +1020,7 @@ func _local_move(delta: float) -> void:
 			anim = Anim.FLY
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
+	var deck_y := _deck_floor(next, v_attempt)
 	if _ghost_rise > 0.0 or _lift_to < INF:
 		# Straight through the roof. Somebody knocked out inside their own
 		# fort would otherwise be pinned against its ceiling for the whole
@@ -908,6 +1028,15 @@ func _local_move(delta: float) -> void:
 		# they are already invisible to everyone still playing.
 		next = v_attempt
 		on_floor = false
+	elif deck_y < INF and velocity.y <= 0.0:
+		# A DECK IS A FLOOR. It is not made of blocks, so nothing in the
+		# voxel sweep above can see it — without this you fall through the
+		# boat you are trying to get into.
+		next = Vector3(v_attempt.x, deck_y, v_attempt.z)
+		velocity.y = 0.0
+		on_floor = true
+		if _fly_grace <= 0.0:
+			fly_mode = false
 	elif _collides(v_attempt):
 		var impact := velocity.y
 		if velocity.y < 0.0:
@@ -950,6 +1079,7 @@ func _local_move(delta: float) -> void:
 		next = v_attempt
 		on_floor = false
 	position = next
+	_ride(delta)
 	if fp_mode:
 		heading = Vector3(-sin(look_yaw), 0, -cos(look_yaw))
 		rotation.y = look_yaw
