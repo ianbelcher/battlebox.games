@@ -93,6 +93,20 @@ Things worth knowing:
 - **The log is full of ALSA errors.** There is no sound card. Ignore them;
   the script tells you if there were real script errors.
 
+One check needs a real browser, because what it tests is entirely about
+what a browser will and will not permit:
+
+```sh
+# The loading screen: does the intro play with sound on a first visit,
+# is that remembered, and does the title screen come back if the browser
+# refuses anyway? Run it after touching web/boot.js or web/boot.css.
+CHROME_PATH=/path/to/chrome node tools/boot_test.js
+```
+
+It is not in CI because the build image has no browser and putting one
+there would add hundreds of megabytes to every deploy.
+`tools/webtest_play.js` needs one for the same reason.
+
 Two more checks need a real window and so are not in CI. Run them if you are
 changing menus or controls — synthetic input goes through the display
 server, and headless has none, so both report failure on good code:

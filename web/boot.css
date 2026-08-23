@@ -40,16 +40,24 @@ body.bb-booting #status { display: none !important; }
   background: #000;
 }
 
-/* ---- the gate ------------------------------------------------------
+/* ---- the title screen ----------------------------------------------
  *
- * Shown the instant the page appears, in front of everything, with one
- * button on it. It exists for ONE reason: a browser will not play sound
- * without a user gesture first, so somebody has to click something before
- * the video can be heard. Rather than a muted intro and an apology, the
- * click is made part of the show.
+ * Shown the instant the page appears, in front of everything. It exists
+ * for ONE reason: a browser will not play sound without a user gesture
+ * first, so somebody has to press something before the video can be
+ * heard. Rather than a muted intro and an apology, the press is made part
+ * of the show.
+ *
+ * Since it has to be there, it is the title screen. It used to be an
+ * unlabelled cube above a button, which told a first-time visitor nothing
+ * about what they had just opened.
  *
  * The game and the video both start downloading immediately behind this —
- * the gate costs nothing but the moment it takes to press it. */
+ * the screen costs nothing but the moment it takes to press it. On a
+ * return visit it is usually not shown at all; see boot.js.
+ *
+ * No webfonts: this runs before the engine and outside COEP's reach, so
+ * every family here has to be one the machine already has. */
 #bb-gate {
   position: fixed;
   inset: 0;
@@ -58,52 +66,191 @@ body.bb-booting #status { display: none !important; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: clamp(28px, 5vh, 60px);
-  background: radial-gradient(120% 90% at 50% 35%, #16213a, #080b12 70%);
+  gap: 0;
+  background:
+    radial-gradient(120% 90% at 50% 30%, #1d2b48 0%, #0c1120 55%, #06080e 100%);
   transition: opacity .45s ease;
+  overflow: hidden;
 }
 #bb-gate.bb-gone { opacity: 0; pointer-events: none; }
 
-/* A block, turning. Six faces in CSS — no library, nothing fetched, and
- * COEP blocks anything from a CDN anyway. */
-.bb-stage { perspective: 640px; }
-.bb-cube {
+/* A faint lattice behind everything, drifting. Suggests a world built out
+ * of blocks without drawing one, and costs a single repeating gradient. */
+#bb-gate::before {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .045) 1px, transparent 1px);
+  background-size: 56px 56px;
+  transform: perspective(520px) rotateX(62deg);
+  animation: bb-drift 26s linear infinite;
+  pointer-events: none;
+}
+@keyframes bb-drift {
+  from { background-position: 0 0; }
+  to   { background-position: 0 560px; }
+}
+
+/* Blocks, turning. Six faces each in CSS — no library, nothing fetched,
+ * and COEP blocks anything from a CDN anyway. */
+.bb-stage {
+  perspective: 640px;
   position: relative;
-  width: 132px; height: 132px;
+  width: 100%;
+  height: clamp(150px, 22vh, 210px);
+  margin-bottom: clamp(10px, 2vh, 22px);
+}
+.bb-cube {
+  position: absolute;
+  left: 50%;
+  top: 50%;
   transform-style: preserve-3d;
-  animation: bb-spin 9s linear infinite;
 }
 .bb-cube div {
   position: absolute;
-  width: 132px; height: 132px;
+  inset: 0;
   border: 2px solid rgba(255, 255, 255, .10);
   box-shadow: inset 0 0 44px rgba(0, 0, 0, .45);
 }
 /* Grass-block colours, because that is what the game is made of. */
-.bb-cube .t { background: #7fb84e; transform: rotateX( 90deg) translateZ(66px); }
-.bb-cube .b { background: #6b4a30; transform: rotateX(-90deg) translateZ(66px); }
-.bb-cube .n { background: #8a6242; transform: rotateY(  0deg) translateZ(66px); }
-.bb-cube .s { background: #7d5739; transform: rotateY(180deg) translateZ(66px); }
-.bb-cube .e { background: #966a48; transform: rotateY( 90deg) translateZ(66px); }
-.bb-cube .w { background: #74502f; transform: rotateY(-90deg) translateZ(66px); }
+.bb-cube .t { background: #7fb84e; }
+.bb-cube .b { background: #6b4a30; }
+.bb-cube .n { background: #8a6242; }
+.bb-cube .s { background: #7d5739; }
+.bb-cube .e { background: #966a48; }
+.bb-cube .w { background: #74502f; }
+
+.bb-main { width: 118px; height: 118px; margin: -59px 0 0 -59px; }
+.bb-main div { width: 118px; height: 118px; }
+.bb-main .t { transform: rotateX( 90deg) translateZ(59px); }
+.bb-main .b { transform: rotateX(-90deg) translateZ(59px); }
+.bb-main .n { transform: rotateY(  0deg) translateZ(59px); }
+.bb-main .s { transform: rotateY(180deg) translateZ(59px); }
+.bb-main .e { transform: rotateY( 90deg) translateZ(59px); }
+.bb-main .w { transform: rotateY(-90deg) translateZ(59px); }
+.bb-main { animation: bb-spin 9s linear infinite; }
+
+/* The two behind it: smaller, dimmer, slower, and offset. They are
+ * decoration, so they are hidden on a narrow screen rather than crowding
+ * the one that matters. */
+/* Opacity goes on the FACES, never on the cube. `opacity` builds a
+ * stacking context, which flattens transform-style: preserve-3d — the two
+ * far blocks came out as flat dark slivers that read as rendering
+ * artefacts rather than as distant scenery. */
+.bb-far-a, .bb-far-b { width: 52px; height: 52px; }
+.bb-far-a div, .bb-far-b div { width: 52px; height: 52px; opacity: .42; }
+.bb-far-a .t, .bb-far-b .t { transform: rotateX( 90deg) translateZ(26px); }
+.bb-far-a .b, .bb-far-b .b { transform: rotateX(-90deg) translateZ(26px); }
+.bb-far-a .n, .bb-far-b .n { transform: rotateY(  0deg) translateZ(26px); }
+.bb-far-a .s, .bb-far-b .s { transform: rotateY(180deg) translateZ(26px); }
+.bb-far-a .e, .bb-far-b .e { transform: rotateY( 90deg) translateZ(26px); }
+.bb-far-a .w, .bb-far-b .w { transform: rotateY(-90deg) translateZ(26px); }
+.bb-far-a { margin: -96px 0 0 -188px; animation: bb-spin 17s linear infinite reverse; }
+.bb-far-b { margin:  28px 0 0  136px; animation: bb-spin 21s linear infinite; }
+
 @keyframes bb-spin {
   from { transform: rotateX(-24deg) rotateY(0deg); }
   to   { transform: rotateX(-24deg) rotateY(360deg); }
 }
 
-#bb-enter {
+.bb-title {
+  position: relative;
   font-family: 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif;
   font-weight: 800;
-  letter-spacing: .2em;
-  font-size: clamp(16px, 2.2vw, 24px);
+  font-size: clamp(40px, 7.6vw, 88px);
+  letter-spacing: .012em;
+  line-height: 1;
+  color: #ffd166;
+  /* A hard offset shadow rather than a blur: everything in this game has
+   * square edges, including the letters. */
+  text-shadow: 0 5px 0 #8a6216, 0 10px 30px rgba(0, 0, 0, .65);
+}
+
+.bb-tagline {
+  position: relative;
+  margin-top: clamp(10px, 1.6vh, 18px);
+  font-family: 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif;
+  font-size: clamp(13px, 1.7vw, 19px);
+  letter-spacing: .04em;
+  color: rgba(226, 236, 255, .72);
+}
+
+#bb-enter {
+  position: relative;
+  margin-top: clamp(26px, 4.6vh, 52px);
+  display: inline-flex;
+  align-items: center;
+  gap: .6em;
+  font-family: 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif;
+  font-weight: 800;
+  letter-spacing: .18em;
+  font-size: clamp(17px, 2.3vw, 26px);
+  text-transform: uppercase;
   color: #14202f;
-  background: linear-gradient(180deg, #ffd166, #f0a93c);
+  background: linear-gradient(180deg, #ffd97f, #f0a93c);
   border: 0;
   border-radius: 999px;
-  padding: clamp(14px, 2vh, 20px) clamp(40px, 6vw, 74px);
+  padding: clamp(15px, 2.1vh, 21px) clamp(46px, 6.4vw, 82px);
   cursor: pointer;
   box-shadow: 0 8px 0 #8a6216, 0 14px 34px rgba(0, 0, 0, .5);
   transition: transform .12s ease, box-shadow .12s ease;
 }
 #bb-enter:hover { transform: translateY(-2px); }
 #bb-enter:active { transform: translateY(5px); box-shadow: 0 3px 0 #8a6216; }
+/* The button is focused on arrival, so this is on screen for everybody
+ * who lands here with a keyboard — it has to look deliberate rather than
+ * like a rendering fault around the one button on the page. */
+#bb-enter:focus-visible {
+  outline: 3px solid rgba(255, 236, 190, .9);
+  outline-offset: 6px;
+}
+/* Drawn rather than typed: a ▶ character depends on a font the machine
+ * may not have, and a missing glyph on the Play button is a tofu box on
+ * the first screen of the game. */
+.bb-tri {
+  width: 0; height: 0;
+  border-left: .72em solid currentColor;
+  border-top: .44em solid transparent;
+  border-bottom: .44em solid transparent;
+}
+
+/* What is happening behind the screen. Pressing early is remembered
+ * anyway, so this is not an instruction — it is the difference between
+ * "this page is broken" and "this page is working". */
+.bb-status {
+  position: relative;
+  margin-top: clamp(14px, 2.2vh, 22px);
+  font-family: 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif;
+  font-size: clamp(11px, 1.3vw, 14px);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: rgba(226, 236, 255, .40);
+  animation: bb-pulse 1.9s ease-in-out infinite;
+}
+.bb-status.bb-ready { color: rgba(140, 220, 150, .85); animation: none; }
+@keyframes bb-pulse { 50% { opacity: .42; } }
+
+.bb-hint {
+  position: absolute;
+  bottom: clamp(18px, 3.4vh, 34px);
+  font-family: 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif;
+  font-size: clamp(11px, 1.3vw, 14px);
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: rgba(226, 236, 255, .28);
+}
+
+@media (max-height: 560px) {
+  .bb-stage { height: 108px; }
+  .bb-hint { display: none; }
+}
+@media (max-width: 560px) {
+  .bb-far-a, .bb-far-b { display: none; }
+}
+/* Someone who has asked for less movement should get a still screen, not
+ * three spinning blocks and a drifting floor. */
+@media (prefers-reduced-motion: reduce) {
+  .bb-cube, #bb-gate::before, .bb-status { animation: none; }
+}
