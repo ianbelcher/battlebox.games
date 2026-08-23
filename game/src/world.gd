@@ -2727,7 +2727,14 @@ func cl_flare(pos: Vector3, team: int) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func cl_smoke(pos: Vector3, team: int) -> void:
-	fx.drop_smoke_marker()
+	# `call_local`, so this runs on the SERVER as well — where there is no
+	# fx node and no chunk view, because neither is built for a headless
+	# world. `chunks` was guarded and `fx` was not, so every smoke round
+	# fired threw a script error on the server. Harmless to the game and
+	# very loud in a log, which is worse than it sounds: a log full of
+	# errors is a log nobody reads the next one in.
+	if fx != null:
+		fx.drop_smoke_marker()
 	if chunks == null:
 		return
 	var tint: Color = TEAM_COLORS[team] if team >= 0 and team < TEAM_COLORS.size() \
@@ -2781,7 +2788,9 @@ func cl_smoke(pos: Vector3, team: int) -> void:
 
 @rpc("authority", "call_local", "reliable")
 func cl_smoke_clear() -> void:
-	fx.drop_smoke_marker()
+	# Server-side too — see cl_smoke.
+	if fx != null:
+		fx.drop_smoke_marker()
 
 
 @rpc("authority", "reliable")

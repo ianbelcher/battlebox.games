@@ -137,9 +137,38 @@ func redistribute() -> void:
 		counts[best] += 1
 	Game.cl_roster.rpc(Game.roster)
 
+## THE NEAREST ENEMY THIS ONE CAN ACTUALLY SEE.
+##
+## It was the nearest enemy full stop — distance alone, no line of sight —
+## so a computer player noticed you through a hill, chased you through a
+## wall, and turned to face you while you were stood behind a building it
+## had never had a view of. At the top skill that reached fifty-five
+## blocks in every direction, through anything.
+##
+## It is also what made the quiet walk pointless: creeping silences your
+## footsteps, and they were never listening, they were looking through
+## the map.
+##
+## Every caller wants the same thing and always did — who is chasing me,
+## who do I run from, is anybody in sight before I start laying blocks —
+## so the fix is one function. The comment at the cover-building site has
+## said "there is nobody in sight" all along; it is true now.
+##
+## BOUNDED WORK. A line of sight test is a walk along the ray, and doing
+## one per enemy per think for fifty players is real time. Candidates are
+## sorted by distance and tested nearest-first, stopping at the first one
+## visible — so the usual answer costs one, and the worst case (nobody
+## visible at all) is capped. If the six nearest are all behind something,
+## nobody is chasing you.
+const SIGHT_TRIES := 6
+
+## How long a computer player keeps going to the last place it saw
+## somebody. Short: it is "go and look", not "follow you round a corner
+## you left ten seconds ago".
+const SIGHT_MEMORY_MS := 4000
+
 func _bot_nearest_enemy(id: String, pos: Vector3, radius: float) -> String:
-	var best := ""
-	var best_dist := radius
+	var near: Array = []
 	for other: String in world.match_alive.keys():
 		if other == id or world.downed_ids.has(other) or not world.teams_differ(id, other):
 			continue
@@ -147,10 +176,23 @@ func _bot_nearest_enemy(id: String, pos: Vector3, radius: float) -> String:
 		if other_state.is_empty():
 			continue
 		var d: float = pos.distance_to(other_state.pos)
-		if d < best_dist:
-			best_dist = d
-			best = other
-	return best
+		if d < radius:
+			near.append([d, other])
+	if near.is_empty():
+		return ""
+	near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	# The same two points the SHOT is tested between, so "I can see you"
+	# and "I can hit you" cannot disagree.
+	var eye := pos + Vector3(0, 1.4, 0)
+	var tried := 0
+	for entry: Array in near:
+		if tried >= SIGHT_TRIES:
+			break
+		tried += 1
+		var at: Vector3 = world.player_state[entry[1]].pos
+		if world.clear_shot(eye, at + Vector3(0, 1.0, 0)):
+			return str(entry[1])
+	return ""
 
 ## How far away an enemy can still be covering a spot. Beyond this nobody
 ## is realistically shooting at you, whatever the sight lines.
@@ -566,6 +608,19 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 		# near the fight, a deadly one comes straight at you.
 		var nerve: float = float(bot.get("nerve", 0.6))
 		var enemy := _bot_nearest_enemy(id, pos, lerpf(16.0, 34.0, nerve))
+		# THEY REMEMBER WHERE YOU WENT, for a few seconds.
+		#
+		# Without this, needing line of sight makes them twitch: you step
+		# behind a wall, they forget you instantly and wander off, you
+		# step out, they charge again. That reads as broken rather than
+		# as fair. Losing sight of somebody should mean going to where
+		# they were and having a look, which is what a person does.
+		if enemy != "":
+			bot.saw_at = Vector3(world.player_state[enemy].pos)
+			bot.saw_ms = Time.get_ticks_msec()
+		elif int(bot.get("saw_ms", 0)) > 0 \
+				and Time.get_ticks_msec() - int(bot.saw_ms) < SIGHT_MEMORY_MS:
+			return Vector3(bot.get("saw_at", pos))
 		if enemy != "" and randf() < 0.35 + nerve * 0.65:
 			var epos: Vector3 = world.player_state[enemy].pos
 			var standoff := 1.2 if int(bot.weapon) == 13 \
