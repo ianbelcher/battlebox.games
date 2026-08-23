@@ -661,7 +661,7 @@ func _on_connected() -> void:
 		if not MatchUi.final_table_shows(str(Game.world.match_phase)):
 			final_scores.hide_now()
 		if Game.world.match_phase == "COUNTDOWN":
-			_show_banner("Next battle starting soon — fresh map incoming!"))
+			_news("Next battle starting soon — fresh map incoming!"))
 	world.match_won.connect(func(winner: int) -> void:
 		# The scoreboard says who won, how many games they have taken and
 		# what everybody scored — so no banner on top of it.
@@ -671,7 +671,7 @@ func _on_connected() -> void:
 	world.reset_vote_started.connect(func() -> void: _vote_panel.visible = true)
 	world.reset_result.connect(func(happened: bool) -> void:
 		_vote_panel.visible = false
-		_show_banner("A brand new world!" if happened else "Map reset was voted down"))
+		_news("A brand new world!" if happened else "Map reset was voted down"))
 	world.survival_ended.connect(func(seconds: float, bonked: int) -> void:
 		_show_banner("You survived %d:%02d and bonked %d Grumps!" % [
 			int(seconds / 60.0), int(seconds) % 60, bonked])
@@ -693,7 +693,7 @@ func _on_connected() -> void:
 		for input in seats:
 			Game.join_local(input as InputSlot)
 		_split.update_layout()
-		_show_banner("Back in the world!")
+		_news("Back in the world!")
 	_maybe_start_autotest()
 
 ## WORLD_AUTOTEST=<n>: join n bot players who wander, dig and build — lets a
@@ -1074,6 +1074,19 @@ func _update_cursor_release() -> void:
 		return
 	_split.world_menu_open = (_world_menu != null and _world_menu.visible) \
 		or is_instance_valid(final_scores.panel)
+
+## News for every player sharing this screen, in the corner each of them
+## already watches for the match clock. Falls back to the big banner when
+## there is no HUD yet — before anyone has joined, that is the only place
+## a message could go.
+func _news(text: String) -> void:
+	var huds := get_tree().get_nodes_in_group("player_hud")
+	if huds.is_empty():
+		_show_banner(text)
+		return
+	for hud: Node in huds:
+		if is_instance_valid(hud) and hud.has_method("news"):
+			hud.news(text)
 
 func _show_banner(text: String, sticky := false) -> void:
 	_loading_label.visible = false

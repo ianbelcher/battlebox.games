@@ -5,13 +5,16 @@ extends Node
 ## The server (peer 1) owns the roster; the World node (created here, same
 ## path everywhere) handles everything spatial.
 
-## 24, and we tried 100 to find out why. It was dodgy — not on the server,
-## which held up, but in the BROWSER, where every one of those players is
-## a mesh to skin and every shot is a particle system to run.
+## 50. We tried 100 to find out where it broke, and it broke — not on the
+## server, which held up, but in the BROWSER, where every one of those
+## players is a mesh to skin and every shot is a particle system to run.
+## It sat at 24 after that, which was comfortable and small.
 ##
-## 24 is also the number the teams want: six fours, four sixes, or close
-## enough to five fives.
-const MAX_PLAYERS := 24
+## 50 is the middle of the two: five tens, or ten fives, and half the load
+## that was measured as too much. The ceiling on simultaneous explosions
+## is what actually protects the frame rate here (see WorldFx), and that
+## is unchanged.
+const MAX_PLAYERS := 50
 const MAX_LOCAL := 4
 
 ## People get animals, computers get the phonetic alphabet. Two name
@@ -196,7 +199,7 @@ var profile_keys: Dictionary = {}
 ## Three, because no one of them has the lot: DejaVu has the box-drawing
 ## and card suits, Noto Sans Symbols has the circled letters (and ONLY it
 ## does — Symbols 2 does not, despite the name), Noto Emoji has the rest.
-const WEB_FONTS := [
+const BUNDLED_FONTS := [
 	"res://assets/fonts/DejaVuSans.ttf",
 	"res://assets/fonts/NotoSansSymbols-Regular.ttf",
 	"res://assets/fonts/NotoEmoji-Regular.ttf",
@@ -271,14 +274,25 @@ func _ready() -> void:
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 
-## Web only, deliberately. On a desktop the system fonts already do this
-## job and do it better — macOS draws these in colour — so bundling ours
-## ahead of them would be a downgrade nobody asked for.
+## Everywhere except macOS and Windows, where the system fonts already do
+## this job and do it better — both draw these in colour — so putting ours
+## in front of them would be a downgrade nobody asked for.
+##
+## IT USED TO BE WEB ONLY, on the reasoning that a desktop has fonts to
+## borrow. A Linux box very often does not: no emoji font is installed by
+## default on a server image or a bare desktop, so the trophy on the match
+## clock and the robot beside the player count came out as boxes with
+## their code point in them — the exact failure the bundled fonts exist to
+## prevent, on the one platform that was excluded from the fix.
+##
+## It also made tools/screenshot.sh lie. That runs here, on Linux, and is
+## the thing this repository uses to LOOK at the interface; a picture that
+## shows tofu where a browser shows a trophy is worse than no picture.
 func _install_fallback_fonts() -> void:
-	if not OS.has_feature("web"):
+	if OS.has_feature("macos") or OS.has_feature("windows"):
 		return
 	var extra: Array[Font] = []
-	for path: String in WEB_FONTS:
+	for path: String in BUNDLED_FONTS:
 		var font := load(path) as Font
 		if font != null:
 			extra.append(font)

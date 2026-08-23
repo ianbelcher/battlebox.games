@@ -39,7 +39,7 @@ var client_fly := false
 var client_drop := false
 var client_ctf_revive := true
 var client_ctf_target := 3
-var client_team_names: Array = TEAM_NAMES.slice(0, 4)
+var client_team_names: Array = TEAM_NAMES.slice(0, DEFAULT_TEAMS)
 var client_world := ""
 var client_mode := "creative"
 var map_list: Array = []
@@ -167,7 +167,13 @@ const TEAM_COLORS := [Color("ff5a5a"), Color("4a9df8"), Color("51c979"),
 	Color("e040e0"), Color("909020"), Color("7ec8ff"), Color("ff8a70"),
 	Color("8858d8"), Color("90e8b8"), Color("708098"), Color("ffc8a0"),
 	Color("484858")]
-var team_count := 4
+## FIVE. With a cap of 50 that is ten a side, and five is also enough
+## colours for a table of children to each want a different one.
+const DEFAULT_TEAMS := 5
+## How many computer players a new world starts with. Enough for a game
+## to be a game the moment somebody walks in.
+const DEFAULT_BOTS := 5
+var team_count := DEFAULT_TEAMS
 var selected_map := ""
 ## "battle" = matches loop continuously · "creative" = free build/play.
 var game_mode := "creative"
@@ -179,7 +185,7 @@ const MERCY_MS := 2000
 ## Players view. Size always equals team_count.
 ## Named after their colour — "Blue" — never "B". A child cannot be asked
 ## to remember which letter they were.
-var team_names: Array = TEAM_NAMES.slice(0, 4)
+var team_names: Array = TEAM_NAMES.slice(0, DEFAULT_TEAMS)
 var match_phase := "IDLE"
 ## Soft edge for players: the world's hard chunk bound plus a splash of
 ## swimmable ocean — nobody drifts into the infinite procedural sea.
@@ -293,6 +299,16 @@ func _server_setup() -> void:
 	clock = _random_clock()
 	print("World spawn at %s, clock %.2f" % [spawn_pos, clock])
 	_load_battle_setup()
+	# SOMEBODY TO PLAY AGAINST, without anybody having to go and ask for
+	# them. A fresh world had nobody in it at all, so the first child in
+	# is alone in a field until an adult opens the world menu and presses
+	# a button five times.
+	#
+	# Added here rather than when the first player arrives, so the number
+	# is a property of the world and not of who is looking at it — the
+	# host can add or remove them from the Players tab like any other.
+	for _i in DEFAULT_BOTS:
+		bots.spawn()
 	var trim := Timer.new()
 	trim.wait_time = CACHE_TRIM_SECONDS
 	trim.timeout.connect(_server_trim_cache)

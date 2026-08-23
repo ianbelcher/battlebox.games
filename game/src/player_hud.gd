@@ -18,6 +18,11 @@ var _name_label: Label
 var _name_edit: LineEdit
 var _treasure_label: Label
 var _storm_label: Label
+## The card the corner notice sits on, and the one-off message currently
+## being shown in it (empty when the match clock owns the corner).
+var _note_card: PanelContainer
+var _news := ""
+var _news_t := 0.0
 var _death_note: Label
 var _death_flash: ColorRect
 ## The colour draining out of the screen while you are out of the fight.
@@ -364,23 +369,52 @@ func _build_revive_ring() -> void:
 ## The big centre note: lobby countdowns and next-battle timers.
 func _build_center_note() -> void:
 	# Big center note for match phases (lobby countdown, next-battle).
+	# THE CORNER. Everything the world wants to tell this player arrives
+	# here: the match clock, and one-off news like the map having been
+	# replaced. One place, so a player learns where to look once.
+	#
+	# It is a PANEL now, not floating outlined text. Outlined gold over a
+	# bright sky at a distance is not something a child reads across a
+	# room, however large the letters are — and it shared the corner with
+	# the hotbar, so it was competing with the busiest part of the screen
+	# on its own. A dark card behind it is what makes the size count.
+	_note_card = PanelContainer.new()
+	var note_bg := StyleBoxFlat.new()
+	note_bg.bg_color = Color(0.05, 0.06, 0.1, 0.86)
+	note_bg.set_corner_radius_all(_us(12))
+	note_bg.set_content_margin_all(_us(14))
+	note_bg.content_margin_left = _us(20)
+	note_bg.content_margin_right = _us(20)
+	note_bg.border_color = Color("ffd166")
+	note_bg.set_border_width_all(_us(2))
+	_note_card.add_theme_stylebox_override("panel", note_bg)
+	_note_card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	_note_card.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_note_card.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_note_card.offset_right = -_us(14)
+	_note_card.offset_bottom = -_us(124)
+	_note_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_note_card.visible = false
+	add_child(_note_card)
 	_center_note = Label.new()
 	# Big enough to read from across the room. This is the match clock —
 	# "Next battle in 12" — and on a split screen at 26px it was smaller
 	# than the hotbar numbers underneath it, so nobody ever noticed a
-	# round was about to start.
-	_center_note.add_theme_font_size_override("font_size", _us(42))
+	# round was about to start. 42 was still losing to the sky behind it.
+	# A sensible size for the frame before the first layout. The real one
+	# is set in _refresh_crosshair_and_layout, which overrides this the
+	# moment the cell has a size — see the note there.
+	_center_note.add_theme_font_size_override("font_size", _us(34))
 	_center_note.add_theme_color_override("font_color", Color("ffd166"))
 	_center_note.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
-	_center_note.add_theme_constant_override("outline_size", 9)
-	_center_note.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
-	_center_note.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_center_note.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_center_note.offset_right = -_us(12)
-	_center_note.offset_bottom = -_us(116)
+	_center_note.add_theme_constant_override("outline_size", _us(6))
 	_center_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_center_note.visible = false
-	add_child(_center_note)
+	# NO WRAPPING. The card is anchored to the corner and grows leftwards,
+	# so it has no width for a wrap to measure against — turning wrapping
+	# on produced one letter per line down the side of the screen. Every
+	# message that goes here is kept short enough not to need it.
+	_center_note.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_note_card.add_child(_center_note)
 
 ## The storm countdown along the top of the screen.
 func _build_storm_line() -> void:
@@ -1814,7 +1848,18 @@ func _update_clock() -> void:
 		if not holding.is_empty():
 			parts.append(holding)
 		parts.append("%s %02d:00" % ["☾" if night else "☀", hour])
-		parts.append("%d playing" % Game.roster.size())
+		# People, then computer players. The same reason the first screen
+		# splits them: "6 playing" in a room with one child and five bots
+		# is the wrong answer to the only question being asked.
+		var humans := 0
+		var bots := 0
+		for rid: String in Game.roster:
+			if bool(Game.roster[rid].get("bot", false)):
+				bots += 1
+			else:
+				humans += 1
+		parts.append("%d playing" % humans if bots == 0
+			else "%d playing + %d 🤖" % [humans, bots])
 		_selected_label.text = "   ·   ".join(parts)
 
 ## What the player is holding, in words. Empty if their hand is empty.
@@ -2575,22 +2620,43 @@ func _refresh_battle_prompts(player: Player) -> void:
 			_revive_hint.visible = false
 	_update_revive_ring(player)
 
+## Something happened to the WORLD — the map was replaced, you rejoined —
+## said in the same corner the match clock uses.
+##
+## It used to be a lit card in the middle of the screen, over the game, for
+## every one of these. That is the right weight for "you left the game" and
+## far too much for "here is a new map": it covers what a player is looking
+## at to tell them something they can see for themselves.
+func news(text: String, seconds := 5.0) -> void:
+	_news = text
+	_news_t = seconds
+
 ## The centre note, the storm countdown and the death card.
 func _refresh_notices(player: Player, delta: float) -> void:
 	if _center_note != null and world != null:
 		var secs := int(ceil(world.match_seconds))
+		var say := ""
 		if world.match_phase == "LOBBY" and not _menu.visible:
-			_center_note.visible = true
-			_center_note.text = ("🏆  Next battle in %d" % secs) if secs > 0 \
+			say = ("🏆  Next battle in %d" % secs) if secs > 0 \
 				else "🏆  Battle starting…"
 		elif world.match_phase == "BATTLE" and not world.alive_ids.has(
 				Game.player_id(multiplayer.get_unique_id(), slot)) \
 				and not world.ghost_ids.has(
 				Game.player_id(multiplayer.get_unique_id(), slot)):
-			_center_note.visible = true
-			_center_note.text = "🏆  Battle in progress — you drop into the next one!"
-		else:
-			_center_note.visible = false
+			say = "🏆  In the next one!"
+		# News wins the corner while it lasts. It is a one-off — the map
+		# was replaced, you rejoined — and the clock will still be there
+		# in five seconds' time.
+		_news_t = maxf(0.0, _news_t - delta)
+		if _news_t > 0.0 and not _news.is_empty():
+			say = _news
+		elif _news_t <= 0.0:
+			_news = ""
+		_center_note.text = say
+		var showing := not say.is_empty() and not _menu.visible
+		_center_note.visible = showing
+		if _note_card != null:
+			_note_card.visible = showing
 	if _storm_label != null and world != null:
 		var storm_on: bool = world.match_phase == "BATTLE" and world.storm_radius > 0.0
 		# Silent until the storm is actually live — then a real countdown
@@ -2760,8 +2826,18 @@ func _refresh_crosshair_and_layout(player: Player) -> void:
 				"font_size", maxi(11, int(chip_px * 0.38)))
 		_selected_label.add_theme_font_size_override(
 			"font_size", maxi(11, int(chip_px * 0.3)))
+		# THE MATCH CLOCK, and the biggest thing on the screen that is not
+		# the game. This is where "next battle in 4" is read from across a
+		# room by somebody who is not looking for it.
+		#
+		# It was chip_px * 0.36 — about thirteen pixels on a 1280 screen,
+		# smaller than the numbers on the hotbar chips underneath it. That
+		# is the whole of why it was never noticed. The size set when the
+		# label is BUILT does not survive to the screen: this line runs on
+		# the first layout and replaces it, so this is the only number that
+		# has ever mattered.
 		_center_note.add_theme_font_size_override(
-			"font_size", maxi(12, int(chip_px * 0.36)))
+			"font_size", maxi(30, int(chip_px * 1.0)))
 		if _storm_label != null:
 			_storm_label.add_theme_font_size_override(
 				"font_size", maxi(12, int(chip_px * 0.4)))
