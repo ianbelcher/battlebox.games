@@ -430,7 +430,7 @@ func sv_hello() -> void:
 	# already running is exactly what somebody joining a server that has
 	# been up all night walks into.
 	cl_match_state.rpc_id(peer, match_phase, battle._timer,
-		match_alive.keys(), downed_ids.keys(), ghost_ids.keys())
+		match_alive.keys(), downed_ids.keys(), out_ids.keys())
 	if ctf.active() and not ctf._flags.is_empty():
 		cl_flags.rpc_id(peer, ctf._flag_payload(), ctf_scores, ctf_target,
 			ctf_caps, ctf_lost, ctf_player_caps)
@@ -1560,6 +1560,24 @@ func fly_allowed_for(id: String) -> bool:
 	var by_default: bool = battle_fly if multiplayer.is_server() else client_fly
 	return bool(Game.roster.get(id, {}).get("fly", by_default))
 
+## THERE ARE THREE STATES A PLAYER CAN BE IN, and no more: ALIVE, KNOCKED
+## OUT, or OUT. Between them they are exhaustive and exclusive.
+##
+##   alive        in `match_alive`, in neither of the other two
+##   knocked out  in `match_alive` AND `downed_ids` — still in the round,
+##                waiting for a team-mate, or for their own flag in
+##                capture the flag
+##   out          in `out_ids` and nothing else — the whole team went
+##                down at once, and in battle royale that is permanent
+##
+## `out_ids` was called `ghost_ids`, which read as a fourth thing rather
+## than as a name for the third. The word is still around for the LOOK a
+## knocked-out player has, which is a separate idea and now has its own
+## name (Player.set_knocked_out_look).
+##
+## The client keeps its own mirrors — `alive_ids`, `client_downed`,
+## `out_ids` — because it draws them.
+##
 ## Who is still in the fight. id -> true.
 var match_alive: Dictionary = {}
 
@@ -1887,7 +1905,7 @@ signal match_score_changed
 signal flags_changed
 signal flag_taken(id: String, team: int, from_team: int)
 signal knockout(attacker: String, attacker_team: int, victim: String, victim_team: int)
-var ghost_ids: Dictionary = {}
+var out_ids: Dictionary = {}
 ## Client mirror of the flags, for the HUD map. See cl_flags.
 var flags: Array = []
 var client_downed: Dictionary = {}
@@ -1899,7 +1917,7 @@ var alive_ids: Dictionary = {}
 
 ## THE WHOLE ROUND, HANDED TO SOMEBODY WHO HAS JUST ARRIVED.
 ##
-## `cl_match` only fires on a phase CHANGE, and the alive / downed / ghost
+## `cl_match` only fires on a phase CHANGE, and the alive / downed / out
 ## sets are only rebuilt on the SETUP transition — so a client joining a
 ## round already in progress had no picture of it at all. Every team read
 ## "0 of 6" while the computer players shooting at them were, as far as
@@ -1911,7 +1929,7 @@ var alive_ids: Dictionary = {}
 ## built.
 @rpc("authority", "reliable")
 func cl_match_state(phase: String, seconds: float, alive: Array,
-		downed: Array, ghosts: Array) -> void:
+		downed: Array, out_of_it: Array) -> void:
 	match_phase = phase
 	match_seconds = seconds
 	alive_ids.clear()
@@ -1920,15 +1938,15 @@ func cl_match_state(phase: String, seconds: float, alive: Array,
 	client_downed.clear()
 	for id: String in downed:
 		client_downed[id] = true
-	ghost_ids.clear()
-	for id: String in ghosts:
-		ghost_ids[id] = true
+	out_ids.clear()
+	for id: String in out_of_it:
+		out_ids[id] = true
 	for child in players.get_children():
 		if child is Player:
 			var is_down: bool = client_downed.has(child.player_id)
-			var is_out: bool = ghost_ids.has(child.player_id)
+			var is_out: bool = out_ids.has(child.player_id)
 			child.downed = is_down
-			child.set_ghost(is_down)
+			child.set_knocked_out_look(is_down)
 			# The fallen are invisible to everyone still playing; the
 			# downed only to the other team.
 			child.visible = not is_out and ((not is_down) \
@@ -1942,7 +1960,7 @@ func cl_match(phase: String, seconds: float) -> void:
 	match_phase = phase
 	match_seconds = seconds
 	if phase == "SETUP":
-		ghost_ids.clear()
+		out_ids.clear()
 		client_downed.clear()
 		revive_progress.clear()
 		alive_ids.clear()
@@ -1955,18 +1973,18 @@ func cl_match(phase: String, seconds: float) -> void:
 				# downed when the last battle ended dropped out of the sky
 				# still playing their death animation.
 				child.downed = false
-				child.set_ghost(false)
+				child.set_knocked_out_look(false)
 		match_score_changed.emit()
 		_refresh_overheads()
 	elif phase == "IDLE" or phase == "LOBBY":
-		ghost_ids.clear()
+		out_ids.clear()
 		client_downed.clear()
 		revive_progress.clear()
 		for child in players.get_children():
 			if child is Player:
 				child.visible = true
 				child.downed = false
-				child.set_ghost(false)
+				child.set_knocked_out_look(false)
 	if chunks != null:
 		chunks.match_mode = phase != "IDLE"
 	match_changed.emit()
@@ -2020,7 +2038,7 @@ func cl_stand(id: String, pos: Vector3, loot := false, kit: Array = [],
 ## Undo every part of being down, not just the part this file happens to
 ## own.
 func cl_revived(id: String) -> void:
-	ghost_ids.erase(id)
+	out_ids.erase(id)
 	alive_ids[id] = true
 	client_downed.erase(id)
 	hearts[id] = MATCH_HP
@@ -2029,7 +2047,7 @@ func cl_revived(id: String) -> void:
 	for child in players.get_children():
 		if child is Player and child.player_id == id:
 			child.downed = false
-			child.set_ghost(false)
+			child.set_knocked_out_look(false)
 			child.visible = true
 			if child.is_local:
 				# Flying was the way home; it is not a way to keep playing.
@@ -2062,7 +2080,7 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 			# whoever might pick you up. `downed` still gates acting: you
 			# cannot shoot, build or take a flag on the way.
 			child.downed = is_down
-			child.set_ghost(is_down)
+			child.set_knocked_out_look(is_down)
 			# SEEN BY EVERYONE. Downed players used to be hidden from the
 			# other side, so that a body did not advertise where to finish
 			# somebody off. That was the right fix for a body lying in the
@@ -2096,7 +2114,7 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				# or the left trigger, which is what flight already does.
 				child.velocity = Vector3.ZERO
 				child.fly_mode = true
-				child.begin_ghost_rise()
+				child.begin_knockout_rise()
 				Sfx.play("drop", -4.0)
 	_refresh_overheads()
 
@@ -2139,7 +2157,7 @@ func cl_eliminated(id: String) -> void:
 	client_downed.erase(id)
 	hearts[id] = 0
 	hearts_changed.emit()
-	ghost_ids[id] = true
+	out_ids[id] = true
 	alive_ids.erase(id)
 	match_score_changed.emit()
 	for child in players.get_children():
@@ -2157,7 +2175,7 @@ func cl_eliminated(id: String) -> void:
 				# has been had. Doing it twice sends somebody already up there
 				# another ten blocks into the sky for no reason.
 				if not was_down:
-					child.begin_ghost_rise()
+					child.begin_knockout_rise()
 				# Out, but not gone: stay where you fell and wander. You
 				# can fly, you cannot touch anything, and nobody can see
 				# you — so you can go and watch a team-mate, or talk them
@@ -2173,7 +2191,7 @@ func cl_eliminated(id: String) -> void:
 				# back mid-fall if anything made them visible again.
 				child.visible = false
 			child.downed = false
-			child.set_ghost(false)
+			child.set_knocked_out_look(false)
 
 signal match_won(winner: int)
 
@@ -2474,7 +2492,7 @@ func cl_pos(id: String, pos: Vector3, yaw: float, anim: int) -> void:
 	for child in players.get_children():
 		if child is Player and child.player_id == id and not child.is_local:
 			child.remote_update(pos, yaw, anim)
-			if ghost_ids.has(id) and child.visible:
+			if out_ids.has(id) and child.visible:
 				child.visible = false
 
 func _nearest_local_dist(pos: Vector3) -> float:
@@ -2938,7 +2956,7 @@ const CTF_CAPTURE_MSEC := 1500
 
 var ctf_target := 3
 ## Revive ON is the gentle default: knockouts work exactly as they do in
-## Battle Royale. Turn it off and a knockout makes you a GHOST who has to
+## Battle Royale. Turn it off and a knockout puts you straight OUT, and you have to
 ## fly home and touch their own flag to rejoin — which is the version that
 ## makes attacking a distant base a real commitment.
 var ctf_revive := true

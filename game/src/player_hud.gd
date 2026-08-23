@@ -2641,7 +2641,7 @@ func _refresh_notices(player: Player, delta: float) -> void:
 				else "🏆  Battle starting…"
 		elif world.match_phase == "BATTLE" and not world.alive_ids.has(
 				Game.player_id(multiplayer.get_unique_id(), slot)) \
-				and not world.ghost_ids.has(
+				and not world.out_ids.has(
 				Game.player_id(multiplayer.get_unique_id(), slot)):
 			say = "🏆  In the next one!"
 		# News wins the corner while it lasts. It is a one-off — the map
@@ -2669,7 +2669,7 @@ func _refresh_notices(player: Player, delta: float) -> void:
 	if _death_note != null and world != null:
 		var my_pid := Game.player_id(multiplayer.get_unique_id(), slot)
 		var down_now: bool = bool(world.client_downed.get(my_pid, false))
-		var out_now: bool = world.ghost_ids.has(my_pid)
+		var out_now: bool = world.out_ids.has(my_pid)
 		if (down_now and not _was_down) or (out_now and not _was_out):
 			_death_t = 2.6
 			_death_note.text = "💀  KNOCKED OUT!" if out_now \
@@ -2679,7 +2679,7 @@ func _refresh_notices(player: Player, delta: float) -> void:
 		# WHOLE TEAM OUT? Then you are gone from the world entirely —
 		# lifted clear, body hidden, watching from above. While even one
 		# team-mate is still in it you stay down among them as a roaming
-		# ghost, which is the point of being able to talk each other onto
+		# out, which is the point of being able to talk each other onto
 		# a spot.
 		if out_now and not _team_gone_lifted:
 			var my_team := int(Game.roster.get(my_pid, {}).get("team", -2))

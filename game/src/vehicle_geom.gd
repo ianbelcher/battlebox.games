@@ -19,11 +19,13 @@ class_name VehicleGeom
 const KIND_BOAT := 0
 const KIND_CAR := 1
 
-## Twice a run, as asked for. Player.WALK_SPEED is 4.6, so a boat at 9.2
+## Twice a run, as asked for. Player.RUN_SPEED is 5.6, so a boat at 11.2
 ## is exactly double and a car is a shade quicker again because a desert
-## is a bigger, emptier place to cross.
-const BOAT_SPEED := 9.2
-const CAR_SPEED := 11.0
+## is a bigger, emptier place to cross. Both moved when running became
+## the default speed — "twice as fast as normal running" is the promise,
+## and it has to keep being true when running changes.
+const BOAT_SPEED := 11.2
+const CAR_SPEED := 13.4
 ## How fast the nose comes round, in radians a second. Slow enough that a
 ## boat feels like a boat and a five-year-old can hold a heading.
 const BOAT_TURN := 1.5

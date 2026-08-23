@@ -154,7 +154,7 @@ func _physics_process(delta: float) -> void:
 				# floor and died there.
 				if child is Player and child.player_id != orb.shooter_id \
 						and not child.downed \
-						and not world.ghost_ids.has(child.player_id) \
+						and not world.out_ids.has(child.player_id) \
 						and child.position.distance_to(here - Vector3(0, 0.8, 0)) < 1.1:
 					if orb.kind == 1 or orb.kind >= 5:
 						world.sv_shot.rpc_id(1, orb.slot, cell, orb.kind)

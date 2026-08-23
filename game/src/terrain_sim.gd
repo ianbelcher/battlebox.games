@@ -54,7 +54,7 @@ func tick_boom_traps() -> void:
 		return
 	var now := Time.get_ticks_msec()
 	for id: String in world.player_state.keys():
-		if world.downed_ids.has(id) or world.ghost_ids.has(id):
+		if world.downed_ids.has(id) or world.out_ids.has(id):
 			continue
 		var at: Vector3 = world.player_state[id].get("pos", Vector3.INF)
 		if at == Vector3.INF:

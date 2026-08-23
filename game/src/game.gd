@@ -413,7 +413,7 @@ func sv_register_player(slot: int, pname: String, style: Dictionary, bot := fals
 			return
 		# Humans ALWAYS get a seat: a full roster evicts a computer
 		# player rather than silently ignoring a real person (this
-		# stranded joins as unplaced ghosts when restored bots filled
+		# stranded joins as unplaced nobodies when restored bots filled
 		# the server).
 		var evict := ""
 		for other: String in roster.keys():

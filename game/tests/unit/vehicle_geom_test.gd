@@ -10,7 +10,7 @@ extends TestCase
 ## and a screenshot is one frame of a moving boat.
 
 func test_a_boat_does_twice_a_running_pace() -> void:
-	equal(VehicleGeom.BOAT_SPEED, Player.WALK_SPEED * 2.0,
+	equal(VehicleGeom.BOAT_SPEED, Player.RUN_SPEED * 2.0,
 		"twice a run, which is the whole point of getting in one")
 
 func test_a_boat_is_longer_than_it_is_wide() -> void:

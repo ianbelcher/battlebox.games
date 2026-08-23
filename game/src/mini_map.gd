@@ -80,7 +80,7 @@ func _draw_big_map() -> void:
 	# Everyone playing, as a fat blip — this is a radar, the ground is
 	# only there so you can tell where the blips ARE.
 	for child in hud.world.players.get_children():
-		if child is Player and not hud.world.ghost_ids.has(child.player_id):
+		if child is Player and not hud.world.out_ids.has(child.player_id):
 			var team := int(Game.roster.get(child.player_id, {}).get("team", -1))
 			var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
 				else Color.WHITE
@@ -252,7 +252,7 @@ func _update_radar() -> void:
 		{}).get("team", -1))
 	for child in hud.world.players.get_children():
 		if child is Player and child != player and child.visible \
-				and not hud.world.ghost_ids.has(child.player_id):
+				and not hud.world.out_ids.has(child.player_id):
 			var team := int(Game.roster.get(child.player_id, {}).get("team", -1))
 			var blip_color: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
 				else Color("ff4426")

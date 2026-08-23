@@ -251,6 +251,26 @@ func get_ui_vector() -> Vector2:
 
 ## Sprint is retired — walking is the normal pace now.
 ## Triggers cycle the menu's TOP-LEVEL group (Build / Game / Options).
+## FINE AIM: hold the right stick IN and the look slows to a quarter.
+##
+## The look curve already gives a gentle bottom end, and that helps with
+## the small corrections you make without thinking. It does not help with
+## the deliberate ones — lining up on somebody across a field — because
+## there the stick is well off centre and firmly in the fast part of the
+## curve. A modifier is the answer to that, and it has to be a MODIFIER
+## rather than a setting: you want it for the second before you shoot and
+## not for the rest of the round.
+##
+## The right stick's own button, because it is the stick you are already
+## holding to aim with. Nothing to reach for.
+const PRECISION_SCALE := 0.25
+
+func is_precision_pressed() -> bool:
+	match kind:
+		Kind.GAMEPAD:
+			return Input.is_joy_button_pressed(device, JOY_BUTTON_RIGHT_STICK)
+	return false
+
 func is_sprint_pressed() -> bool:
 	return false
 
@@ -344,7 +364,10 @@ func get_look_vector() -> Vector2:
 	# than at a step: without this the first registered input is already
 	# DEADZONE-sized and the fine control is gone before it starts.
 	var t := clampf((mag - DEADZONE) / (1.0 - DEADZONE), 0.0, 1.0)
-	return v.normalized() * look_response(t)
+	var scale := PRECISION_SCALE if is_precision_pressed() else 1.0
+	# Applied HERE rather than at each camera, so it covers first person,
+	# the orbit view and anything added later without being remembered.
+	return v.normalized() * look_response(t) * scale
 
 ## Spin the camera a quarter turn. Returns -1, 0 or +1 (caller edge-latches).
 func rotate_direction() -> int:

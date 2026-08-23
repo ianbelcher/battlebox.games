@@ -366,12 +366,12 @@ func ctf_goal(id: String, pos: Vector3) -> Vector3:
 		return Vector3.INF
 	var mine: Dictionary = world.ctf._flags.get(team, {})
 	var home: Vector3 = mine.get("home", Vector3.INF)
-	# A GHOST WALKS HOME. Same rule a person plays by — get to your own
+	# SOMEBODY WHO IS OUT WALKS HOME. Same rule a person plays by — get to your own
 	# flag and tag up. It used to have no idea where home was: a knocked
 	# out bot wandered at random until an eight-second timer teleported it
 	# back, so on the field it looked like it had forgotten the way and was
 	# trying to bring itself round on the spot.
-	if world.ghost_ids.has(id):
+	if world.out_ids.has(id):
 		return home
 	if _bot_ctf_defends(id, team) and home != Vector3.INF:
 		# The keeper. Anyone closing on our flag is the job; otherwise
@@ -492,11 +492,11 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 	# GETTING HOME COMES FIRST. Before the storm, before a fight, before
 	# anything: if you are out of the round, the only thing that matters is
 	# reaching your own flag and tagging back in. Nothing below this is a
-	# job a ghost can do — it cannot shoot, cannot be shot, cannot pick
+	# job somebody who is OUT can do — they cannot shoot, cannot be shot, cannot pick
 	# anyone up and cannot take a flag — so any other goal is a knocked-out
 	# computer player wandering the map for no reason, which is exactly
 	# what it looked like on the field.
-	if world.ctf.active() and world.ghost_ids.has(id):
+	if world.ctf.active() and world.out_ids.has(id):
 		var back := ctf_goal(id, pos)
 		if back != Vector3.INF:
 			return back
@@ -642,9 +642,9 @@ func _bot_dig_out(id: String, bot: Dictionary, pos: Vector3, dir: Vector2) -> vo
 const BOT_CLIMB_BUDGET := 12
 
 func _bot_build_out(id: String, bot: Dictionary, pos: Vector3, dir: Vector2) -> void:
-	# A ghost cannot touch the world — it goes round, or it waits for the
+	# Somebody who is OUT cannot touch the world — they go round, or wait for the
 	# BOT_RETURN_MS backstop.
-	if world.ghost_ids.has(id):
+	if world.out_ids.has(id):
 		return
 	if float(bot.get("build_out_cd", 0.0)) > 0.0:
 		return
@@ -972,7 +972,13 @@ func _apply_skill(bot: Dictionary) -> void:
 	# fires once every two seconds is a scarecrow.
 	bot.spread = lerpf(0.115, 0.016, skill)
 	bot.sight = lerpf(22.0, 55.0, skill)        # blocks
-	bot.speed = lerpf(2.7, 4.1, skill)          # blocks per second
+	# THE SAME SORT OF PACE AS A PERSON. It was 2.7 to 4.1 against a
+	# player's 4.6, so every computer player in the game was slower than
+	# everybody at the table and none of them could ever catch anyone.
+	# Centred on Player.RUN_SPEED now, and still spread: the worst of them
+	# are slower than you and the best are slightly quicker, which is what
+	# makes it worth knowing which one you are being chased by.
+	bot.speed = lerpf(4.4, 6.0, skill)          # blocks per second
 	bot.nerve = lerpf(0.15, 0.9, skill)
 	bot.tier = BOT_SKILL_NAMES[clampi(int(skill * 4.0), 0, 3)]
 
@@ -1125,9 +1131,9 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, delta: float) -> v
 ##   drop out of the sky the moment it cleared the wall
 func _bot_cruise_y(id: String, bot: Dictionary, flat: Vector2,
 		floor_y: float, delta: float) -> float:
-	# A ghost cannot touch the world and a downed bot is crawling; neither
+	# Somebody OUT cannot touch the world and a downed bot is crawling; neither
 	# has any business in the air.
-	if world.downed_ids.has(id) or world.ghost_ids.has(id) \
+	if world.downed_ids.has(id) or world.out_ids.has(id) \
 			or not world.fly_allowed_for(id):
 		bot.flying = false
 		return INF
@@ -1161,7 +1167,7 @@ func _bot_sap(id: String, bot: Dictionary, pos: Vector3) -> void:
 	if float(bot.get("dig_cd", 0.0)) > 0.0:
 		return
 	var target: Vector3 = bot.get("sap_at", Vector3.INF)
-	if target == Vector3.INF or world.ghost_ids.has(id) or world.downed_ids.has(id):
+	if target == Vector3.INF or world.out_ids.has(id) or world.downed_ids.has(id):
 		return
 	var ground := float(world.store.surface_y(floori(pos.x), floori(pos.z)))
 	var want_y := minf(target.y - 1.0, ground - SAP_DEPTH)
@@ -1206,11 +1212,11 @@ func _bot_downed_y(id: String, pos: Vector3, delta: float) -> float:
 		return INF
 	var down_for := float(Time.get_ticks_msec()
 		- int(world.downed_ids.get(id, 0))) * 0.001
-	if down_for >= Player.GHOST_RISE_SECONDS:
+	if down_for >= Player.KNOCKOUT_RISE_SECONDS:
 		# The rise is done. INF hands the way down back to the ordinary
 		# ground handling, which glides anything above the floor down.
 		return INF
-	return pos.y + (Player.GHOST_RISE_BLOCKS / Player.GHOST_RISE_SECONDS) * delta
+	return pos.y + (Player.KNOCKOUT_RISE_BLOCKS / Player.KNOCKOUT_RISE_SECONDS) * delta
 
 func _bot_settle_ground(id: String, bot: Dictionary, delta: float) -> void:
 	var pos: Vector3 = bot.pos
@@ -1392,12 +1398,12 @@ func tick(delta: float) -> void:
 				# player can do. Dug towards the GOAL, since there is no
 				# steering direction left to use.
 				#
-				# Not while out of the round, though. A ghost cannot touch
+				# Not while out of the round, though. They cannot touch
 				# anything — that is the whole deal — so one walking home
 				# must not chew its way through the landscape to get
 				# there. It goes round, or the BOT_RETURN_MS backstop
 				# brings it in.
-				if not world.ghost_ids.has(id):
+				if not world.out_ids.has(id):
 					_bot_dig_out(id, bot, pos, flat.normalized())
 					# ...and if digging is not getting us anywhere, BUILD.
 					# A crater is not a wall problem, it is an up problem,
@@ -1461,9 +1467,9 @@ func tick(delta: float) -> void:
 						# from wall to wall, never trips the "nowhere to
 						# go" case, and never builds itself a way out.
 						# Being wedged is the signal that matters.
-						# Ghosts never dig or build: they cannot touch the
+						# The out never dig or build: they cannot touch the
 						# world.
-						if not world.ghost_ids.has(id):
+						if not world.out_ids.has(id):
 							var want := Vector2(bot.goal.x - pos.x,
 								bot.goal.z - pos.z)
 							if want.length() > 0.001:

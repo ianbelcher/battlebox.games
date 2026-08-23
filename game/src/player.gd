@@ -64,20 +64,34 @@ var _climbing := false
 const BOUNCE_GAIN_BLOCKS := 1.0
 const BOUNCE_CEILING_BLOCKS := 40.0
 const JUMP_VELOCITY := 8.6
-const WALK_SPEED := 4.6
-const SWIM_SPEED := 3.0
+## RUNNING IS THE DEFAULT, and there is nothing to hold down for it.
+##
+## There was a sprint, and it did nothing: `is_sprint_pressed()` returns
+## false and always has, so the 1.55x branch in _local_move was dead code
+## and everybody has been moving at one speed the whole time. Rather than
+## bind a button nobody would find, the one speed IS the run — which is
+## what a child expects from a stick pushed all the way forward anyway.
+##
+## 5.6 is Minecraft's sprint, up from 4.6, which was its walk. Sneak
+## (Shift, or the left stick pressed in) still halves it, and halving a
+## run is a more useful quiet walk than halving a walk was.
+const RUN_SPEED := 5.6
+## Kept in proportion with the run rather than left where it was. Water
+## is already the slow part of the map; making the land faster and not
+## the water would have widened that on its own.
+const SWIM_SPEED := 3.6
 
 ## How fast you fly once you are OUT of the round.
 ##
-## Faster than running, deliberately. A ghost is not playing: it is
+## Faster than running, deliberately. Somebody who is out is not playing: they are
 ## travelling back to its own flag to rejoin, and every second of that is
 ## dead time for the person holding the controller. It used to share the
 ## creative-mode flying speed, which is tuned for pottering about building
 ## things rather than for crossing the map with something to do at the far
 ## end.
-const GHOST_FLY_SPEED := 11.0
+const OUT_FLY_SPEED := 11.0
 
-## THE GHOST RISE: how far you drift up when you are knocked out, and how
+## THE KNOCKOUT RISE: how far you drift up when you are knocked out, and how
 ## long it takes. Being out used to leave you standing on the spot you
 ## died on, at ground level, in the middle of whatever killed you, with no
 ## sign that anything had changed except that nothing worked any more.
@@ -86,14 +100,14 @@ const GHOST_FLY_SPEED := 11.0
 ##
 ## It is a NUDGE, not a cutscene: you keep full control the whole way up
 ## and any input of your own takes over immediately.
-const GHOST_RISE_BLOCKS := 10.0
-const GHOST_RISE_SECONDS := 3.0
+const KNOCKOUT_RISE_BLOCKS := 10.0
+const KNOCKOUT_RISE_SECONDS := 3.0
 ## Being knocked out leaves you FLYING, at the top of the rise. Coming
 ## back down is the two things flight already does and every player
 ## already knows: double-tap Ⓐ to stop flying and drop, or hold the left
 ## trigger and let go of it. No separate falling mode to learn, and no
 ## mode that only exists while you are knocked out.
-var _ghost_rise := 0.0
+var _knockout_rise := 0.0
 ## Climbing clear of the map, once your whole team is out and there is
 ## nobody left down there to watch. Height to reach, or INF for "stay
 ## where you are".
@@ -108,7 +122,7 @@ var _ghost_rise := 0.0
 var _lift_to := INF
 const SPECTATOR_LIFT_SPEED := 7.0
 
-## Go up and watch from there. Takes effect after any ghost rise already
+## Go up and watch from there. Takes effect after any knockout rise already
 ## running, because that one is the one with the timing promise on it.
 func lift_clear_to(height: float) -> void:
 	_lift_to = height
@@ -126,7 +140,7 @@ func revive_locked() -> bool:
 		return false
 	if world.revive_progress.has(player_id):
 		return true      # being picked up
-	if downed or world.ghost_ids.has(player_id):
+	if downed or world.out_ids.has(player_id):
 		return false     # you cannot pick anybody up in either state
 	var my_team := int(Game.roster.get(player_id, {}).get("team", -1))
 	for rid: String in world.revive_progress.keys():
@@ -148,8 +162,8 @@ var capture_lock := 0.0
 func begin_capture_hold(seconds: float) -> void:
 	capture_lock = seconds
 
-func begin_ghost_rise() -> void:
-	_ghost_rise = GHOST_RISE_SECONDS
+func begin_knockout_rise() -> void:
+	_knockout_rise = KNOCKOUT_RISE_SECONDS
 	# A grapple in flight OUTLIVES you otherwise, and a zip is a teleport:
 	# it snaps you to its last waypoint at sixty blocks a second, so being
 	# knocked out mid-swing threw the body across the map and started the
@@ -396,24 +410,24 @@ func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 ## avatars are assembled from parts with their own materials, several of
 ## them shared between players, and anything short of replacing the
 ## material leaves somebody's shirt showing through.
-static var _ghost_skin: StandardMaterial3D = null
+static var _knocked_out_skin: StandardMaterial3D = null
 
-static func ghost_skin() -> StandardMaterial3D:
-	if _ghost_skin == null:
-		_ghost_skin = StandardMaterial3D.new()
-		_ghost_skin.albedo_color = Color(0.66, 0.68, 0.74, 0.42)
-		_ghost_skin.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_ghost_skin.roughness = 1.0
+static func knocked_out_skin() -> StandardMaterial3D:
+	if _knocked_out_skin == null:
+		_knocked_out_skin = StandardMaterial3D.new()
+		_knocked_out_skin.albedo_color = Color(0.66, 0.68, 0.74, 0.42)
+		_knocked_out_skin.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_knocked_out_skin.roughness = 1.0
 		# Barely lit: a ghost should not pick up the sunset like everyone
 		# else, or it goes orange and stops reading as grey at all.
-		_ghost_skin.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-		_ghost_skin.emission_enabled = true
-		_ghost_skin.emission = Color(0.30, 0.32, 0.36)
-		_ghost_skin.emission_energy_multiplier = 0.5
-	return _ghost_skin
+		_knocked_out_skin.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+		_knocked_out_skin.emission_enabled = true
+		_knocked_out_skin.emission = Color(0.30, 0.32, 0.36)
+		_knocked_out_skin.emission_energy_multiplier = 0.5
+	return _knocked_out_skin
 
-func set_ghost(ghost: bool) -> void:
-	var skin := ghost_skin() if ghost else null
+func set_knocked_out_look(out_of_it: bool) -> void:
+	var skin := knocked_out_skin() if out_of_it else null
 	for node in _avatar.find_children("*", "MeshInstance3D", true, false):
 		var mesh := node as MeshInstance3D
 		mesh.material_override = skin
@@ -839,7 +853,7 @@ func _local_move(delta: float) -> void:
 		capture_lock = maxf(0.0, capture_lock - delta)
 	if _fly_grace > 0.0:
 		_fly_grace = maxf(0.0, _fly_grace - delta)
-	var speed := SWIM_SPEED if in_water else WALK_SPEED
+	var speed := SWIM_SPEED if in_water else RUN_SPEED
 	if input.is_sprint_pressed() and on_floor and not downed:
 		speed *= 1.55
 	elif input.is_sneak_pressed() and on_floor and not downed:
@@ -848,7 +862,7 @@ func _local_move(delta: float) -> void:
 	if feet_soft >= Blocks.M_SNOW and feet_soft < Blocks.MAX_BLOCK:
 		speed *= 0.45  # wading through soft snow
 	if fly_mode:
-		speed = GHOST_FLY_SPEED if world.ghost_ids.has(player_id) else 7.5
+		speed = OUT_FLY_SPEED if world.out_ids.has(player_id) else 7.5
 	# A REVIVE HOLDS YOU BOTH STILL. Not a slow-down, a stop — for the
 	# person being picked up AND the person picking them up.
 	#
@@ -876,12 +890,12 @@ func _local_move(delta: float) -> void:
 		heading = dir.normalized()
 
 	# Downed counts as out for flying: you have been knocked over, you
-	# float up out of it (see `begin_ghost_rise`), and the world's
+	# float up out of it (see `begin_knockout_rise`), and the world's
 	# no-flying rules are about people who are PLAYING.
-	var is_out: bool = world.ghost_ids.has(player_id) or downed
+	var is_out: bool = world.out_ids.has(player_id) or downed
 	var fly_ok: bool = world.client_fly
 	if fly_mode and (world.survival_active or not fly_ok) and not is_out:
-		fly_mode = false  # no flying away from raids or matches (ghosts may)
+		fly_mode = false  # no flying away from raids or matches (the out may)
 	if world != null and world.match_phase == "SETUP":
 		dropping = true
 	# KNOCKED OUT: drift up out of the fight, Tom-and-Jerry fashion.
@@ -895,11 +909,11 @@ func _local_move(delta: float) -> void:
 	#
 	# Constant speed, not a lerp toward one: ten blocks over three seconds
 	# is the promise, and a ramp makes it nine and a bit.
-	if _ghost_rise > 0.0:
-		_ghost_rise = maxf(0.0, _ghost_rise - delta)
+	if _knockout_rise > 0.0:
+		_knockout_rise = maxf(0.0, _knockout_rise - delta)
 		velocity.x = 0.0
 		velocity.z = 0.0
-		velocity.y = GHOST_RISE_BLOCKS / GHOST_RISE_SECONDS
+		velocity.y = KNOCKOUT_RISE_BLOCKS / KNOCKOUT_RISE_SECONDS
 		on_floor = false
 		anim = Anim.FLY
 	elif _lift_to < INF and position.y < _lift_to:
@@ -1050,7 +1064,7 @@ func _local_move(delta: float) -> void:
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
 	var deck_y := _deck_floor(next, v_attempt)
-	if _ghost_rise > 0.0 or _lift_to < INF:
+	if _knockout_rise > 0.0 or _lift_to < INF:
 		# Straight through the roof. Somebody knocked out inside their own
 		# fort would otherwise be pinned against its ceiling for the whole
 		# three seconds, which is the opposite of a graceful exit — and
@@ -1183,7 +1197,7 @@ func camera_look_dir() -> Vector3:
 func can_act() -> bool:
 	if downed:
 		return false
-	if world != null and world.ghost_ids.has(player_id):
+	if world != null and world.out_ids.has(player_id):
 		return false
 	return true
 

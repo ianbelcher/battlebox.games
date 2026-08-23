@@ -56,3 +56,32 @@ func test_out_of_range_input_is_clamped_not_extrapolated() -> void:
 	# A stick pushed to a corner reads past 1.0 on the diagonal.
 	equal(InputSlot.look_response(1.4), 1.0, "over-range is still full speed")
 	equal(InputSlot.look_response(-0.5), 0.0, "negative travel is nothing")
+
+# ---- fine aim ---------------------------------------------------------
+
+## Holding the right stick in quarters the look. Tested because the number
+## is the whole feature: the reported problem was that a deliberate aim at
+## range is unmanageable, and the curve cannot help there — at that end of
+## the stick you are well into the fast part of it on purpose.
+func test_fine_aim_is_a_quarter() -> void:
+	equal(InputSlot.PRECISION_SCALE, 0.25,
+		"a quarter, as asked for — not a nudge and not a stop")
+
+func test_fine_aim_still_reaches_the_far_end_of_the_stick() -> void:
+	# It has to remain USABLE while held, or it is a brake rather than a
+	# precision mode: full stick under fine aim should still turn you, at
+	# a quarter of the pace.
+	var full := InputSlot.look_response(1.0)
+	near(full * InputSlot.PRECISION_SCALE, 0.25, 0.0001,
+		"full stick held fine is a quarter of full speed, not nothing")
+
+func test_fine_aim_leaves_the_shape_of_the_curve_alone() -> void:
+	# A flat scale, so the gentle bottom end stays gentle relative to the
+	# top. Scaling the input instead of the output would have moved every
+	# point onto a different part of the curve and changed the feel.
+	for i in range(1, 10):
+		var t := float(i) / 10.0
+		var plain := InputSlot.look_response(t)
+		near(plain * InputSlot.PRECISION_SCALE / maxf(plain, 0.00001),
+			InputSlot.PRECISION_SCALE, 0.0001,
+			"the same quarter at %.1f stick" % t)

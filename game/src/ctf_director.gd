@@ -30,7 +30,7 @@ var _capture_guard: Dictionary = {}
 
 var _flag_progress: Dictionary = {}
 
-var _bot_ghost_since: Dictionary = {}
+var _bot_out_since: Dictionary = {}
 
 ## team -> {"home": Vector3, "pos": Vector3 (INF while taken), "back_at": msec}
 
@@ -263,11 +263,11 @@ func revive_pulse(id: String, pos: Vector3, frac: float, delta: float,
 ## losing your flag hurt.
 func _ctf_flag_channel(id: String, pos: Vector3, flag: Dictionary,
 		flag_at: Vector3, delta: float) -> void:
-	# Belt and braces: this is only ever called from the ghost and downed
+	# Belt and braces: this is only ever called from the out and downed
 	# branches, but it is the one place that can start a revive, and a
 	# revive starting on a player who is perfectly well is exactly the
 	# confusion being fixed.
-	if not world.ghost_ids.has(id) and not world.downed_ids.has(id):
+	if not world.out_ids.has(id) and not world.downed_ids.has(id):
 		if _flag_progress.has(id):
 			_flag_progress.erase(id)
 			_revive_pulse_t.erase(id)
@@ -308,11 +308,11 @@ func tick(delta: float) -> void:
 		var pos: Vector3 = world.player_state[id].get("pos", Vector3.INF)
 		if pos == Vector3.INF:
 			continue
-		# A GHOST touching its OWN flag comes back. That is the whole
+		# SOMEBODY WHO IS OUT touching their OWN flag comes back. That is the whole
 		# respawn rule when reviving is off: fly home, tag up, rejoin.
-		if world.ghost_ids.has(id):
+		if world.out_ids.has(id):
 			# A computer player WALKS HOME like everybody else. Its goal
-			# while it is a ghost is its own flag (see `_ctf_bot_goal`), so
+			# while it is out is its own flag (see `_ctf_bot_goal`), so
 			# the ordinary rule below — touch your flag, tag back in —
 			# does the work, and you can watch it make the trip.
 			#
@@ -331,19 +331,19 @@ func tick(delta: float) -> void:
 				# spot for three seconds would be the one rule in this
 				# mode the computer gets an easier version of.
 				_ctf_flag_channel(id, pos, mine_bot, bot_flag, delta)
-				if not world.ghost_ids.has(id):
+				if not world.out_ids.has(id):
 					var home_spot := home_spot(team,
 						maxi(seats_of(team).find(id), 0))
 					world.bots.roster[id].pos = home_spot
 					world.player_state[id].pos = home_spot
 					world.cl_stand.rpc(id, home_spot, false, [], false)
 					continue
-				var out_since := int(_bot_ghost_since.get(id, 0))
+				var out_since := int(_bot_out_since.get(id, 0))
 				if out_since == 0:
-					_bot_ghost_since[id] = now
+					_bot_out_since[id] = now
 					out_since = now
 				if now - out_since > world.BOT_RETURN_MS:
-					_bot_ghost_since.erase(id)
+					_bot_out_since.erase(id)
 					respawn(id)
 					var back := home_spot(team, maxi(seats_of(team).find(id), 0))
 					world.bots.roster[id].pos = back
@@ -363,7 +363,7 @@ func tick(delta: float) -> void:
 		# enough meant crawling all the way home and then standing on your
 		# own flag with nothing happening — which is exactly what happened,
 		# and he reported the flag as broken. It is not a special case: it
-		# is the same rule ghosts play by, and being downed is a WORSE
+		# is the same rule the out play by, and being downed is a WORSE
 		# position than being out, so it should not have fewer ways back.
 		if world.downed_ids.has(id):
 			var down_flag: Dictionary = _flags.get(team, {})
@@ -447,7 +447,7 @@ func capture(id: String, team: int, from_team: int) -> void:
 	# A capture used to bring the SCORER'S WHOLE TEAM back at once, as a
 	# release valve for a losing side. It is gone on purpose. There are
 	# exactly two ways back into a round now, and both are something a
-	# person does: fly home as a ghost and touch your own flag, or have a
+	# person does: fly home and touch your own flag, or have a
 	# team-mate stand over you and pick you up. Anything that quietly
 	# undoes a knockout somewhere else on the map makes knocking anybody
 	# down feel like it did not count.
@@ -482,9 +482,9 @@ func capture(id: String, team: int, from_team: int) -> void:
 
 ## Back in the game, standing at your own flag.
 func respawn(id: String) -> void:
-	world.ghost_ids.erase(id)
+	world.out_ids.erase(id)
 	_flag_progress.erase(id)
-	_bot_ghost_since.erase(id)
+	_bot_out_since.erase(id)
 	world.match_alive[id] = true
 	world.downed_ids.erase(id)
 	var state: Dictionary = world.player_state.get(id, {})

@@ -444,7 +444,7 @@ func eliminate(id: String, attacker := "") -> void:
 	# work out which approaches have been turning into trenches.
 	world.remember_scar(fell_at)
 	# Reviving is a mode setting in capture the flag: with it off, a
-	# knockout puts you straight out as a ghost and the only way back is
+	# knockout puts you straight OUT and the only way back is
 	# your own flag.
 	var can_revive: bool = world.ctf_revive if world.ctf.active() else true
 	if has_standing_mate and can_revive:
@@ -455,11 +455,11 @@ func eliminate(id: String, attacker := "") -> void:
 	world.match_alive.erase(id)
 	world.downed_ids.erase(id)
 	drop_weapons(id, fell_at)
-	# ghost_ids is written by cl_eliminated, which is an authority RPC and
+	# out_ids is written by cl_eliminated, which is an authority RPC and
 	# therefore never runs on the server itself — so the server had no idea
-	# who was a ghost, and "touch your own flag to come back" could never
+	# who was out, and "touch your own flag to come back" could never
 	# fire for anybody.
-	world.ghost_ids[id] = true
+	world.out_ids[id] = true
 	world.cl_eliminated.rpc(id)
 	_emit_feed(id, attacker)
 	check_win()
@@ -627,17 +627,17 @@ func tick_revives(delta: float) -> void:
 			world.ctf._flag_progress.erase(id)
 			world.ctf._revive_pulse_t.erase(id)
 			world.match_alive.erase(id)
-			# GHOSTHOOD IS WRITTEN HERE, ON THE SERVER. `cl_eliminated` is
+			# BEING OUT IS WRITTEN HERE, ON THE SERVER. `cl_eliminated` is
 			# an authority RPC, so it never runs on the server itself —
-			# `_match_eliminate` knows that and sets `ghost_ids` directly,
+			# `_match_eliminate` knows that and sets `out_ids` directly,
 			# but this path, the one you take when you BLEED OUT, did not.
 			# So anyone who ran out of time on the floor was in no set at
-			# all: not alive, not downed, not a ghost. They could never tag
-			# in at their own flag (that rule reads `ghost_ids`), a bot in
+			# all: not alive, not downed, not out. They could never tag
+			# in at their own flag (that rule reads `out_ids`), a bot in
 			# that state never walked home, and they were missing from the
 			# state a joining client is sent — which is a roster of nine
 			# showing four alive and five nowhere.
-			world.ghost_ids[id] = true
+			world.out_ids[id] = true
 			world.cl_revive_progress.rpc(id, 0.0)
 			world.cl_eliminated.rpc(id)
 			check_win()
@@ -765,7 +765,7 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	if world.match_phase != "BATTLE" or not world.match_alive.has(id):
 		return
 	if world.downed_ids.has(id):
-		return  # ghosts are untouchable — get back in, or stay out
+		return  # players who are OUT are untouchable — get back in, or stay out
 	var now := Time.get_ticks_msec()
 	var mercy := 250 if world.bots.roster.has(id) else 800
 	if now - int(_last_hit_ms.get(id, -mercy)) < mercy:
