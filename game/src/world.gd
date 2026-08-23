@@ -2047,16 +2047,29 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 	match_score_changed.emit()
 	for child in players.get_children():
 		if child is Player and child.player_id == id:
-			# Being downed makes you a GHOST: you walk about normally, you
-			# cannot shoot or pick anything up, and only YOUR OWN TEAM can
-			# see you — they are the ones who can do something about it.
-			# Lying on the floor visible to everybody just told the other
-			# side where to finish you off, and left your own side
-			# guessing whose body it even was. `downed` still gates
-			# acting; the death POSE is gone (see Player._animate_*).
+			# GOING DOWN IS THE DEATH SEQUENCE, and it happens here.
+			#
+			# It used to be: you fell over, stayed where you were, and the
+			# ten-block rise came much later, at elimination — after
+			# bleeding out. So the moment that should read as "that player
+			# is out of this" read as nothing at all, and a scrap with
+			# eight people in it was impossible to follow, because the
+			# ones lying in it looked much like the ones still in it.
+			#
+			# Now the knockout lifts you clear of the fight straight away.
+			# You are grey, you are half transparent, you are ten blocks up
+			# and out of everybody's way — and then you fly back down to
+			# whoever might pick you up. `downed` still gates acting: you
+			# cannot shoot, build or take a flag on the way.
 			child.downed = is_down
 			child.set_ghost(is_down)
-			child.visible = (not is_down) or _my_team_has(id)
+			# SEEN BY EVERYONE. Downed players used to be hidden from the
+			# other side, so that a body did not advertise where to finish
+			# somebody off. That was the right fix for a body lying in the
+			# open and the wrong one now: they are grey, ten blocks up and
+			# unmistakably out, and being able to see who is out is the
+			# whole point of the sequence.
+			child.visible = true
 			if is_down:
 				# THE KNOCKOUT IS SEEN HERE, not only at elimination.
 				#
@@ -2071,10 +2084,33 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				# It fires for everyone, including whoever caused it —
 				# that is the entire point. You shot someone; you should
 				# be able to see that you did.
-				if fx != null:
+				# ...but NOT to the person it happened to. They are
+				# getting the colour drained out of their screen and a
+				# ten-block rise; a bang in their own face on top of that
+				# is noise. It is for everyone else, which is what it is
+				# for: knowing who has just gone out.
+				#
+				# All or nothing on a shared screen — this is a real
+				# effect in the world, not something a single viewport
+				# can be shown — so a split-screen partner loses it too.
+				# They still watch their team-mate go grey and rise, which
+				# is a longer and clearer signal than the flash.
+				if fx != null and not child.is_local:
 					fx.knockout(child.position + Vector3(0, 0.9, 0))
 				Sfx.play("pop", -4.0)
 			if child.is_local and is_down:
+				# UP AND OUT OF IT. Ten blocks over three seconds — the
+				# same rise elimination used to give, moved to the moment
+				# it means something.
+				#
+				# NOT flight afterwards: flying has no descend on a gamepad
+				# (see Player.DOWNED_SINK), so it would have left a child
+				# on a pad hovering ten blocks up with no way back to
+				# anybody who could pick them up. They sink gently instead,
+				# and hold jump if they want to stay up.
+				child.velocity = Vector3.ZERO
+				child.fly_mode = false
+				child.begin_ghost_rise()
 				Sfx.play("drop", -4.0)
 	_refresh_overheads()
 
@@ -2131,6 +2167,11 @@ func cl_eliminated(id: String) -> void:
 					fx.knockout(child.position + Vector3(0, 0.9, 0))
 				Sfx.play("pop", -2.0)
 			if child.is_local:
+				# Already down and already ten blocks up? Then the rise
+				# has been had. Doing it twice sends somebody who bled out
+				# another ten blocks into the sky for no reason.
+				if not was_down:
+					child.begin_ghost_rise()
 				# Out, but not gone: stay where you fell and wander. You
 				# can fly, you cannot touch anything, and nobody can see
 				# you — so you can go and watch a team-mate, or talk them
@@ -2138,7 +2179,6 @@ func cl_eliminated(id: String) -> void:
 				# blocks into the sky meant "out" also meant "bored".
 				child.fly_mode = true
 				child.velocity = Vector3.ZERO
-				child.begin_ghost_rise()
 				Sfx.play("drop", -6.0)
 			else:
 				# The fallen are invisible to everyone still playing, and

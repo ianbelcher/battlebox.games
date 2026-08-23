@@ -1188,7 +1188,47 @@ func _bot_sap(id: String, bot: Dictionary, pos: Vector3) -> void:
 		return
 	_bot_dig_out(id, bot, pos, ahead.normalized())
 
-func _bot_settle_ground(bot: Dictionary, delta: float) -> void:
+## WHERE A KNOCKED-DOWN COMPUTER PLAYER FLOATS, or INF for "on the
+## ground like everything else".
+##
+## The same sequence a person gets: ten blocks up, out of the fight. Most
+## of the players in a room ARE computer players, so leaving them lying in
+## the scrap would have fixed the confusion for the handful of humans and
+## left it exactly as it was for everybody else.
+##
+## They HOLD up there rather than drifting back down, because coming
+## straight back is coming back into the fray. They only descend when
+## somebody who could pick them up is close enough to be worth coming down
+## for — which is what makes them reachable without putting them back in
+## the middle of it.
+const DOWNED_HOVER := 10.0
+const DOWNED_COME_DOWN := 13.0
+
+func _bot_downed_y(id: String, floor_y: float, pos: Vector3,
+		delta: float) -> float:
+	if not world.downed_ids.has(id):
+		return INF
+	var want := floor_y + DOWNED_HOVER
+	# A rescuer in reach: come down to be picked up. Their goal is this
+	# body, so they walk in under it and then it drops to meet them.
+	for other: String in world.match_alive.keys():
+		if other == id or world.downed_ids.has(other) \
+				or world.teams_differ(id, other):
+			continue
+		var st: Dictionary = world.player_state.get(other, {})
+		if st.is_empty():
+			continue
+		if Vector3(st.pos).distance_to(pos) < DOWNED_COME_DOWN:
+			want = floor_y
+			break
+	# The rise is the death sequence, so it runs at the sequence's pace;
+	# coming back down is not, so it can be quicker.
+	var rate := Player.GHOST_RISE_BLOCKS / Player.GHOST_RISE_SECONDS
+	if want < pos.y:
+		rate *= 2.0
+	return move_toward(pos.y, want, rate * delta)
+
+func _bot_settle_ground(id: String, bot: Dictionary, delta: float) -> void:
 	var pos: Vector3 = bot.pos
 	var gy := walk_y(floori(pos.x), floori(pos.z), pos.y)
 	if gy < 0:
@@ -1197,6 +1237,11 @@ func _bot_settle_ground(bot: Dictionary, delta: float) -> void:
 	if _water_at(floori(pos.x), floori(pos.z)):
 		# Chest deep — see the note in the movement step.
 		floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) - 1.1)
+	var down_y := _bot_downed_y(id, floor_y, pos, delta)
+	if down_y < INF:
+		pos.y = down_y
+		bot.pos = pos
+		return
 	if pos.y > floor_y + 3.0:
 		# Still airborne (the drop): glide down at human pace (-3,
 		# matching Player's drop glide exactly).
@@ -1273,7 +1318,7 @@ func tick(delta: float) -> void:
 		# in the same tick and only while a rescuer is actually in range,
 		# so this is exactly the same condition the people obey.
 		if downed and world.battle.revive_progress.has(id):
-			_bot_settle_ground(bot, delta)
+			_bot_settle_ground(id, bot, delta)
 			var held: Dictionary = world.player_state.get(id, {})
 			if not held.is_empty():
 				held.pos = bot.pos
@@ -1282,7 +1327,7 @@ func tick(delta: float) -> void:
 		# ...and a bot doing the reviving stands still as well, rather than
 		# wandering off two seconds into a three-second job.
 		if not downed and _bot_holding_a_revive(id, pos):
-			_bot_settle_ground(bot, delta)
+			_bot_settle_ground(id, bot, delta)
 			var stood: Dictionary = world.player_state.get(id, {})
 			if not stood.is_empty():
 				stood.pos = bot.pos
@@ -1343,7 +1388,7 @@ func tick(delta: float) -> void:
 					pos.z += dir.y * crawl * delta
 					bot.yaw = atan2(-dir.x, -dir.y)
 				bot.pos = pos
-				_bot_settle_ground(bot, delta)
+				_bot_settle_ground(id, bot, delta)
 				var down_state: Dictionary = world.player_state.get(id, {})
 				if not down_state.is_empty():
 					down_state.pos = bot.pos
@@ -1456,8 +1501,11 @@ func tick(delta: float) -> void:
 			# "most players walk on water" was. Chest deep now, so the
 			# head and shoulders are out and the rest is under.
 			floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) - 1.1)
+		var down_y := _bot_downed_y(id, floor_y, pos, delta)
 		var cruise_y := _bot_cruise_y(id, bot, flat, floor_y, delta)
-		if cruise_y < INF:
+		if down_y < INF:
+			pos.y = down_y
+		elif cruise_y < INF:
 			pos.y = cruise_y
 		elif pos.y > floor_y + 3.0:
 			# Still airborne (the drop, or having just landed from a

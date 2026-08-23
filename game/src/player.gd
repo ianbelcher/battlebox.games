@@ -102,6 +102,19 @@ const GHOST_FLY_SPEED := 11.0
 ## and any input of your own takes over immediately.
 const GHOST_RISE_BLOCKS := 10.0
 const GHOST_RISE_SECONDS := 3.0
+## KNOCKED OUT AND IN THE AIR: hold jump to go up, let go and sink gently.
+##
+## The way back down had to work on a CONTROLLER, and flying does not.
+## Godot's descend is bound to Shift on a WASD keyboard and to nothing at
+## all on a gamepad or the arrow keys — so a child knocked out on a pad
+## would have floated ten blocks up, hovered, and stayed there until they
+## bled out, unrescuable, which is worse than the problem the rise fixes.
+##
+## Sinking by default also means the way back needs no instruction: let go
+## and you drift down to your team, hold jump if you overshot. Nothing to
+## learn, nothing to press, and it is the same on every input there is.
+const DOWNED_RISE := 4.2
+const DOWNED_SINK := 1.8
 var _ghost_rise := 0.0
 ## Climbing clear of the map, once your whole team is out and there is
 ## nobody left down there to watch. Height to reach, or INF for "stay
@@ -379,9 +392,12 @@ func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 		_tag.text = ""
 		return
 	if downed_now:
-		_tag.text = "⛑ HELP!"
-		_tag.modulate = Color(1.0, 0.75, 0.3)
-		_tag.outline_modulate = Color(0.4, 0.1, 0.05, 0.95)
+		# NOTHING over a downed player. The grey, half-transparent body is
+		# the signal now, and it says the same thing from any distance
+		# without adding a label to a screen that already has hearts over
+		# everybody else. Their team-mate is told who to go for by the
+		# prompt on their own HUD, which is where an instruction belongs.
+		_tag.text = ""
 		return
 	hp = clampi(hp, 0, 8)
 	var top_row := "".rpad(mini(hp, 4), "♥")
@@ -390,12 +406,42 @@ func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 	_tag.modulate = Color(team_color.darkened(0.12), 0.9)
 	_tag.outline_modulate = Color(0.05, 0.05, 0.1, 0.95)
 
-## Ghost look while downed: the whole character fades to a shimmer.
+## THE LOOK OF SOMEBODY WHO IS OUT OF THE FIGHT: grey, and half there.
+##
+## Fading alone was not enough. A faded player still has their team colour,
+## their kit and their character on them, so at a glance across a scrap
+## they read as somebody you still have to deal with — and working out who
+## is actually still in it was the problem. Colour is the thing that says
+## "in the game", so taking it away is the thing that says the opposite.
+##
+## An override rather than a tint, because it has to beat everything: the
+## avatars are assembled from parts with their own materials, several of
+## them shared between players, and anything short of replacing the
+## material leaves somebody's shirt showing through.
+static var _ghost_skin: StandardMaterial3D = null
+
+static func ghost_skin() -> StandardMaterial3D:
+	if _ghost_skin == null:
+		_ghost_skin = StandardMaterial3D.new()
+		_ghost_skin.albedo_color = Color(0.66, 0.68, 0.74, 0.42)
+		_ghost_skin.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_ghost_skin.roughness = 1.0
+		# Barely lit: a ghost should not pick up the sunset like everyone
+		# else, or it goes orange and stops reading as grey at all.
+		_ghost_skin.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+		_ghost_skin.emission_enabled = true
+		_ghost_skin.emission = Color(0.30, 0.32, 0.36)
+		_ghost_skin.emission_energy_multiplier = 0.5
+	return _ghost_skin
+
 func set_ghost(ghost: bool) -> void:
+	var skin := ghost_skin() if ghost else null
 	for node in _avatar.find_children("*", "MeshInstance3D", true, false):
-		# GeometryInstance3D.transparency fades ANY mesh, including
-		# imported ones whose materials are shared between players.
-		(node as MeshInstance3D).transparency = 0.55 if ghost else 0.0
+		var mesh := node as MeshInstance3D
+		mesh.material_override = skin
+		# The old fade is off: the material carries the transparency now,
+		# and both at once made a ghost almost invisible.
+		mesh.transparency = 0.0
 
 func refresh_from_roster(entry: Dictionary) -> void:
 	set_team_glow(int(entry.get("team", -1)))
@@ -872,6 +918,12 @@ func _local_move(delta: float) -> void:
 		velocity.z = 0.0
 		velocity.y = GHOST_RISE_BLOCKS / GHOST_RISE_SECONDS
 		on_floor = false
+		anim = Anim.FLY
+	elif downed and not on_floor:
+		# The float back down. See DOWNED_SINK — this branch is what makes
+		# being knocked out survivable on a gamepad.
+		velocity.y = lerpf(velocity.y, DOWNED_RISE if jump_now else -DOWNED_SINK,
+			minf(1.0, delta * 6.0))
 		anim = Anim.FLY
 	elif _lift_to < INF and position.y < _lift_to:
 		# Still climbing out. Nothing else to decide while this runs: you
