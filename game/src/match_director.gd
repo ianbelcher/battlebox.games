@@ -440,6 +440,9 @@ func eliminate(id: String, attacker := "") -> void:
 				and int(Game.roster.get(other, {}).get("team", -2)) == team:
 			has_standing_mate = true
 	var fell_at: Vector3 = world.player_state.get(id, {}).get("pos", Vector3.ZERO)
+	# Every knockout, downed or out — the computer players read this to
+	# work out which approaches have been turning into trenches.
+	world.remember_scar(fell_at)
 	# Reviving is a mode setting in capture the flag: with it off, a
 	# knockout puts you straight out as a ghost and the only way back is
 	# your own flag.

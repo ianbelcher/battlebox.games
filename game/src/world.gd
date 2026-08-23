@@ -1513,6 +1513,40 @@ var loot_only := false
 ## would have silently turned flying off in creative.
 var battle_fly := true
 
+## WHERE PEOPLE HAVE ACTUALLY BEEN KNOCKED OUT, most recent last.
+##
+## Read by the computer players when they choose which way to come at a
+## base — see BotSquads.lane_cost. It is the only honest answer to "where
+## is it dangerous": not where the enemy is standing this instant, but
+## where the last dozen fights ended.
+##
+## Server-side and deliberately short. It is a rolling picture of THIS
+## part of the round; a full history would keep steering everyone away
+## from ground that has been quiet for ten minutes.
+var battle_scars: Array = []
+const BATTLE_SCARS_KEPT := 16
+
+func remember_scar(at: Vector3) -> void:
+	battle_scars.append(at)
+	if battle_scars.size() > BATTLE_SCARS_KEPT:
+		battle_scars = battle_scars.slice(battle_scars.size() - BATTLE_SCARS_KEPT)
+
+## MAY THIS PLAYER FLY?
+##
+## The world's setting is the DEFAULT, and any player may be given a
+## different answer — `Game.roster[id].fly`, absent unless somebody has
+## said otherwise. Absent rather than filled in at join time on purpose:
+## a player who has never been singled out follows the world, so flipping
+## the world setting still moves everyone who has not been decided about.
+##
+## Flying used to be one switch for the whole table, which is the wrong
+## shape for what it is actually used for — letting the small ones float
+## out of trouble while everybody else plays on the ground, or handing it
+## to one team and not the other.
+func fly_allowed_for(id: String) -> bool:
+	var by_default: bool = battle_fly if multiplayer.is_server() else client_fly
+	return bool(Game.roster.get(id, {}).get("fly", by_default))
+
 ## Who is still in the fight. id -> true.
 var match_alive: Dictionary = {}
 
@@ -1549,6 +1583,38 @@ func sv_ctf_config(revive: int, target: int, drop: int) -> void:
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target)
 
+## Hand flight out, or take it away, from a group at a time.
+##
+##   scope "all"     everybody in the room
+##   scope "bots"    every computer player
+##   scope "humans"  every person
+##   scope "team"    everyone on `team`
+##   scope "one"     the single player whose id is in `who`
+##
+## Groups rather than a switch each, because that is how it gets used:
+## turn it on for all the computer players, then take it off the ones on
+## Red. Doing that a player at a time in a room of fifty is not something
+## anybody would sit through.
+@rpc("any_peer", "reliable")
+func sv_set_fly(scope: String, team: int, on: bool, who := "") -> void:
+	if not multiplayer.is_server() \
+			or not _is_host(multiplayer.get_remote_sender_id()):
+		return
+	for id: String in Game.roster.keys():
+		var entry: Dictionary = Game.roster[id]
+		var is_bot := bool(entry.get("bot", false))
+		var matched := false
+		match scope:
+			"all": matched = true
+			"bots": matched = is_bot
+			"humans": matched = not is_bot
+			"team": matched = int(entry.get("team", -1)) == team
+			"one": matched = id == who
+		if matched:
+			entry["fly"] = on
+	Game.cl_roster.rpc(Game.roster)
+	_save_battle_setup()
+
 @rpc("any_peer", "reliable")
 func sv_match_config(minutes: int, loot: int, size: int = -1, fly: int = -1) -> void:
 	# No phase guard: the grown-up gets to re-size the arena, allow flying
@@ -1569,6 +1635,13 @@ func sv_match_config(minutes: int, loot: int, size: int = -1, fly: int = -1) -> 
 		resize_to = int(battle_size)
 	if fly >= 0:
 		battle_fly = fly == 1
+		# The world switch is the DEFAULT, so turning it over has to clear
+		# the per-player answers as well — otherwise "no flying" leaves
+		# everyone who was singled out still in the air, and the switch
+		# looks broken to the one person who used both features.
+		for id: String in Game.roster.keys():
+			(Game.roster[id] as Dictionary).erase("fly")
+		Game.cl_roster.rpc(Game.roster)
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target)
 	_save_battle_setup()

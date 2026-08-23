@@ -638,6 +638,7 @@ func _build_game_tab() -> void:
 func _build_players_tab() -> void:
 	var box := _tab("Players")
 	_build_invite_card(box)
+	_build_flying_card(box)
 	var manage_card := _section(box, "Teams and computer players")
 	# Two per row, not four: at four across, "Add a computer player" was
 	# wider than its column and lost its last word. Plain ASCII +/− on
@@ -689,11 +690,15 @@ func _sig_of_roster() -> String:
 	var teams: int = world.team_count if world != null else 4
 	var ids: Array = Game.roster.keys()
 	ids.sort()
-	var out := "t%d|" % teams
+	# The world's flying setting is in here too, because it is the DEFAULT
+	# every player follows until they are singled out — flip it and every
+	# row in the Fly column changes without a single roster entry moving.
+	var out := "t%d|f%s|" % [teams,
+		world.client_fly if world != null else false]
 	for id: String in ids:
 		var e: Dictionary = Game.roster[id]
-		out += "%s:%s:%s:%s;" % [id, e.get("name", ""), e.get("team", -1),
-			e.get("bot", false)]
+		out += "%s:%s:%s:%s:%s;" % [id, e.get("name", ""), e.get("team", -1),
+			e.get("bot", false), e.get("fly", "-")]
 	return out
 
 func _refresh_players() -> void:
@@ -731,7 +736,8 @@ func _refresh_players() -> void:
 	# they are counting. As separate rows they drifted apart the moment a
 	# name was a different length.
 	var grid := GridContainer.new()
-	grid.columns = team_count + 2
+	# name | one cell per team | can-fly | remove
+	grid.columns = team_count + 3
 	grid.add_theme_constant_override("h_separation", _s(6))
 	grid.add_theme_constant_override("v_separation", _s(6))
 	_players_box.add_child(grid)
@@ -741,9 +747,64 @@ func _refresh_players() -> void:
 	grid.add_child(_min(Control.new(), 210, 0))
 	for t in team_count:
 		grid.add_child(_team_header(t, counts[t], cell_w))
+	var fly_head := Label.new()
+	fly_head.text = "Fly"
+	fly_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	fly_head.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	grid.add_child(_font(fly_head, UiTheme.T_NOTE))
 	grid.add_child(Control.new())
 	for id_v in ids:
 		_add_player_row(grid, str(id_v), team_count, cell_w)
+
+## WHO CAN FLY. Groups first, because that is how it gets used: hand it to
+## every computer player, then take it off the ones on Red. Doing that one
+## player at a time in a room of fifty is not something anybody would sit
+## through — but the column in the roster below is there for when you want
+## exactly one child to be able to float out of trouble.
+func _build_flying_card(box: Control) -> void:
+	var card := _section(box, "Who can fly",
+		"Double-tap jump to fly. Everyone follows the world's setting "
+		+ "(Map tab) until they are given their own answer here.")
+	var everyone := _row(card)
+	for spec in [["Everyone", "all", true], ["Nobody", "all", false],
+			["All computers", "bots", true], ["No computers", "bots", false]]:
+		var scope := str(spec[1])
+		var on: bool = spec[2]
+		var btn := _button(str(spec[0]), func() -> void:
+			if Game.world != null:
+				Game.world.sv_set_fly.rpc_id(1, scope, -1, on)
+			Sfx.play("pop", -6.0))
+		_min(btn, 150, 44)
+		everyone.add_child(btn)
+
+	var teams := _row(card)
+	var team_count: int = Game.world.client_team_names.size() if Game.world != null else 0
+	for t in team_count:
+		var team_i := t
+		# One button per team that turns the whole team ON unless it
+		# already is, in which case it turns the whole team OFF. A single
+		# button rather than a pair: with five teams a pair each is ten
+		# buttons for a thing a grown-up presses twice a game.
+		var btn := _button(_team_name(team_i), func() -> void:
+			if Game.world == null:
+				return
+			var all_flying := true
+			var any_there := false
+			for id: String in Game.roster.keys():
+				if int(Game.roster[id].get("team", -1)) != team_i:
+					continue
+				any_there = true
+				if not Game.world.fly_allowed_for(id):
+					all_flying = false
+			if not any_there:
+				return
+			Game.world.sv_set_fly.rpc_id(1, "team", team_i, not all_flying)
+			Sfx.play("pop", -6.0))
+		btn.tooltip_text = "Give this team flight, or take it away"
+		var swatch: Color = WorldNode.TEAM_COLORS[team_i % WorldNode.TEAM_COLORS.size()]
+		btn.add_theme_color_override("font_color", swatch)
+		_min(btn, 96, 44)
+		teams.add_child(btn)
 
 ## Whatever the team is actually CALLED — teams can be renamed, and the
 ## header used to show the hard-coded colour list instead.
@@ -817,6 +878,7 @@ func _add_player_row(grid: GridContainer, id: String, team_count: int,
 	var team := int(entry.get("team", -1))
 	for t in team_count:
 		grid.add_child(_team_cell(id, t, team, cell_w))
+	grid.add_child(_fly_cell(id))
 	var kick := _button("✕", func() -> void:
 		Game.sv_kick_player.rpc_id(1, id)
 		Sfx.play("pop", -6.0), UiTheme.T_BODY)
@@ -825,6 +887,21 @@ func _add_player_row(grid: GridContainer, id: String, team_count: int,
 	kick.add_theme_color_override("font_hover_color", Color.WHITE)
 	_min(kick, 46, 44)
 	grid.add_child(kick)
+
+## One player's own answer, in the roster where their name is. Shows what
+## is true for them right now — including when that is only because of the
+## world's setting — so the column can be read down rather than worked out.
+func _fly_cell(id: String) -> Button:
+	var can: bool = Game.world.fly_allowed_for(id) if Game.world != null else false
+	var cell := _button("✈" if can else "·", func() -> void:
+		if Game.world != null:
+			Game.world.sv_set_fly.rpc_id(1, "one", -1, not can, id)
+		Sfx.play("pop", -6.0), UiTheme.T_BODY)
+	cell.tooltip_text = "This player can fly" if can else "This player cannot fly"
+	cell.add_theme_color_override("font_color",
+		UiTheme.ACCENT if can else UiTheme.INK_FAINT)
+	_min(cell, 46, 44)
+	return cell
 
 func _team_cell(id: String, t: int, current: int, cell_w: int) -> Button:
 	var entry: Dictionary = Game.roster[id]

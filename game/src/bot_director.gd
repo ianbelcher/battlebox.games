@@ -156,6 +156,13 @@ func _bot_nearest_enemy(id: String, pos: Vector3, radius: float) -> String:
 ## is realistically shooting at you, whatever the sight lines.
 
 const BOT_REVIVE_DANGER := 34.0
+## The same test, for a body that belongs to a PERSON. Far braver, on
+## purpose — see _bot_rescue_goal.
+const BOT_REVIVE_DANGER_PERSON := 10.0
+## How far a bot will travel to attempt a rescue at all.
+const BOT_REVIVE_REACH := 34.0
+## Team-mates this close to the body count as going in with you.
+const BOT_REVIVE_CROWD := 18.0
 
 ## IS THIS SPOT UNDER FIRE? Not "is an enemy near it" — is an enemy near it
 ## WITH A CLEAR LINE TO IT.
@@ -190,6 +197,73 @@ func _under_fire(at: Vector3, ally: String, radius: float) -> bool:
 		if world.clear_shot(epos + Vector3(0, 1.4, 0), eye):
 			return true
 	return false
+
+## Which body to go and pick up, or INF for none worth attempting.
+##
+## THE OLD RULE ALMOST NEVER SAID YES. One radius, 34 blocks, and a
+## rescue was abandoned if any enemy anywhere inside it had a line to the
+## body. On an open map in a busy round that is nearly always true, so
+## computer players essentially never picked anybody up — reported as
+## "none of my team mates will revive me", which was exactly right.
+##
+## The radius is now a judgement rather than a constant, and it turns on
+## two things the old rule could not see:
+##
+## A PERSON IS WORTH MORE THAN A BOT. If the body is a human player, the
+## bar drops a long way. A child lying on the floor for forty-five seconds
+## while their computer team-mates decide it is a bit dangerous is the
+## worst version of this game, and there is always another bot.
+##
+## AND A CROWD CHANGES THE ODDS. If other able team-mates are near the
+## body too, going in is a group walking into a fight rather than one bot
+## kneeling in the open — so the bar drops for that as well, and they
+## arrive together, which is how it should have looked all along.
+##
+## Nearest first among equals, people before bots, so a bot does not walk
+## past somebody to reach somebody further away.
+func _bot_rescue_goal(id: String, pos: Vector3) -> Vector3:
+	var best := Vector3.INF
+	var best_rank := INF
+	for mate: String in world.downed_ids.keys():
+		if mate == id or world.teams_differ(id, mate) \
+				or not world.player_state.has(mate):
+			continue
+		var body: Vector3 = world.player_state[mate].pos
+		var away := pos.distance_to(body)
+		if away >= BOT_REVIVE_REACH:
+			continue
+		var is_person := not bool(Game.roster.get(mate, {}).get("bot", false))
+		var danger := BOT_REVIVE_DANGER
+		if is_person:
+			danger = BOT_REVIVE_DANGER_PERSON
+		elif _mates_near(mate, body) >= 2:
+			danger = BOT_REVIVE_DANGER * 0.5
+		# Only the BODY is tested, not the walk in. Testing the bot's own
+		# position too sounds more careful and is actually fatal: a bot in
+		# a firefight anywhere then never goes for anybody, and revives
+		# stopped happening at all.
+		if _under_fire(body, id, danger):
+			continue
+		# People first, then whoever is closest. The 1000 is simply bigger
+		# than any distance on this map.
+		var rank := away + (0.0 if is_person else 1000.0)
+		if rank < best_rank:
+			best_rank = rank
+			best = body
+	return best
+
+## How many able team-mates are already close to this body — the ones who
+## could be going in with you.
+func _mates_near(mate: String, body: Vector3) -> int:
+	var count := 0
+	for other: String in world.match_alive.keys():
+		if other == mate or world.downed_ids.has(other) \
+				or world.teams_differ(mate, other):
+			continue
+		var st: Dictionary = world.player_state.get(other, {})
+		if not st.is_empty() and Vector3(st.pos).distance_to(body) < BOT_REVIVE_CROWD:
+			count += 1
+	return count
 
 ## Where a knocked-down computer player drags itself. Towards the nearest
 ## team-mate who could actually pick it up, or failing that directly away
@@ -333,10 +407,85 @@ func ctf_goal(id: String, pos: Vector3) -> Vector3:
 	var best: Vector3 = world.ctf._flags[target].get("pos", Vector3.INF)
 	if best == Vector3.INF:
 		return best
-	# Each raider aims a little to one side of the last, so two arriving
-	# together fan out around the mound instead of treading on each other.
+	return _bot_assault_goal(id, team, best)
+
+## WHERE AN ATTACKER IS ACTUALLY GOING, which is not usually the flag.
+##
+## It used to be: the flag, plus a couple of blocks of jitter so two
+## arriving at once did not stand on each other. That is the whole of what
+## "they just run in a straight line at their target" was — they arrived
+## one at a time, from wherever they happened to be, over the same ground
+## every time, and that ground turned into a trench of craters from
+## whoever tried it last.
+##
+## Now they go in groups, from a side of their own, avoiding wherever the
+## last dozen knockouts happened — and one of each group goes underneath.
+## The arithmetic for all of that is in BotSquads, which knows nothing
+## about the world and can therefore be tested; this is the part that has
+## to look things up.
+func _bot_assault_goal(id: String, team: int, target: Vector3) -> Vector3:
+	var seats: Array = world.ctf.seats_of(team)
+	var seat := seats.find(id)
+	var keepers := _bot_ctf_keepers(team)
+	# Which attacker am I, counting past the ones minding the shop.
+	var index := maxi(0, seat - keepers)
+	var attackers := maxi(1, seats.size() - keepers)
+	var squad := BotSquads.squad_of(index)
+	var squads := BotSquads.squad_count(attackers)
+	var now := Time.get_ticks_msec()
+	var bearing := BotSquads.attack_bearing(squad, squads, float(now) * 0.001,
+		target, world.battle_scars)
+
+	# The digger is not part of the gathering: it left earlier and it is
+	# taking its own route. See _bot_sap.
+	var bot: Dictionary = roster.get(id, {})
+	var digging := BotSquads.is_sapper(index) and not bot.is_empty()
+	if not bot.is_empty():
+		bot.sapping = digging
+		bot.sap_at = target
+	if digging:
+		return target
+
+	var key := "%d:%d" % [team, squad]
+	# ALREADY GOING IN: keep going. Without this a squad that reached the
+	# push and then lost a member would drop back to gathering, walk out
+	# to the rally, and come in again — visible as an attack that turns
+	# round and leaves half way.
+	if now < int(_squad_push_until.get(key, 0)):
+		return _bot_fan_out(id, target)
+
+	var rally := BotSquads.point_on_bearing(target, bearing, BotSquads.RALLY_RANGE)
+	rally = world.store.clamp_inside(rally, 4)
+	rally.y = float(world.store.surface_y(floori(rally.x), floori(rally.z))) + 1.0
+
+	if not _squad_since.has(key):
+		_squad_since[key] = now
+	var waited := float(now - int(_squad_since[key])) * 0.001
+
+	var here := 0
+	var size := 0
+	for other_v: Variant in seats:
+		var other := str(other_v)
+		var other_seat := seats.find(other)
+		if BotSquads.squad_of(maxi(0, other_seat - keepers)) != squad:
+			continue
+		size += 1
+		var st: Dictionary = world.player_state.get(other, {})
+		if st.is_empty() or world.downed_ids.has(other):
+			continue
+		if Vector3(st.pos).distance_to(rally) < BotSquads.GATHER_RADIUS:
+			here += 1
+	if BotSquads.ready_to_push(here, size, waited):
+		_squad_push_until[key] = now + SQUAD_PUSH_MS
+		_squad_since.erase(key)
+		return _bot_fan_out(id, target)
+	return rally
+
+## A couple of blocks to one side of the flag, so a squad arriving
+## together spreads around the mound instead of treading on each other.
+func _bot_fan_out(id: String, target: Vector3) -> Vector3:
 	var lane := float(absi(id.hash()) % 5) - 2.0
-	return best + Vector3(lane, 0.0, float(absi(id.hash() >> 3) % 5) - 2.0)
+	return target + Vector3(lane, 0.0, float(absi(id.hash() >> 3) % 5) - 2.0)
 
 func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 	var pos: Vector3 = bot.pos
@@ -387,20 +536,9 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 		# at all. It is the least likely to survive the attempt and the
 		# most likely to become the next body.
 		if hp > 2:
-			for mate: String in world.downed_ids.keys():
-				if mate == id or world.teams_differ(id, mate) \
-						or not world.player_state.has(mate):
-					continue
-				var body: Vector3 = world.player_state[mate].pos
-				if pos.distance_to(body) >= 34.0:
-					continue
-				# Only the BODY is tested, not the walk in. Testing the
-				# bot's own position too sounds more careful and is
-				# actually fatal: a bot in a firefight anywhere then never
-				# goes for anybody, and revives stopped happening at all.
-				if _under_fire(body, id, BOT_REVIVE_DANGER):
-					continue
-				return body
+			var rescue := _bot_rescue_goal(id, pos)
+			if rescue != Vector3.INF:
+				return rescue
 		# Loot when unarmed.
 		if int(bot.weapon) == 13:
 			var best_crate := Vector3.INF
@@ -730,6 +868,36 @@ func _water_at(wx: int, wz: int) -> bool:
 ##   speed      how fast they move
 ##   nerve      how likely they are to close in rather than mill about
 
+## FLYING, for the computer players allowed it (WorldNode.fly_allowed_for).
+##
+## Not simply "on if permitted": a bot that flew everywhere would float
+## over the whole game at a fixed height and never be anywhere anybody
+## could fight it. It uses flight the way a person does — to get somewhere
+## it cannot walk to, and to get out of somewhere it is stuck in — and
+## comes down when it arrives.
+const BOT_FLY_HEIGHT := 7.0        ## cruise, in blocks above local ground
+const BOT_FLY_SPEED := 5.0         ## how fast it climbs and descends
+const BOT_FLY_CLIMB := 5.0         ## goal this far above ground: fly to it
+const BOT_FLY_LAND_RANGE := 3.5    ## this close, flat: come down and finish on foot
+
+## Squad bookkeeping, by "team:squad". `_squad_since` is when a squad
+## started waiting at its rally; `_squad_push_until` is how long it stays
+## committed once it has gone in, which is what makes the attacks come in
+## waves rather than dithering.
+var _squad_since: Dictionary = {}
+var _squad_push_until: Dictionary = {}
+const SQUAD_PUSH_MS := 26_000
+
+## THE SAPPER digs to its objective instead of walking to it.
+##
+## Underneath, at a depth the fighting overhead cannot reach — which makes
+## it the one attacker that does not care how cratered the ground is. It
+## comes up wherever it arrives, and mostly it is a nuisance rather than a
+## war winner, which is about right: the fun of it is that it happens at
+## all.
+const SAP_DEPTH := 4.0
+const SAP_COOLDOWN := 0.55
+
 const BOT_SKILL_NAMES := ["Rookie", "Steady", "Sharp", "Deadly"]
 
 ## How fast a computer player can work its trigger.
@@ -941,6 +1109,85 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, delta: float) -> v
 			world.cl_edits.rpc(pairs)
 		return
 
+## What height a flying computer player should be at, or INF for "it is
+## not flying — use the ground rules".
+##
+## The one thing this must not do is fly ALL the time. A bot permanently
+## at cruising height is out of everybody's reach and out of the game; the
+## point of giving computer players wings is that they can come at a base
+## over its wall instead of queueing at the door.
+##
+## So there are exactly three reasons to be in the air, and arriving ends
+## all of them:
+##   the goal is well above the ground here (a mound, a roof, a ledge)
+##   walking has stopped working (blocked, or wedged twice over)
+##   it is already flying and has not arrived yet — otherwise it would
+##   drop out of the sky the moment it cleared the wall
+func _bot_cruise_y(id: String, bot: Dictionary, flat: Vector2,
+		floor_y: float, delta: float) -> float:
+	# A ghost cannot touch the world and a downed bot is crawling; neither
+	# has any business in the air.
+	if world.downed_ids.has(id) or world.ghost_ids.has(id) \
+			or not world.fly_allowed_for(id):
+		bot.flying = false
+		return INF
+	var pos: Vector3 = bot.pos
+	var goal: Vector3 = bot.goal
+	var needs_height := goal.y - floor_y > BOT_FLY_CLIMB
+	var walking_failed := float(bot.get("blocked_t", 0.0)) > 0.8 \
+		or int(bot.get("wedged", 0)) >= 1
+	var arrived := flat.length() < BOT_FLY_LAND_RANGE
+	var flying := bool(bot.get("flying", false))
+	if arrived and not needs_height:
+		flying = false
+	elif needs_height or walking_failed:
+		flying = true
+	bot.flying = flying
+	if not flying:
+		return INF
+	# High enough to clear what stopped it, and high enough to be ABOVE
+	# the goal rather than level with it — coming down onto a mound works,
+	# flying into its side does not.
+	var cruise := maxf(floor_y + BOT_FLY_HEIGHT, goal.y + 2.0)
+	return move_toward(pos.y, cruise, BOT_FLY_SPEED * delta)
+
+## Drive the tunnel forward one bite, on its own cooldown.
+##
+## Two moves and no more: sink until we are under the fighting, then chew
+## towards the objective. Coming back up is not handled and does not need
+## to be — the ground rises and falls, so a tunnel held at a fixed depth
+## surfaces on its own soon enough.
+func _bot_sap(id: String, bot: Dictionary, pos: Vector3) -> void:
+	if float(bot.get("dig_cd", 0.0)) > 0.0:
+		return
+	var target: Vector3 = bot.get("sap_at", Vector3.INF)
+	if target == Vector3.INF or world.ghost_ids.has(id) or world.downed_ids.has(id):
+		return
+	var ground := float(world.store.surface_y(floori(pos.x), floori(pos.z)))
+	var want_y := minf(target.y - 1.0, ground - SAP_DEPTH)
+	if pos.y > want_y + 1.0:
+		# Not deep enough yet: take the floor out from under ourselves.
+		bot.dig_cd = SAP_COOLDOWN
+		var cleared: Array = []
+		for dy in [-1, -2]:
+			var cell := Vector3i(floori(pos.x), floori(pos.y) + dy, floori(pos.z))
+			if not world.store.inside_world(cell.x, cell.z, 1):
+				continue
+			var block := world.store.get_block(cell)
+			if block == Blocks.AIR or Blocks.is_liquid(block):
+				continue
+			if not world.can_carve(cell, block) or Blocks.hardness(block) >= 3:
+				continue
+			world.store.set_block(cell, Blocks.AIR)
+			cleared.append(cell)
+		if not cleared.is_empty():
+			world.cl_batch.rpc(cleared, Blocks.AIR)
+		return
+	var ahead := Vector2(target.x - pos.x, target.z - pos.z)
+	if ahead.length() < 0.001:
+		return
+	_bot_dig_out(id, bot, pos, ahead.normalized())
+
 func _bot_settle_ground(bot: Dictionary, delta: float) -> void:
 	var pos: Vector3 = bot.pos
 	var gy := walk_y(floori(pos.x), floori(pos.z), pos.y)
@@ -1033,6 +1280,11 @@ func tick(delta: float) -> void:
 		if bot.think <= 0.0:
 			bot.think = randf_range(0.35, 0.6)
 			bot.goal = _bot_pick_goal(id, bot)
+		# The tunnel advances every tick, not only when the bot is stuck.
+		# That is the whole difference between a sapper and a bot that
+		# happens to be digging its way out of a hole.
+		if bool(bot.get("sapping", false)):
+			_bot_sap(id, bot, pos)
 		var to_goal: Vector3 = Vector3(bot.goal) - pos
 		var flat := Vector2(to_goal.x, to_goal.z)
 		# ARRIVAL IS NOT A FLAT MEASUREMENT. Standing on a ledge with your
@@ -1055,6 +1307,12 @@ func tick(delta: float) -> void:
 				bot.think = randf_range(0.4, 0.8)
 		if flat.length() > 0.8:
 			var dir := _bot_steer(bot, pos, Vector3(bot.goal), delta)
+			# AIRBORNE: go straight there. The pathfinder walks the
+			# ground, so a flying bot asking it for directions gets routed
+			# round a wall it is currently above — or told there is no way
+			# through at all, which is how it came to be flying.
+			if bool(bot.get("flying", false)) and flat.length() > 0.001:
+				dir = flat.normalized()
 			# A DOWNED BOT CRAWLS. It used to be frozen solid — the whole
 			# steering block was gated on `not downed` — so a knocked-down
 			# computer player lay in the open, in the middle of whatever
@@ -1181,9 +1439,13 @@ func tick(delta: float) -> void:
 		if _water_at(floori(pos.x), floori(pos.z)):
 			# Bots swim: ride the surface instead of sinking to the seabed.
 			floor_y = maxf(floor_y, float(WorldGen.SEA_LEVEL) + 0.4)
-		if pos.y > floor_y + 3.0:
-			# Still airborne (the drop): glide down at human pace (-3,
-			# matching Player's drop glide exactly).
+		var cruise_y := _bot_cruise_y(id, bot, flat, floor_y, delta)
+		if cruise_y < INF:
+			pos.y = cruise_y
+		elif pos.y > floor_y + 3.0:
+			# Still airborne (the drop, or having just landed from a
+			# flight): glide down at human pace (-3, matching Player's
+			# drop glide exactly).
 			pos.y = maxf(pos.y - 3.0 * delta, floor_y)
 		else:
 			pos.y = lerpf(pos.y, floor_y, minf(1.0, delta * 8.0))

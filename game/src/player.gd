@@ -649,8 +649,9 @@ func _local_move(delta: float) -> void:
 	var jump_now := input.is_jump_pressed()
 	if jump_now and not _prev_jump:
 		var now := Time.get_ticks_msec()
-		# One rule in every mode: the world says whether anyone may fly.
-		var fly_allowed: bool = world.client_fly
+		# The world's setting, unless this player has been given their own
+		# answer — see WorldNode.fly_allowed_for.
+		var fly_allowed: bool = world.fly_allowed_for(player_id)
 		# 650ms, up from 480. A double-tap is a thing a nine-year-old has
 		# to do on purpose with a thumb, not a mouse, and under half a
 		# second was tighter than it needed to be.
