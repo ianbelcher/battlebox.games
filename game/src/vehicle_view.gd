@@ -62,9 +62,17 @@ func add_one(vid: String, kind: int, pos: Vector3, yaw: float,
 	add_child(node)
 	node.position = pos
 	node.rotation.y = yaw
+	# MINE IS NOT ALWAYS FALSE, and hard-coding it here is why a boat you
+	# were steering went dead under you. Any full refresh of the list —
+	# somebody joining, a vehicle being placed — rebuilds every entry
+	# through here, and this threw the helm away while you were still
+	# standing on the deck: `drive_mine` checks this flag and quietly
+	# returns false, so the boat carried you along and answered nothing.
+	# The driver is right there in the payload; ask the same question
+	# set_driver asks.
 	vehicles[vid] = {"kind": kind, "pos": pos, "yaw": yaw, "speed": 0.0,
 		"driver": driver, "node": node, "target_pos": pos, "target_yaw": yaw,
-		"mine": false}
+		"mine": driver != "" and Game.local_player_ids().has(driver)}
 
 func remove_one(vid: String) -> void:
 	_drop(vid)

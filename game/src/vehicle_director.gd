@@ -47,6 +47,7 @@ func board(vid: String, id: String) -> void:
 	if str(v.driver) != "" and _still_aboard(vid, str(v.driver)):
 		return
 	v.driver = id
+	v.off_since = 0
 	world.cl_vehicle_helm.rpc(vid, id)
 
 func leave(vid: String, id: String) -> void:
@@ -92,6 +93,22 @@ func _still_aboard(vid: String, id: String) -> bool:
 	return VehicleGeom.on_deck(int(v.kind), Vector3(v.pos), float(v.yaw),
 		Vector3(where.pos))
 
+## HOW LONG A DRIVER MAY LOOK OFF THE DECK BEFORE LOSING THE HELM.
+##
+## Not one frame, which is what it was. The two positions this is judged
+## between come from two different machines at two different rates — the
+## boat from whoever is steering it, the driver's own body from their
+## client at twelve a second — so while a boat is MOVING the two disagree
+## almost constantly. The helm was being taken off the driver several
+## times a second and handed straight back: the boat went on carrying
+## them and stopped answering the controls, which is exactly "I get on top
+## of them and it pulls me into it but I can't control it".
+##
+## A second and a half is far longer than any disagreement lag can
+## produce, and far shorter than anybody will notice when somebody really
+## has walked off.
+const HELM_GRACE_MS := 1500
+
 func _process(_delta: float) -> void:
 	if not multiplayer.is_server():
 		return
@@ -102,9 +119,19 @@ func _process(_delta: float) -> void:
 		var v: Dictionary = vehicles[vid]
 		if str(v.driver) == "":
 			continue
-		if not _still_aboard(vid, str(v.driver)):
-			v.driver = ""
-			world.cl_vehicle_helm.rpc(vid, "")
+		if _still_aboard(vid, str(v.driver)):
+			v.off_since = 0
+			continue
+		# NOT ON THE FIRST FRAME IT LOOKS WRONG. See HELM_GRACE_MS.
+		var since := int(v.get("off_since", 0))
+		if since == 0:
+			v.off_since = Time.get_ticks_msec()
+			continue
+		if Time.get_ticks_msec() - since < HELM_GRACE_MS:
+			continue
+		v.driver = ""
+		v.off_since = 0
+		world.cl_vehicle_helm.rpc(vid, "")
 
 ## Put the thing where it belongs: a boat on the water, a car on the
 ## ground. The same rule the client uses while driving, applied once when

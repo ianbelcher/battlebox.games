@@ -474,13 +474,8 @@ func eliminate(id: String, attacker := "") -> void:
 	# Reviving is a mode setting in capture the flag: with it off, a
 	# knockout puts you straight OUT and the only way back is
 	# your own flag.
-	# NOBODY COMES BACK, if the table asked for that. It overrides the
-	# capture-the-flag setting rather than sitting beside it: there is no
-	# sensible reading of "no reviving" that still lets a team-mate stand
-	# you up.
-	var can_revive: bool = world.ctf_revive if world.ctf.active() else true
-	if world.no_revive:
-		can_revive = false
+	# One rung of one ladder — see ReviveRule.
+	var can_revive: bool = ReviveRule.mates_can_lift(world.revive_mode)
 	if has_standing_mate and can_revive:
 		world.downed_ids[id] = Time.get_ticks_msec()
 		world.cl_downed_state.rpc(id, true)

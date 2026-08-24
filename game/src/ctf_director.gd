@@ -609,11 +609,12 @@ func teams_surviving() -> Array:
 ## Guarding the junction rather than each of the three routes is the point:
 ## a fourth route added later cannot forget.
 func respawn(id: String) -> void:
-	# NOBODY COMES BACK. Guarding the junction rather than each route is
-	# the point — touching your own flag, the channel a computer player
-	# stands through, and the backstop that recovers a bot walled into a
-	# pit all end up here, and a fourth route added later cannot forget.
-	if world.no_revive:
+	# THE FLAG ROUTE, and whether it is open. Guarding the junction rather
+	# than each route is the point — touching your own flag, the channel a
+	# computer player stands through, and the backstop that recovers a bot
+	# walled into a pit all end up here, and a fourth route added later
+	# cannot forget. See ReviveRule.
+	if not ReviveRule.flag_brings_you_back(world.revive_mode, active()):
 		return
 	if elimination() and team_is_out(int(Game.roster.get(id, {}).get("team", -1))):
 		return

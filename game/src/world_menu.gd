@@ -56,7 +56,6 @@ var _players_box: VBoxContainer
 var _map_row: HBoxContainer
 var _saved_label: Label
 var _saved_row: HBoxContainer
-var _server_edit: LineEdit
 var _mode_btns: Dictionary = {}
 var _length_btns: Dictionary = {}
 var _size_btns: Dictionary = {}
@@ -66,7 +65,6 @@ var _battle_only: Array = []
 var _fight_only: Array = []
 var _ctf_only: Array = []
 var _capture_only: Array = []
-var _norevive_btns: Dictionary = {}
 var _holdout_only: Array = []
 var _drop_btns: Dictionary = {}
 var _target_btns: Dictionary = {}
@@ -226,6 +224,7 @@ func _ready() -> void:
 	_build_game_tab()
 	_build_map_tab()
 	_build_players_tab()
+	_build_score_tab()
 	_build_audio_tab()
 	_build_video_tab()
 	_build_credits_tab()
@@ -453,8 +452,7 @@ func _build_map_tab() -> void:
 	# what any of them means. Doubling each time gives three that are
 	# obviously different from each other: a garden, a park, and further
 	# than anyone is going to walk.
-	var size_card := _section(box, "Size of the world",
-		"How far out you can roam, in blocks. Applies in both modes.")
+	var size_card := _section(box, "Size of the world")
 	var size_row := _row(size_card)
 	for arena in [50, 100, 200, 400, 800]:
 		var blocks: int = arena
@@ -464,29 +462,10 @@ func _build_map_tab() -> void:
 		_min(btn, 88, 42)
 		_size_btns[arena] = btn
 
-	var server_card := _section(box, "Server",
-		"The game connects here by itself on start-up.")
-	var server_row := _row(server_card)
-	_server_edit = LineEdit.new()
-	_server_edit.text = Game.server_url()
-	_server_edit.focus_mode = Control.FOCUS_ALL
-	_server_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_min(_server_edit, 300, 46)
-	_font(_server_edit, UiTheme.T_BODY)
-	server_row.add_child(_server_edit)
-	var use := _button("Use this server", func() -> void:
-		var url := _server_edit.text.strip_edges()
-		if url.is_empty():
-			return
-		if not url.begins_with("ws://") and not url.begins_with("wss://"):
-			url = "ws://" + url
-		Game.set_server_url(url)
-		close()
-		# Dropping the link is enough — main.gd shows the reconnecting
-		# banner and dials the new address by itself.
-		Net.disconnect_now())
-	_min(use, 200, 46)
-	server_row.add_child(use)
+	# NO SERVER BOX. Typing an address into the game you reached BY its
+	# address is a question with one answer: you are already there.
+	# It was a text field a child could edit into a dead link and then
+	# be unable to get back from.
 
 func _refresh_maps() -> void:
 	if _map_row == null:
@@ -531,9 +510,7 @@ func _map_button(key: String, label: String) -> Button:
 
 func _build_game_tab() -> void:
 	var box := _tab("Game")
-	_build_live_score(box)
-	var mode_card := _section(box, "How are we playing?",
-		"Just building is the calm one: no storm, no hearts, nothing can hurt you.")
+	var mode_card := _section(box, "How are we playing?")
 	var mode_row := _row(mode_card)
 	for spec in [["creative", "🔨  Just building"], ["battle", "🏆  Battle royale"],
 			["ctf", "⚑  Capture the flag"],
@@ -545,34 +522,32 @@ func _build_game_tab() -> void:
 		_min(btn, 150, 62)
 		_mode_btns[key] = btn
 
-	# Creative has no settings of its own, which left this tab as one row
-	# of buttons above half a screen of nothing. Say what the mode IS
-	# instead: the space is doing work, and a child reading it learns what
-	# the other button would change.
-	var calm_group := VBoxContainer.new()
-	calm_group.add_theme_constant_override("separation", _s(8))
-	box.add_child(calm_group)
-	_creative_only.append(calm_group)
-	var calm := _section(calm_group, "What just building means")
-	for line in ["Nothing can hurt you — no hearts, no storm, no timer.",
-			"Everyone builds in the same world, and it lasts until the "
-				+ "server restarts — nothing is saved to disk.",
-			"The map and how big it is are on the Map tab; who can fly is on Players.",
-			"Switch to Battle royale for teams, weapons and the shrinking storm."]:
-		var bullet := Label.new()
-		bullet.text = "•   " + str(line)
-		bullet.add_theme_color_override("font_color", UiTheme.INK_DIM)
-		bullet.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		calm.add_child(_font(bullet, UiTheme.T_LABEL))
-
-	# Knockouts work the same way in every mode that HAS them, so this one
-	# sits above the per-mode settings and is shown for both.
+	# Knockouts work the same way in every mode that HAS them, so these sit
+	# above the per-mode settings and show for all of them.
 	var ko_group := VBoxContainer.new()
 	ko_group.add_theme_constant_override("separation", _s(8))
 	box.add_child(ko_group)
 	_fight_only.append(ko_group)
-	var ko_card := _section(ko_group, "When you are knocked out",
-		"Dropping is off by default: someone who found a blaster keeps it.")
+
+	# GETTING BACK UP IS ONE QUESTION. It was two cards — "can you be
+	# picked up" and "getting back up" — with CAPTURING sitting between
+	# them, and they are not separate settings, they are three rungs of
+	# one ladder. Split apart they could be set to contradict each other.
+	# See ReviveRule.
+	var rev_card := _section(ko_group, "Getting back up")
+	var rev_row := _row(rev_card)
+	for mode_v: int in ReviveRule.choices(true):
+		var rev_val: int = mode_v
+		var btn4 := _choice(rev_row, ReviveRule.label(rev_val), func() -> void:
+			if Game.world != null:
+				Game.world.sv_ctf_config.rpc_id(1, rev_val, -1, -1))
+		_min(btn4, 190, 44)
+		_revive_btns[rev_val] = btn4
+		# Flying home to your own flag needs a flag to fly to.
+		if rev_val == ReviveRule.MATES_AND_FLAG:
+			_ctf_only.append(btn4)
+
+	var ko_card := _section(ko_group, "When you are knocked out")
 	var ko_row := _row(ko_card)
 	for spec2 in [[0, "Keep your weapons"], [1, "Drop them where you fell"]]:
 		var drop_val: int = spec2[0]
@@ -582,36 +557,14 @@ func _build_game_tab() -> void:
 		_min(btn2, 150, 44)
 		_drop_btns[drop_val] = btn2
 
-	# CAN ANYBODY BE PICKED UP AT ALL — and this is not a flag-mode
-	# question, which is why it sits up here with the knockout setting
-	# rather than inside the capture-the-flag group. Battle royale wants it
-	# as much as anything else does.
-	var back_card := _section(ko_group, "Can you be picked up?",
-		"Being stood back up is what keeps somebody in a round they would "
-		+ "otherwise spend watching. Turning it off is a harder game.")
-	var back_row := _row(back_card)
-	for spec4 in [[0, "Yes — you can be revived"],
-			[1, "No — one knockout and you're out"]]:
-		var none_val: int = spec4[0]
-		var btn5 := _choice(back_row, str(spec4[1]), func() -> void:
-			if Game.world != null:
-				Game.world.sv_ctf_config.rpc_id(1, -1, -1, -1, none_val))
-		_min(btn5, 210, 44)
-		_norevive_btns[none_val] = btn5
-
-	# CAPTURING IS NOT IN EVERY FLAG MODE. This card went in `_ctf_only`,
-	# which is shown for `flag_mode()` — and that covers last flag
-	# standing as well, where there is no capturing and no target to reach:
-	# you take a flag to knock a team OUT, and the round ends when one
-	# side is left or the clock runs down. So "First to 3" sat there in a
-	# mode it means nothing in, which is how it was reported.
+	# CAPTURING IS NOT IN EVERY FLAG MODE. This showed for `flag_mode()`,
+	# which covers last flag standing — where there is no capturing and no
+	# target to reach: you take a flag to knock a team OUT.
 	var cap_group := VBoxContainer.new()
 	cap_group.add_theme_constant_override("separation", _s(8))
 	box.add_child(cap_group)
 	_capture_only.append(cap_group)
-	var ctf_card := _section(cap_group, "Capturing",
-		"Touch another team's flag to score. There is no clock — the round "
-		+ "ends when someone reaches the target.")
+	var ctf_card := _section(cap_group, "Capturing")
 	var target_row := _row(ctf_card)
 	for t in [1, 3, 5, 10]:
 		var target_val: int = t
@@ -620,59 +573,31 @@ func _build_game_tab() -> void:
 				Game.world.sv_ctf_config.rpc_id(1, -1, target_val, -1))
 		_min(btn3, 96, 44)
 		_target_btns[target_val] = btn3
-	# Keep this note SHORT. It is one label in a card that grows to fit it,
-	# so a long sentence here stretches the whole menu panel out past the
-	# edge of the screen. Four lines of explanation used to live here and
-	# it made the modal unusable.
-	# Getting back up applies to both flag modes, so it stays in the group
-	# that shows for either.
-	var ctf_group := VBoxContainer.new()
-	ctf_group.add_theme_constant_override("separation", _s(8))
-	box.add_child(ctf_group)
-	_ctf_only.append(ctf_group)
-	var rev_card := _section(ctf_group, "Getting back up",
-		"Fly home and touch your own flag.")
-	var rev_row := _row(rev_card)
-	for spec3 in [[1, "Team-mates can pick you up too"],
-			[0, "Only flying home brings you back"]]:
-		var rev_val: int = spec3[0]
-		var btn4 := _choice(rev_row, str(spec3[1]), func() -> void:
-			if Game.world != null:
-				Game.world.sv_ctf_config.rpc_id(1, rev_val, -1, -1))
-		_min(btn4, 170, 44)
-		_revive_btns[rev_val] = btn4
 
-	# LAST FLAG STANDING HAD NOTHING AT ALL HERE, which is worse than
-	# showing the wrong card: a mode with a clock, an elimination rule and
-	# a scoring table that is unlike anything else in the game, explained
-	# nowhere.
+	# Last flag standing had nothing here at all, which is worse than the
+	# wrong card: a mode with a clock, an elimination rule and a scoring
+	# table unlike anything else in the game, explained nowhere.
 	var hold_group := VBoxContainer.new()
 	hold_group.add_theme_constant_override("separation", _s(8))
 	box.add_child(hold_group)
 	_holdout_only.append(hold_group)
-	var hold_card := _section(hold_group, "Last flag",
-		"Lose your flag and your whole team is out — there is no coming "
-		+ "back. %d minutes on the clock." % int(HoldoutRules.ROUND_MINUTES))
-	for line in ["%d points if you are the last team holding."
-				% HoldoutRules.ROUND_POINTS,
-			"Two teams left at the whistle: %d each. Three: %d each."
-				% [HoldoutRules.share(2), HoldoutRules.share(3)],
-			"Four or more still holding and nobody scores — dig in, but go "
-				+ "and take one."]:
+	var hold_card := _section(hold_group, "Last flag")
+	for line in ["Lose your flag and your team is out. %d minutes."
+				% int(HoldoutRules.ROUND_MINUTES),
+			"Last team holding: %d points." % HoldoutRules.ROUND_POINTS,
+			"Two left: %d each. Three: %d each. Four or more: none."
+				% [HoldoutRules.share(2), HoldoutRules.share(3)]]:
 		var bullet := Label.new()
 		bullet.text = "•   " + str(line)
 		bullet.add_theme_color_override("font_color", UiTheme.INK_DIM)
 		bullet.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		hold_card.add_child(_font(bullet, UiTheme.T_LABEL))
 
-	# Battle-only settings are hidden outright in creative rather than
-	# greyed out — one less thing for a child to poke at.
 	var len_group := VBoxContainer.new()
 	len_group.add_theme_constant_override("separation", _s(8))
 	box.add_child(len_group)
 	_battle_only.append(len_group)
-	var len_card := _section(len_group, "How long a battle lasts",
-		"Only used in battle royale. The world's size lives on the Map tab.")
+	var len_card := _section(len_group, "How long a battle lasts")
 	var len_row := _row(len_card)
 	for preset in [[3, "3 min"], [5, "5 min"], [8, "8 min"], [60, "Unlimited"]]:
 		var minutes: int = preset[0]
@@ -682,43 +607,68 @@ func _build_game_tab() -> void:
 		_min(btn, 120, 46)
 		_length_btns[minutes] = btn
 
-## HOW THE ROUND IS ACTUALLY GOING, in the menu, while it is going.
+
+## HOW THE ROUND IS GOING — its own tab, next to Players.
 ##
-## The scores existed in exactly two places: along the side of the screen
-## during play, and on the end card afterwards. Open the menu mid-round —
-## which is the obvious thing to do if you want to check the score — and
-## there was nothing, and if the round then ended or was restarted the
-## only way back to that number was to play another one. In last flag
-## standing that is ten minutes to answer "how are we doing".
+## It was a card at the top of the Game tab, above "How are we playing?",
+## which is a settings page: you went to the game SETTINGS to read the
+## SCORE, and the first thing above the mode buttons was a table. Wrong
+## place, and wrong thing to put first.
 ##
-## Same table as the end card so the two cannot disagree, and it is built
-## fresh on a signature the way the players list is, because a scoreboard
-## that lags the round it describes is worse than none.
-var _score_card: VBoxContainer
+## The scores otherwise live in exactly two places — down the side during
+## play, and on the end card — so opening the menu mid-round to check them
+## showed nothing, and once the round ended the only way back to the
+## number was to play another. In last flag standing that is ten minutes
+## to answer "how are we doing".
+##
+## COLUMNS NEED HEADINGS. The first version had none, so a row read
+## "Blue  holding  3 took  3  1/1 up" and there was no way to tell what
+## any of those numbers were. Same table as the end card, so the two
+## cannot disagree.
 var _score_rows: VBoxContainer
 var _score_sig := ""
+var _score_empty: Label
 
-func _build_live_score(box: Control) -> void:
-	_score_card = VBoxContainer.new()
-	_score_card.add_theme_constant_override("separation", _s(8))
-	_score_card.visible = false
-	box.add_child(_score_card)
-	var card := _section(_score_card, "How it is going")
+func _build_score_tab() -> void:
+	var box := _tab("Score")
+	var card := _section(box, "How it is going")
+	_score_empty = Label.new()
+	_score_empty.text = "No round is running. Start one from the Game tab."
+	_score_empty.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	card.add_child(_font(_score_empty, UiTheme.T_LABEL))
 	_score_rows = VBoxContainer.new()
 	_score_rows.add_theme_constant_override("separation", _s(2))
 	card.add_child(_score_rows)
 
+## One row of the table. `head` draws it as a heading rather than a team.
+func _score_row(cells: Array, tint: Color, head := false) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _s(10))
+	_score_rows.add_child(row)
+	for cell: Array in cells:
+		var lbl := Label.new()
+		lbl.text = str(cell[0])
+		lbl.custom_minimum_size = Vector2(_s(int(cell[1])), 0)
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT if int(cell[1]) > 100 \
+			else HORIZONTAL_ALIGNMENT_RIGHT
+		lbl.add_theme_color_override("font_color", UiTheme.INK_FAINT if head else tint)
+		_font(lbl, UiTheme.T_NOTE if head else UiTheme.T_LABEL)
+		row.add_child(lbl)
+
 func _refresh_live_score() -> void:
-	if _score_card == null or world == null:
+	if _score_rows == null or world == null:
 		return
 	var running: bool = world.match_phase != "IDLE" and world.client_mode != "creative"
-	_score_card.visible = running
+	_score_empty.visible = not running
 	if not running:
-		_score_sig = ""
+		if _score_sig != "":
+			_score_sig = ""
+			for stale in _score_rows.get_children():
+				stale.queue_free()
 		return
 	var flags: bool = world.flag_mode()
 	var sig := "%s|%s|%s|%s|%d" % [world.match_phase, str(world.ctf_scores),
-		str(world.ctf_caps), str(world.alive_ids.size()), int(world.team_count)]
+		str(world.ctf_caps), str(world.alive_ids), int(world.team_count)]
 	if sig == _score_sig:
 		return
 	_score_sig = sig
@@ -730,8 +680,18 @@ func _refresh_live_score() -> void:
 	if flags:
 		order.sort_custom(func(a: int, b: int) -> bool:
 			return int(world.ctf_scores.get(a, 0)) > int(world.ctf_scores.get(b, 0)))
-	for t_v: Variant in order:
-		var t := int(t_v)
+	var head: Array = [["TEAM", 130], ["STILL UP", 80]]
+	if flags:
+		head.append(["FLAG", 80])
+		head.append(["TOOK", 60])
+		head.append(["LOST", 60])
+		# Last flag standing is settled once, at the whistle — a running
+		# score would be a number that means nothing until then.
+		if world.client_mode != "holdout":
+			head.append(["SCORE", 60])
+	_score_row(head, UiTheme.INK_FAINT, true)
+	for team_v: Variant in order:
+		var t := int(team_v)
 		var standing := 0
 		var total := 0
 		for rid: String in Game.roster.keys():
@@ -742,27 +702,16 @@ func _refresh_live_score() -> void:
 				standing += 1
 		if total == 0:
 			continue
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", _s(10))
-		_score_rows.add_child(row)
-		var tint: Color = WorldNode.TEAM_COLORS[t % WorldNode.TEAM_COLORS.size()]
-		# In last flag standing the score is only settled at the whistle,
-		# so what matters mid-round is whether your pole is still up.
-		var cells: Array = [[_team_name(t), 130]]
+		var cells: Array = [[_team_name(t), 130], ["%d of %d" % [standing, total], 80]]
 		if flags:
-			cells.append(["out" if _flag_gone(t) else "holding", 80])
-			cells.append(["%d took" % int(world.ctf_caps.get(t, 0)), 80])
+			cells.append(["gone" if _flag_gone(t) else "up", 80])
+			cells.append([str(int(world.ctf_caps.get(t, 0))), 60])
+			cells.append([str(int(world.ctf_lost.get(t, 0))), 60])
 			if world.client_mode != "holdout":
-				cells.append(["%d" % int(world.ctf_scores.get(t, 0)), 50])
-		cells.append(["%d/%d up" % [standing, total], 80])
-		for cell: Array in cells:
-			var lbl := Label.new()
-			lbl.text = str(cell[0])
-			lbl.custom_minimum_size = Vector2(_s(int(cell[1])), 0)
-			lbl.add_theme_color_override("font_color",
-				tint if standing > 0 else Color(0.55, 0.55, 0.6))
-			_font(lbl, UiTheme.T_LABEL)
-			row.add_child(lbl)
+				cells.append([str(int(world.ctf_scores.get(t, 0))), 60])
+		_score_row(cells, WorldNode.TEAM_COLORS[t % WorldNode.TEAM_COLORS.size()] \
+			if standing > 0 else Color(0.55, 0.55, 0.6))
+
 
 ## Has this team's flag been taken for good? Client-side, off the flag
 ## list the server broadcasts.
@@ -788,11 +737,17 @@ func _build_players_tab() -> void:
 	# bundled font and rendered as tofu boxes.
 	var team_row := _row(manage_card)
 	var bot_row := _row(manage_card)
+	var fill_row := _row(manage_card)
 	for spec in [["+  Add a team", "add_team", 0],
 			["−  Remove a team", "remove_team", 0],
 			["+  Add a computer player", "add_bot", 1],
-			["−  Remove a computer player", "remove_bot", 1]]:
-		var manage: HBoxContainer = bot_row if int(spec[2]) == 1 else team_row
+			["−  Remove a computer player", "remove_bot", 1],
+			["⧉  Fill up to %d" % Game.MAX_PLAYERS, "fill_bots", 2]]:
+		var manage: HBoxContainer = team_row
+		if int(spec[2]) == 1:
+			manage = bot_row
+		elif int(spec[2]) == 2:
+			manage = fill_row
 		var action := str(spec[1])
 		var press := func() -> void:
 			if Game.world == null:
@@ -806,6 +761,8 @@ func _build_players_tab() -> void:
 					Game.world.sv_add_bot.rpc_id(1)
 				"remove_bot":
 					Game.world.sv_remove_bot.rpc_id(1, "")
+				"fill_bots":
+					Game.world.sv_fill_bots.rpc_id(1)
 		var btn := _choice(manage, str(spec[0]), press)
 		_min(btn, 150, 50)
 		if action == "add_bot":
@@ -927,17 +884,20 @@ func _refresh_players() -> void:
 ## read for an answer nobody was giving in terms of teams, and the row
 ## grew every time a team was added. Anyone who wants one player in the
 ## air taps the ✈ against their name in the table below.
+## NOBODY FIRST, because it is the default and the list should read in the
+## order it steps up: nobody, then everybody, then one side or the other.
+## Flying has to be switched ON deliberately — a game where everyone can
+## fly by default is a game nobody walks anywhere in.
 const FLY_ANSWERS := [
-	["Everyone", "everyone"],
 	["Nobody", "nobody"],
-	["Computers only", "computers"],
+	["Everyone", "everyone"],
 	["Humans only", "humans"],
+	["Computers only", "computers"],
 ]
 
 func _build_flying_card(box: Control) -> void:
 	var card := _section(box, "Who can fly",
-		"Double-tap jump to fly. Pick an answer for everybody, or tap ✈ "
-		+ "beside one name below to decide about them on their own.")
+		"Double-tap jump. Or tap ✈ beside one name to decide about them.")
 	var row := _row(card)
 	for spec in FLY_ANSWERS:
 		var answer := str(spec[1])
@@ -1381,15 +1341,7 @@ func _refresh(force := false) -> void:
 	for val: int in _drop_btns:
 		_mark(_drop_btns[val], (val == 1) == world.client_drop)
 	for val: int in _revive_btns:
-		_mark(_revive_btns[val], (val == 1) == world.client_ctf_revive)
-	for val: int in _norevive_btns:
-		_mark(_norevive_btns[val], (val == 1) == world.client_no_revive)
-	# With nobody coming back, HOW they would have come back is not a
-	# question worth asking, so that card goes.
-	if world.client_no_revive:
-		for gone_node in _ctf_only:
-			if is_instance_valid(gone_node):
-				(gone_node as Control).visible = false
+		_mark(_revive_btns[val], val == world.client_revive_mode)
 	for val: int in _target_btns:
 		_mark(_target_btns[val], val == world.client_ctf_target)
 

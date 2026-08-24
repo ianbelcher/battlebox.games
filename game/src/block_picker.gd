@@ -171,6 +171,13 @@ func set_allowed(ids: Array) -> void:
 func _allowed(index: int) -> bool:
 	if allowed_ids.is_empty():
 		return true
+	# THE CARRY LIST IS ABOUT WEAPONS. A boat is not something you are
+	# holding, it is something you put down — and its "id" is a vehicle
+	# kind, 0 or 1, which collides with weapon ids by accident. So in a
+	# battle a boat was offered only if you happened to be carrying
+	# weapon 0, which is nonsense in both directions.
+	if str(entries[index].get("kind", "")) == "vehicle":
+		return true
 	return int(entries[index].id) in allowed_ids
 
 func fit(avail: Vector2) -> void:

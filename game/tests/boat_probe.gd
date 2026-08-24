@@ -36,6 +36,8 @@ var _phase := 0
 var _ticks := 0
 var _vid := ""
 var _from := Vector3.ZERO
+var _had := 0
+var _waited := 0.0
 var _failures := 0
 var _quiet: InputSlot = null
 
@@ -79,7 +81,21 @@ func _physics_process(delta: float) -> void:
 					_report(false, "no vehicles ever arrived from the server")
 					_finish()
 				return
-			_vid = str(view.vehicles.keys()[0])
+			# ONE NOBODY IS ALREADY DRIVING. This runs as a second client
+			# against a world that already has players in it, and the
+			# first one aboard keeps the helm — so grabbing whichever
+			# boat came first and then asserting the wheel is yours is a
+			# test of who got there first, not of whether steering works.
+			_vid = ""
+			for vid_v: Variant in view.vehicles.keys():
+				if view.driver_of(str(vid_v)).is_empty():
+					_vid = str(vid_v)
+					break
+			if _vid.is_empty():
+				if _t > START_AFTER + 20.0:
+					_report(false, "every vehicle already had a driver")
+					_finish()
+				return
 			_stand_on(me, view, Vector3(0.0, 0.0, 0.0))
 			_step()
 		1:
@@ -135,7 +151,75 @@ func _physics_process(delta: float) -> void:
 			var swung := me.position.distance_to(_from)
 			_report(swung > 1.0 and swung < 8.0,
 				"and the rider swung round with it (%.2f blocks)" % swung)
-			_finish()
+			_step()
+		5:
+			if _ticks < SETTLE:
+				return
+			# THE HELM, which is the half this probe never checked. Every
+			# test above moves the boat itself and then looks at the
+			# rider, so a boat that carried people perfectly and answered
+			# nothing at all passed the lot — which is exactly what
+			# shipped: "I get on top of them and it pulls me into it but I
+			# can't control it".
+			var helm: Dictionary = view.at(_vid)
+			if view.driver_of(_vid).is_empty() and _ticks < SETTLE * 3:
+				# Ask once more and wait. Being carried about by a boat
+				# can take you off its deck for a frame, which frees the
+				# helm — and the re-board is the game's own path.
+				Game.world.sv_vehicle_board.rpc_id(1, _vid, me.slot)
+				return
+			_report(view.driver_of(_vid) == me.player_id,
+				"standing on a boat hands you the helm (driver=%s)"
+				% view.driver_of(_vid))
+			_report(bool(helm.get("mine", false)),
+				"…and this machine knows the helm is its own")
+			_from = Vector3(helm.pos)
+			_step()
+		6:
+			# SPEED, not distance travelled. Player._ride drives this same
+			# boat every frame with whatever the stick says — nothing,
+			# here, because the probe holds the controls still — so a
+			# distance measured over several ticks is this probe opening
+			# the throttle and the game closing it again, and it comes out
+			# at a hundredth of a block however well steering works.
+			#
+			# One call, and did it take? That is the whole question the
+			# helm bug was about: with `mine` false, drive_mine returns
+			# false and changes nothing, and the boat carries you about
+			# answering none of the controls.
+			var before: float = float(view.at(_vid).get("speed", 0.0))
+			var answered := view.drive_mine(_vid, 1.0, 0.0, delta)
+			var after: float = float(view.at(_vid).get("speed", 0.0))
+			_report(answered, "the throttle answers at all")
+			_report(after > before,
+				"and opening it puts speed on (%.2f → %.2f)" % [before, after])
+			_had = view.vehicles.size()
+			# PUTTING ONE DOWN, which is the other half nothing covered.
+			# The tools tray called `sv_vehicle_place` and no such method
+			# existed anywhere, so choosing a boat or a car and clicking
+			# did nothing at all, in every mode.
+			Game.world.sv_vehicle_place.rpc_id(1, me.slot,
+				Vector3i(floori(me.position.x) + 3, floori(me.position.y),
+					floori(me.position.z)), VehicleGeom.KIND_CAR)
+			_step()
+		7:
+			# WAIT ON THE ANSWER, not on a tick count. Every other phase
+			# here measures something local and two ticks is plenty;
+			# this one asked the SERVER for a vehicle and then looked
+			# four physics ticks later — about seventy milliseconds — for
+			# a round trip that had not happened yet. It passed alone and
+			# failed against a busier world, which is the shape of a
+			# timing bug in the test rather than in the game.
+			if view.vehicles.size() > _had:
+				_report(true, "a car can be put down (%d → %d)"
+					% [_had, view.vehicles.size()])
+				_finish()
+				return
+			_waited += delta
+			if _waited > 4.0:
+				_report(false, "a car can be put down (%d → %d after %.1fs)"
+					% [_had, view.vehicles.size(), _waited])
+				_finish()
 
 func _step() -> void:
 	_phase += 1

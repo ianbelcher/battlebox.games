@@ -27,6 +27,9 @@ const WALL_CLIMB_SPEED := 1.0
 ## position delta carries people along fine in a straight line and slides
 ## them off the side in a turn.
 var ride_id := ""
+## How often a rider re-asks for a helm nobody is holding.
+const HELM_RETRY_SECONDS := 0.5
+var _helm_ask := 0.0
 ## Where the vehicle was last physics frame, so this frame's motion can be
 ## worked out and applied to whoever is standing on it.
 var _ride_was := ""
@@ -755,6 +758,26 @@ func _ride(delta: float) -> void:
 	if ride_id.is_empty():
 		_ride_was = ""
 		return
+	# ASK AGAIN IF NOBODY IS DRIVING THE THING YOU ARE STANDING ON.
+	#
+	# The helm is granted by the server as its own message, and the full
+	# vehicle list is another — so the two cross. A list built a moment
+	# BEFORE the grant, arriving a moment AFTER it, rebuilds every
+	# vehicle from a payload that says nobody is driving, and the helm is
+	# quietly gone. The boat still carries you; it just stops answering,
+	# which is precisely "it pulls me into it but I can't control it".
+	#
+	# Standing on a driverless vehicle is a state that should never
+	# persist, so say so again. Reliable, throttled, and self-healing —
+	# it also covers a dropped packet and a join landing mid-handover,
+	# which no amount of ordering the two messages would.
+	if view.driver_of(ride_id).is_empty():
+		_helm_ask -= delta
+		if _helm_ask <= 0.0:
+			_helm_ask = HELM_RETRY_SECONDS
+			world.sv_vehicle_board.rpc_id(1, ride_id, slot)
+	else:
+		_helm_ask = 0.0
 	var v: Dictionary = view.at(ride_id)
 	if v.is_empty():
 		ride_id = ""

@@ -5,7 +5,7 @@ extends Control
 ## weapon is a bold colored roundel with its initial.
 
 var block_id := 0
-var kind := "block"   # block / weapon / structure
+var kind := "block"   # block / weapon / structure / vehicle
 var dimmed := false
 var badge := ""
 
@@ -42,8 +42,46 @@ func _draw() -> void:
 		_draw_weapon(w, h, mid)
 	elif kind == "structure":
 		_draw_structure(w, h)
+	elif kind == "vehicle":
+		_draw_vehicle(w, h)
 	else:
 		_draw_block(w, h, mid)
+
+## A BOAT OR A CAR, in profile.
+##
+## There was no branch for this at all, so both fell through to
+## `_draw_block` with the vehicle KIND as a block id — 0 and 1, which are
+## air and stone. A car drew as a grey cube and a boat as nothing, which
+## is why there was "no icon for car".
+##
+## Drawn rather than rendered: these are two shapes and a wheel, and a
+## model would need a viewport per icon for something the size of a
+## thumbnail.
+func _draw_vehicle(w: float, h: float) -> void:
+	var boat: bool = block_id == VehicleGeom.KIND_BOAT
+	var body: Color = Color("8a5a34") if boat else Color("c8503c")
+	var trim: Color = Color("d8c39a") if boat else Color("2f3542")
+	draw_rect(Rect2(w * 0.06, h * 0.30, w * 0.88, h * 0.40),
+		Color(body.r, body.g, body.b, 0.16))
+	if boat:
+		# A hull: flat deck, sloped bow and stern, and a mast.
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(w * 0.12, h * 0.56), Vector2(w * 0.88, h * 0.56),
+			Vector2(w * 0.74, h * 0.76), Vector2(w * 0.26, h * 0.76)]), body)
+		draw_rect(Rect2(w * 0.47, h * 0.22, w * 0.06, h * 0.34), trim)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(w * 0.53, h * 0.24), Vector2(w * 0.78, h * 0.40),
+			Vector2(w * 0.53, h * 0.50)]), trim)
+	else:
+		# A car: body, cab, two wheels.
+		draw_rect(Rect2(w * 0.12, h * 0.50, w * 0.76, h * 0.20), body)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(w * 0.30, h * 0.50), Vector2(w * 0.42, h * 0.32),
+			Vector2(w * 0.66, h * 0.32), Vector2(w * 0.74, h * 0.50)]), trim)
+		draw_circle(Vector2(w * 0.29, h * 0.72), w * 0.09, Color("1b1f2a"))
+		draw_circle(Vector2(w * 0.71, h * 0.72), w * 0.09, Color("1b1f2a"))
+		draw_circle(Vector2(w * 0.29, h * 0.72), w * 0.04, Color("6b7280"))
+		draw_circle(Vector2(w * 0.71, h * 0.72), w * 0.04, Color("6b7280"))
 
 ## A weapon: a soft tinted plate with the actual weapon drawn in profile
 ## on top of it, or its rendered model where one exists.

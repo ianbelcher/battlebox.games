@@ -38,7 +38,7 @@ var client_fly := false
 var client_fly_bots := false
 ## Client mirrors of the mode settings the menu draws. See cl_battle_config.
 var client_drop := false
-var client_ctf_revive := true
+var client_revive_mode := ReviveRule.MATES_AND_FLAG
 var client_ctf_target := 3
 var client_team_names: Array = TEAM_NAMES.slice(0, DEFAULT_TEAMS)
 var client_world := ""
@@ -422,8 +422,8 @@ func sv_hello() -> void:
 	cl_map_list.rpc_id(peer, ChunkStore.list_maps())
 	cl_overview.rpc_id(peer, overview)
 	cl_battle_config.rpc_id(peer, int(storm_minutes), int(battle_size), loot_only,
-		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
-		battle_fly_bots, no_revive)
+		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
+		battle_fly_bots)
 	cl_teams.rpc_id(peer, team_names)
 	cl_mode.rpc_id(peer, game_mode)
 	cl_world_sel.rpc_id(peer, selected_map if not selected_map.is_empty() \
@@ -1361,6 +1361,29 @@ func sv_add_bot() -> void:
 	bots.spawn()
 	_save_battle_setup()
 
+## FILL THE ROOM. Adding computer players one at a time is a button press
+## each, and the ceiling is a hundred — so getting a full game meant
+## clicking the same button ninety-odd times.
+##
+## Server side, in one call, because it is also ninety-odd round trips
+## otherwise and the roster is broadcast after every one of them.
+@rpc("any_peer", "reliable")
+func sv_fill_bots() -> void:
+	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
+		return
+	var added := 0
+	while Game.roster.size() < Game.MAX_PLAYERS:
+		bots.spawn()
+		added += 1
+		# A guard, not a limit: spawn() refusing for any reason would
+		# otherwise turn this into a loop that never ends.
+		if added > Game.MAX_PLAYERS:
+			break
+	print("ROSTER: filled with %d computer players (%d of %d)"
+		% [added, Game.roster.size(), Game.MAX_PLAYERS])
+	bots.redistribute()
+	_save_battle_setup()
+
 ## Roster-full eviction path (a human needs the seat).
 ## Someone was kicked: clear every trace so their body and state don't
 ## linger in a running battle.
@@ -1540,8 +1563,11 @@ var loot_only := false
 ## only" is how the bots get to come at a base over its wall while
 ## everybody at the table plays on the ground; "humans only" is how the
 ## small ones get a way out of trouble without handing it to twenty bots.
-var battle_fly := true
-var battle_fly_bots := true
+## OFF BY DEFAULT, both of them. It has to be switched on deliberately:
+## a game where everybody can fly from the start is a game where nobody
+## walks anywhere, climbs anything or has to get past a wall.
+var battle_fly := false
+var battle_fly_bots := false
 
 ## ONE KNOCKOUT AND YOU ARE OUT, in every mode. Off by default.
 ##
@@ -1551,8 +1577,10 @@ var battle_fly_bots := true
 ## it. It overrides everything: no team-mate pick-ups, and no tagging back
 ## in at your own flag either, because "you cannot be revived" has to mean
 ## all of it or it means nothing.
-var no_revive := false
-var client_no_revive := false
+## HOW YOU GET BACK UP — one rung of ReviveRule's ladder. This was two
+## settings, `ctf_revive` and `no_revive`, in two different cards with an
+## unrelated one between them, and they could be set to contradict.
+var revive_mode := ReviveRule.MATES_AND_FLAG
 
 ## WHERE PEOPLE HAVE ACTUALLY BEEN KNOCKED OUT, most recent last.
 ##
@@ -1638,7 +1666,7 @@ func sv_set_bot_team(target_id: String, team: int) -> void:
 		Game.cl_roster.rpc(Game.roster)
 
 @rpc("any_peer", "reliable")
-func sv_ctf_config(revive: int, target: int, drop: int, none_back := -1) -> void:
+func sv_ctf_config(revive: int, target: int, drop: int) -> void:
 	## Settings that belong to a MODE rather than to the arena. `drop` is
 	## deliberately cross-mode — losing your weapons on a knockout is a
 	## fair question in battle royale too — while revive and the target
@@ -1647,16 +1675,14 @@ func sv_ctf_config(revive: int, target: int, drop: int, none_back := -1) -> void
 			or not _is_host(multiplayer.get_remote_sender_id()):
 		return
 	if revive >= 0:
-		ctf_revive = revive == 1
+		revive_mode = clampi(revive, ReviveRule.NONE, ReviveRule.MATES_AND_FLAG)
 	if target > 0:
 		ctf_target = clampi(target, 1, 25)
 	if drop >= 0:
 		drop_on_knockout = drop == 1
-	if none_back >= 0:
-		no_revive = none_back == 1
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
-		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
-		battle_fly_bots, no_revive)
+		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
+		battle_fly_bots)
 
 ## Hand flight out, or take it away, from a group at a time.
 ##
@@ -1691,7 +1717,7 @@ func sv_set_fly(scope: String, team: int, on: bool, who := "") -> void:
 			(Game.roster[id] as Dictionary).erase("fly")
 		Game.cl_roster.rpc(Game.roster)
 		cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
-			battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
+			battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
 			battle_fly_bots)
 		_save_battle_setup()
 		return
@@ -1709,6 +1735,40 @@ func sv_set_fly(scope: String, team: int, on: bool, who := "") -> void:
 # exactly as every player already does with their own body. The server
 # owns the list, the ids and the one-driver rule. See VehicleDirector.
 # ------------------------------------------------------------------
+
+## PUT A BOAT OR A CAR WHERE SOMEBODY IS AIMING.
+##
+## THIS DID NOT EXIST. The tools tray called `sv_vehicle_place` and there
+## was no such method anywhere — the old `sv_vehicle_here` was deleted as
+## dead code and its replacement never written — so choosing a boat or a
+## car and clicking did precisely nothing, in every mode. "They're
+## impossible to place, so they're kinda useless at the moment" was a
+## plain description of the state of it.
+##
+## Same rules as placing a block, because that is what it is: within
+## reach, and inside the world. The server then settles it down onto the
+## water or the ground, so a boat aimed at the sea floats rather than
+## sinking and a car aimed at a hillside sits on it.
+@rpc("any_peer", "reliable")
+func sv_vehicle_place(slot: int, at_cell: Vector3i, kind: int) -> void:
+	if not multiplayer.is_server() or vehicles == null:
+		return
+	var id := Game.player_id(multiplayer.get_remote_sender_id(), slot)
+	if not Game.roster.has(id):
+		return
+	var spot := Vector3(at_cell) + Vector3(0.5, 0.0, 0.5)
+	var from: Vector3 = player_state.get(id, {}).get("pos", spot)
+	if from.distance_to(spot) > EDIT_RANGE + 2.0:
+		return
+	if not store.inside_world(at_cell.x, at_cell.z, 2):
+		return
+	# spawn() tells every client about the one new vehicle itself. Do NOT
+	# also broadcast the whole list here: the two cross, `set_all` rebuilds
+	# every entry from a payload built before the spawn, and the new one
+	# disappears again a frame after it arrives. Measured — the fleet grew
+	# on the server and stayed put on the client.
+	vehicles.spawn(clampi(kind, VehicleGeom.KIND_BOAT, VehicleGeom.KIND_CAR),
+		vehicles.settle(kind, spot))
 
 @rpc("any_peer", "reliable")
 func sv_vehicle_board(vid: String, slot: int) -> void:
@@ -1779,8 +1839,8 @@ func sv_match_config(minutes: int, loot: int, size: int = -1) -> void:
 		battle_size = clampf(float(size), 25.0, 800.0)
 		resize_to = int(battle_size)
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
-		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
-		battle_fly_bots, no_revive)
+		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
+		battle_fly_bots)
 	_save_battle_setup()
 	if resize_to > 0:
 		_do_world_reset(selected_map, resize_to)
@@ -2483,16 +2543,15 @@ func cl_overview(bytes: PackedByteArray) -> void:
 
 @rpc("authority", "reliable")
 func cl_battle_config(minutes: int, size: int, loot: bool, fly := false,
-		teams := -1, drop := false, revive := true, target := 3,
-		fly_bots := false, none_back := false) -> void:
+		teams := -1, drop := false, revive := ReviveRule.MATES_AND_FLAG,
+		target := 3, fly_bots := false) -> void:
 	client_minutes = minutes
 	client_size = size
 	client_fly_bots = fly_bots
-	client_no_revive = none_back
 	client_loot = loot
 	client_fly = fly
 	client_drop = drop
-	client_ctf_revive = revive
+	client_revive_mode = int(revive)
 	client_ctf_target = target
 	# team_count used to live only on the server, so "Remove a team" left
 	# the client drawing a column that no longer existed.
@@ -3066,7 +3125,6 @@ var ctf_target := 3
 ## Battle Royale. Turn it off and a knockout puts you straight OUT, and you have to
 ## fly home and touch their own flag to rejoin — which is the version that
 ## makes attacking a distant base a real commitment.
-var ctf_revive := true
 ## Cross-mode: does a knockout scatter your weapons where you fell?
 var drop_on_knockout := false
 var ctf_scores: Dictionary = {}   # team index -> net score (caps - losses)
