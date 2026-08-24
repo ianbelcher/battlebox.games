@@ -14,6 +14,8 @@ extends Node
 ##   WORLD_KICK_TEST=1          kick a player and check they are forgotten
 ##   WORLD_SMOKE_TEST=1         fire a smoke round at the world
 ##   WORLD_BOTWATCH=1           report computer players that stopped moving
+##   WORLD_SWITCH_TEST=<theme>  pick a different world MID-ROUND and check
+##                              the ground actually changed under everyone
 
 ## The world being probed.
 var world: WorldNode = null
@@ -66,7 +68,7 @@ func tick_resize(delta: float) -> void:
 	if not _resize_done and _resize_t > 12.0:
 		_resize_done = true
 		print("RESIZETEST resizing to %s" % want)
-		world.sv_match_config(-1, -1, want.to_int(), -1)
+		world.sv_match_config(-1, -1, want.to_int())
 	if _resize_done and fmod(_resize_t, 3.0) < delta:
 		var half := world.store.half_extent()
 		var bad := 0
@@ -217,7 +219,56 @@ func tick_revive(delta: float) -> void:
 			float(world.battle.revive_progress.get(_rev_who, -1.0)), body, near,
 			nearest, world.out_ids.has(_rev_who)])
 
+## WORLD_SWITCH_TEST=<theme>: choose a world while a round is running.
+##
+## Picking one used to be remembered and applied at the START of the next
+## round, so with the match loop on — the normal way this is played — the
+## phase was never idle and choosing Space did nothing whatsoever. It went
+## on doing nothing until the SIZE was changed, which reset the world
+## through a different path and dragged the new theme along with it.
+##
+## Checking it needs a running round and a look at the actual ground
+## before and after, because "the menu highlighted the one I picked" was
+## always true and was never the question.
+var _switch_t := 0.0
+var _switch_done := false
+var _switch_before := ""
+
+func tick_switch(delta: float) -> void:
+	var want := OS.get_environment("WORLD_SWITCH_TEST")
+	if want.is_empty() or _switch_done or world == null:
+		return
+	_switch_t += delta
+	if _switch_t < 26.0:
+		return
+	_switch_done = true
+	# sv_select_world returns in silence for a name it does not know, so
+	# without this an unknown theme reads as "the switch is broken".
+	if not (want in WorldGen.THEMES):
+		print("SWITCH: %s is not a theme — try one of %s" % [want, WorldGen.THEMES])
+		return
+	_switch_before = "map=%s theme=%s" % [world.store.current_map_key, world.store.theme]
+	var ground_before := _ground_line()
+	world.sv_select_world(want)
+	print("SWITCH: phase=%s | before %s %s" % [world.match_phase,
+		_switch_before, ground_before])
+	print("SWITCH: after  map=%s theme=%s %s" % [world.store.current_map_key,
+		world.store.theme, _ground_line()])
+	print("SWITCH: theme changed=%s ground changed=%s"
+		% [str(str(world.store.current_map_key) == want),
+			str(ground_before != _ground_line())])
+
+## A fingerprint of the terrain: the surface height along a line through
+## the middle. Two different worlds do not agree on this.
+func _ground_line() -> String:
+	var heights: PackedStringArray = []
+	for i in 8:
+		var x := -60 + i * 16
+		heights.append(str(world.store.surface_y(x, 0)))
+	return "ground=[%s]" % ",".join(heights)
+
 func tick(delta: float) -> void:
+	tick_switch(delta)
 	tick_revive(delta)
 	tick_resize(delta)
 	tick_kick(delta)

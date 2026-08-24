@@ -1318,29 +1318,15 @@ func _build_game_tab() -> void:
 		var minutes: int = preset[0]
 		preset_btn.pressed.connect(func() -> void:
 			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, minutes, -1, -1)
+				Game.world.sv_match_config.rpc_id(1, minutes, -1)
 			Sfx.play("tick", -8.0))
 		length_row.add_child(preset_btn)
 		_length_btns[minutes] = preset_btn
-	var fly_row := HBoxContainer.new()
-	fly_row.add_theme_constant_override("separation", _us(8))
-	_battle_opts.add_child(fly_row)
-	var fly_label := Label.new()
-	fly_label.text = "Flying:"
-	fly_label.add_theme_font_size_override("font_size", _us(20))
-	fly_row.add_child(fly_label)
-	for fly_spec in [[1, "Allowed"], [0, "No flying"]]:
-		var fly_btn := Button.new()
-		fly_btn.focus_mode = Control.FOCUS_NONE
-		fly_btn.text = str(fly_spec[1])
-		fly_btn.add_theme_font_size_override("font_size", _us(18))
-		var fly_val: int = fly_spec[0]
-		fly_btn.pressed.connect(func() -> void:
-			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, -1, -1, -1, fly_val)
-			Sfx.play("tick", -8.0))
-		fly_row.add_child(fly_btn)
-		_fly_btns[fly_val] = fly_btn
+	# No Flying row here. Flying is decided per player, on the Players
+	# page of the world menu — see WorldMenu.FLY_ANSWERS. It was a
+	# world switch in two places at once, and neither knew about the
+	# per-player answers sitting on top of it.
+
 	var size_row := HBoxContainer.new()
 	size_row.add_theme_constant_override("separation", _us(8))
 	_battle_opts.add_child(size_row)
@@ -1348,7 +1334,7 @@ func _build_game_tab() -> void:
 	size_label.text = "Arena size:"
 	size_label.add_theme_font_size_override("font_size", _us(20))
 	size_row.add_child(size_label)
-	for arena in [50, 100, 150, 200, 250, 300, 350]:
+	for arena in [200, 400, 800]:
 		var size_btn := Button.new()
 		size_btn.focus_mode = Control.FOCUS_NONE
 		size_btn.text = str(arena)
@@ -1946,7 +1932,6 @@ static func _flag_ink(dx: int, dy: int) -> int:
 var _team_box: VBoxContainer
 var _length_btns: Dictionary = {}
 var _size_btns: Dictionary = {}
-var _fly_btns: Dictionary = {}
 var _lobby_countdown: Label
 var _mode_btns: Dictionary = {}
 var _battle_opts: VBoxContainer
@@ -2019,8 +2004,6 @@ func _refresh_battle_highlights() -> void:
 		_mark_selected(_size_btns[arena], arena == world.client_size)
 	for mode_key: String in _mode_btns.keys():
 		_mark_selected(_mode_btns[mode_key], mode_key == world.client_mode)
-	for fly_val: int in _fly_btns.keys():
-		_mark_selected(_fly_btns[fly_val], (fly_val == 1) == world.client_fly)
 	if _battle_opts != null:
 		_battle_opts.visible = world.client_mode == "battle"
 	_refresh_team_box()

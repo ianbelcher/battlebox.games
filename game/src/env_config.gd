@@ -86,6 +86,7 @@ const KNOWN := {
 	"WORLD_DOWNED_TINTS": "1 knocks this player out and reports every red overlay's alpha",
 	"WORLD_KNOCKOUT_TEST": "seconds into a battle to knock the human down, through the real damage path",
 	"WORLD_KNOCKOUT_NOFLY": "1 switches flying off first, to check a revive takes the wings back",
+	"WORLD_SWITCH_TEST": "a theme to switch to mid-round, checking the ground really changes",
 	"WORLD_BOT_DEBUG": "1 logs what the computer players are deciding",
 	"WORLD_ORB_DEBUG": "1 logs every bot shot's flight",
 	"WORLD_FLIER_DEBUG": "1 logs flying critters' altitude decisions",

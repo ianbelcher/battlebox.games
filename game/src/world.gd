@@ -35,6 +35,7 @@ var client_minutes := 5
 var client_size := 250
 var client_loot := false
 var client_fly := false
+var client_fly_bots := false
 ## Client mirrors of the mode settings the menu draws. See cl_battle_config.
 var client_drop := false
 var client_ctf_revive := true
@@ -421,7 +422,8 @@ func sv_hello() -> void:
 	cl_map_list.rpc_id(peer, ChunkStore.list_maps())
 	cl_overview.rpc_id(peer, overview)
 	cl_battle_config.rpc_id(peer, int(storm_minutes), int(battle_size), loot_only,
-		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target)
+		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
+		battle_fly_bots)
 	cl_teams.rpc_id(peer, team_names)
 	cl_mode.rpc_id(peer, game_mode)
 	cl_world_sel.rpc_id(peer, selected_map if not selected_map.is_empty() \
@@ -1532,7 +1534,14 @@ var loot_only := false
 ## this world, not how a battle works. Stored under its own key ("world_fly")
 ## because the old battle-only setting defaulted to false, and reusing it
 ## would have silently turned flying off in creative.
+## THE DEFAULT ANSWER for anyone nobody has decided about — and it is two
+## answers rather than one, because two of the four things a grown-up
+## actually wants to say cannot be said with a single switch. "Computers
+## only" is how the bots get to come at a base over its wall while
+## everybody at the table plays on the ground; "humans only" is how the
+## small ones get a way out of trouble without handing it to twenty bots.
 var battle_fly := true
+var battle_fly_bots := true
 
 ## WHERE PEOPLE HAVE ACTUALLY BEEN KNOCKED OUT, most recent last.
 ##
@@ -1565,8 +1574,21 @@ func remember_scar(at: Vector3) -> void:
 ## out of trouble while everybody else plays on the ground, or handing it
 ## to one team and not the other.
 func fly_allowed_for(id: String) -> bool:
-	var by_default: bool = battle_fly if multiplayer.is_server() else client_fly
-	return bool(Game.roster.get(id, {}).get("fly", by_default))
+	var entry: Dictionary = Game.roster.get(id, {})
+	if entry.has("fly"):
+		return bool(entry["fly"])   # somebody was decided about by hand
+	var is_bot := bool(entry.get("bot", false))
+	if multiplayer.is_server():
+		return battle_fly_bots if is_bot else battle_fly
+	return client_fly_bots if is_bot else client_fly
+
+## Which of the four answers is in force, for lighting the right button.
+## Anybody decided about by hand is ignored here — they are shown against
+## their own name — so this describes the DEFAULT and nothing else.
+func fly_answer() -> String:
+	var people: bool = battle_fly if multiplayer.is_server() else client_fly
+	var computers: bool = battle_fly_bots if multiplayer.is_server() else client_fly_bots
+	return FlyRule.answer_for(people, computers)
 
 ## THERE ARE THREE STATES A PLAYER CAN BE IN, and no more: ALIVE, KNOCKED
 ## OUT, or OUT. Between them they are exhaustive and exclusive.
@@ -1620,7 +1642,8 @@ func sv_ctf_config(revive: int, target: int, drop: int) -> void:
 	if drop >= 0:
 		drop_on_knockout = drop == 1
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
-		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target)
+		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
+		battle_fly_bots)
 
 ## Hand flight out, or take it away, from a group at a time.
 ##
@@ -1639,18 +1662,30 @@ func sv_set_fly(scope: String, team: int, on: bool, who := "") -> void:
 	if not multiplayer.is_server() \
 			or not _is_host(multiplayer.get_remote_sender_id()):
 		return
+	# THE FOUR GROUP ANSWERS ARE A RESET, not a nudge. They set the
+	# default and wipe every individual answer with it — otherwise
+	# "Nobody" leaves whoever was singled out earlier still in the air,
+	# and the button looks broken to the one person using both halves.
+	#
+	# Setting the DEFAULT rather than stamping every player is what makes
+	# it stick: a computer player added ten seconds later follows the
+	# answer too, which is not true of anything that only walks the roster
+	# it can see right now.
+	if scope in FlyRule.ANSWERS:
+		battle_fly = FlyRule.people_fly(scope)
+		battle_fly_bots = FlyRule.computers_fly(scope)
+		for id: String in Game.roster.keys():
+			(Game.roster[id] as Dictionary).erase("fly")
+		Game.cl_roster.rpc(Game.roster)
+		cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
+			battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
+			battle_fly_bots)
+		_save_battle_setup()
+		return
+	# ...and one person at a time, from the ✈ against their name.
 	for id: String in Game.roster.keys():
-		var entry: Dictionary = Game.roster[id]
-		var is_bot := bool(entry.get("bot", false))
-		var matched := false
-		match scope:
-			"all": matched = true
-			"bots": matched = is_bot
-			"humans": matched = not is_bot
-			"team": matched = int(entry.get("team", -1)) == team
-			"one": matched = id == who
-		if matched:
-			entry["fly"] = on
+		if scope == "one" and id == who:
+			(Game.roster[id] as Dictionary)["fly"] = on
 	Game.cl_roster.rpc(Game.roster)
 	_save_battle_setup()
 
@@ -1713,7 +1748,7 @@ func cl_vehicles(payload: Array) -> void:
 		vehicle_view.set_all(payload)
 
 @rpc("any_peer", "reliable")
-func sv_match_config(minutes: int, loot: int, size: int = -1, fly: int = -1) -> void:
+func sv_match_config(minutes: int, loot: int, size: int = -1) -> void:
 	# No phase guard: the grown-up gets to re-size the arena, allow flying
 	# or change the round length WHILE a battle is running.
 	if not multiplayer.is_server() \
@@ -1728,19 +1763,11 @@ func sv_match_config(minutes: int, loot: int, size: int = -1, fly: int = -1) -> 
 	# else just moves an invisible line while the old map stays put.
 	var resize_to := 0
 	if size > 0 and not is_equal_approx(float(size), battle_size):
-		battle_size = clampf(float(size), 25.0, 400.0)
+		battle_size = clampf(float(size), 25.0, 800.0)
 		resize_to = int(battle_size)
-	if fly >= 0:
-		battle_fly = fly == 1
-		# The world switch is the DEFAULT, so turning it over has to clear
-		# the per-player answers as well — otherwise "no flying" leaves
-		# everyone who was singled out still in the air, and the switch
-		# looks broken to the one person who used both features.
-		for id: String in Game.roster.keys():
-			(Game.roster[id] as Dictionary).erase("fly")
-		Game.cl_roster.rpc(Game.roster)
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
-		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target)
+		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
+		battle_fly_bots)
 	_save_battle_setup()
 	if resize_to > 0:
 		_do_world_reset(selected_map, resize_to)
@@ -1765,10 +1792,25 @@ func sv_select_world(map_name: String) -> void:
 	selected_map = map_name
 	cl_world_sel.rpc(selected_map)
 	_save_battle_setup()
-	# Battle royale is a MODE: with no battle running, picking a world
-	# takes you there right away.
-	if match_phase == "IDLE" and map_name != store.current_map_key \
-			and not (map_name == store.theme and store.current_map_key.is_empty()):
+	# PICKING A WORLD TAKES YOU THERE. Immediately, and whatever is
+	# running — which is the same rule the world's SIZE has followed all
+	# along, a few lines up in sv_match_config: "the grown-up gets to
+	# re-size the arena while a battle is running".
+	#
+	# This used to wait for `match_phase == "IDLE"` and apply on the next
+	# round instead. With the match loop on — which is the normal way this
+	# game is played — the phase is essentially never IDLE, so picking
+	# Space or Skylands did nothing at all, and went on doing nothing
+	# until you happened to change the size, which reset the world through
+	# the other path and brought the new theme with it. Reported exactly
+	# that way: "it doesn't change the actual world until I change the
+	# size of the world".
+	#
+	# _do_world_reset already knows how to interrupt a round — it stands
+	# everybody down, clears the board and opens a fresh lobby on the new
+	# map — so there was never anything for the guard to protect.
+	if map_name != store.current_map_key \
+			or (map_name == store.theme and store.current_map_key.is_empty()):
 		_do_world_reset(map_name)
 
 @rpc("authority", "call_local", "reliable")
@@ -2426,9 +2468,11 @@ func cl_overview(bytes: PackedByteArray) -> void:
 
 @rpc("authority", "reliable")
 func cl_battle_config(minutes: int, size: int, loot: bool, fly := false,
-		teams := -1, drop := false, revive := true, target := 3) -> void:
+		teams := -1, drop := false, revive := true, target := 3,
+		fly_bots := false) -> void:
 	client_minutes = minutes
 	client_size = size
+	client_fly_bots = fly_bots
 	client_loot = loot
 	client_fly = fly
 	client_drop = drop

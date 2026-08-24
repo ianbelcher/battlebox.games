@@ -24,20 +24,6 @@ CC0 asks for nothing. Kenney is credited here, in the game's Credits page
 and in this paragraph anyway, because the game would not look or sound
 like anything without that work.
 
-## Explosions — Wikimedia Commons, public domain
-
-Two recordings, trimmed to the bang, with the low end lifted; the
-knockout rumble is the first of them low-passed and slowed, so it is the
-same real blast heard through a wall.
-
-| File | Source | By |
-| --- | --- | --- |
-| `game/assets/sounds/explosion_near.ogg`, `explosion_deep.ogg` | [Explosion 10.ogg](https://commons.wikimedia.org/wiki/File:Explosion_10.ogg) | tcpp |
-| `game/assets/sounds/explosion_far.ogg` | [Explosion-LS100155.ogg](https://commons.wikimedia.org/wiki/File:Explosion-LS100155.ogg) | Fg2 |
-
-Public domain asks for nothing. Both are credited here and on the game's
-Credits page anyway.
-
 ## Building kits — Silicon23, MIT
 
 <https://github.com/Silicon23/MoreChineseStructures>

@@ -33,3 +33,35 @@ static func keeps_flying(flying: bool, allowed: bool, in_a_raid: bool,
 	if out_of_it:
 		return true          # the knocked-out may fly whatever the setting
 	return allowed and not in_a_raid
+
+## THE FOUR ANSWERS a grown-up can give for everybody at once, and what
+## each one means as a pair of defaults: one for the people, one for the
+## computers.
+##
+## Two defaults rather than one because two of these cannot be said with a
+## single switch. "Computers only" is how the bots get to come at a base
+## over its wall while everybody at the table plays on the ground, and
+## "humans only" is how the small ones get a way out of trouble without
+## handing it to twenty bots.
+##
+## Both directions live here together on purpose. The menu has to turn an
+## answer into settings when a button is pressed and settings back into an
+## answer to light the right button, and two mappings written apart drift
+## until the button you pressed is not the one that lights up.
+const ANSWERS := ["everyone", "nobody", "computers", "humans"]
+
+static func people_fly(answer: String) -> bool:
+	return answer == "everyone" or answer == "humans"
+
+static func computers_fly(answer: String) -> bool:
+	return answer == "everyone" or answer == "computers"
+
+## Which answer is in force, given the two defaults.
+static func answer_for(people: bool, computers: bool) -> String:
+	if people and computers:
+		return "everyone"
+	if computers:
+		return "computers"
+	if people:
+		return "humans"
+	return "nobody"

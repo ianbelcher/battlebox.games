@@ -60,20 +60,26 @@ func _ready() -> void:
 		"warp": _notes([[880, 0.06], [660, 0.06], [440, 0.07], [880, 0.0], [1320, 0.12]], 0.5, "soft"),
 		"cheer": _cheer(),
 	}
-	# RECORDED SAMPLES BEAT SYNTHESIS, and the explosions are why this
-	# comment is here. Two goes at building one out of oscillators and
-	# filters both came back as "sounds shite": the first was noise with a
-	# thump under it, the second was noise through a falling filter, and
-	# measured against a real recording both were missing the thing that
-	# actually makes a bang — the messy, un-modellable transient of air
-	# moving. Real ones are public domain and take an afternoon to find.
+	# Sample overrides: anything here replaces the built-in above, and the
+	# built-in stays as the fallback for a missing file. Arrays are
+	# per-play random variants.
 	#
-	# Arrays are per-play random variants, which matters most for the
-	# sounds you hear most: one explosion sample played forty times in a
-	# round starts to read as a bug.
+	# THE EXPLOSIONS ARE NOT IN HERE, and that is deliberate. Two real
+	# public-domain recordings went in and came straight back out — "this
+	# weird beep and then this crunchy weird sound", and worse than the
+	# synthesised one they replaced.
 	#
-	# Anything here overrides the built-in above, and the built-in stays as
-	# the fallback for a missing file.
+	# The likely reason is PLAYER_POOL at the top of this file. There are
+	# eight voices handed out round-robin, so the ninth sound in flight
+	# cuts the first one off part-way through. The recordings ran 2.6 and
+	# 3.2 seconds against the synthesised 1.9, and a busy round throws far
+	# more than eight sounds inside three seconds — so they were being
+	# chopped mid-blast and restarted over the top of each other, which is
+	# what a beep followed by a crunch actually is.
+	#
+	# The lesson is not "recordings are worse than synthesis". It is that a
+	# sound this game plays THIS OFTEN has to be short, and a two-and-a-half
+	# second sample is the wrong shape whatever it was made of.
 	const SAMPLES := {
 		"tick": ["click_001", "click_002"],
 		"pop": ["pluck_001", "pluck_002"],
@@ -88,14 +94,6 @@ func _ready() -> void:
 			"impactSoft_heavy_002"],
 		"bonk": ["impactPunch_medium_000", "impactPunch_medium_001",
 			"impactPunch_medium_002"],
-		# Real explosions, trimmed to the bang — the recordings both open
-		# with a fifth of a second of room tone, and a sound that arrives
-		# a fifth of a second after the flash reads as lag, not as weight.
-		"boom": ["explosion_near", "explosion_far"],
-		# The knockout: the same blast heard through a wall. Low-passed
-		# and slowed rather than replaced, so what rumbles the house is
-		# the real thing rather than a sine pretending to be one.
-		"rumble": ["explosion_deep"],
 	}
 	for clip: String in SAMPLES:
 		var variants: Array = []

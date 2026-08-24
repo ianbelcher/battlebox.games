@@ -70,6 +70,7 @@ jobs:
           ~/godot/godot --headless --path game --script res://tests/ui_glyphs.gd
           ~/godot/godot --headless --path game --script res://tests/flag_beacons.gd
           ~/godot/godot --headless --path game --script res://tests/sfx_samples.gd
+          ~/godot/godot --headless --path game --script res://tests/menu_controls.gd
 
       # The Minecraft importer, against a generated region file. No maps
       # are committed, so without this nothing exercises it at all — and a

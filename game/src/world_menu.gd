@@ -10,7 +10,7 @@ extends Control
 ##           because the mode is what gives the rest of this menu meaning
 ##           — and, as modes are added, what decides which tabs exist.
 ##   Map     what world you're in and how play works in it — the map, its
-##           size, whether flying is on. True in every mode.
+##           size. True in every mode.
 ##   Players who's here, their names, teams, and computer players.
 ##   Audio   talking to each other, and how loud everything is. Its own
 ##           tab because it was under "Video", where nobody looked: a
@@ -60,11 +60,13 @@ var _server_edit: LineEdit
 var _mode_btns: Dictionary = {}
 var _length_btns: Dictionary = {}
 var _size_btns: Dictionary = {}
-var _fly_btns: Dictionary = {}
+var _fly_answer_btns: Dictionary = {}
 var _battle_only: Array = []
 ## Shown in any mode with knockouts (battle royale AND capture the flag).
 var _fight_only: Array = []
 var _ctf_only: Array = []
+var _capture_only: Array = []
+var _holdout_only: Array = []
 var _drop_btns: Dictionary = {}
 var _target_btns: Dictionary = {}
 var _revive_btns: Dictionary = {}
@@ -441,30 +443,25 @@ func _build_map_tab() -> void:
 	world_card.add_child(_font(_saved_label, UiTheme.T_NOTE))
 	_saved_row = _row(world_card)
 
-	# Size and flying belong to the MAP: they describe how play works
-	# here, in whatever mode. They used to live under Battle, which is why
-	# changing them looked like it did nothing while just building.
+	# Size belongs to the MAP: it describes how play works here, in
+	# whatever mode. It used to live under Battle, which is why changing
+	# it looked like it did nothing while just building.
+	#
+	# THREE SIZES, NOT SEVEN. Fifty to three-fifty in steps of fifty is a
+	# row of near-identical numbers to choose between and no way to tell
+	# what any of them means. Doubling each time gives three that are
+	# obviously different from each other: a garden, a park, and further
+	# than anyone is going to walk.
 	var size_card := _section(box, "Size of the world",
 		"How far out you can roam, in blocks. Applies in both modes.")
 	var size_row := _row(size_card)
-	for arena in [50, 100, 150, 200, 250, 300, 350]:
+	for arena in [200, 400, 800]:
 		var blocks: int = arena
 		var btn := _choice(size_row, str(arena), func() -> void:
 			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, -1, -1, blocks, -1))
-		_min(btn, 70, 42)
+				Game.world.sv_match_config.rpc_id(1, -1, -1, blocks))
+		_min(btn, 88, 42)
 		_size_btns[arena] = btn
-
-	var fly_card := _section(box, "Flying",
-		"Double-tap jump to fly. Applies in both modes.")
-	var fly_row := _row(fly_card)
-	for spec in [[1, "Flying allowed"], [0, "No flying"]]:
-		var val: int = spec[0]
-		var btn := _choice(fly_row, str(spec[1]), func() -> void:
-			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, -1, -1, -1, val))
-		_min(btn, 160, 44)
-		_fly_btns[val] = btn
 
 	var server_card := _section(box, "Server",
 		"The game connects here by itself on start-up.")
@@ -558,7 +555,7 @@ func _build_game_tab() -> void:
 	for line in ["Nothing can hurt you — no hearts, no storm, no timer.",
 			"Everyone builds in the same world, and it lasts until the "
 				+ "server restarts — nothing is saved to disk.",
-			"The map, how big it is and whether you can fly are on the Map tab.",
+			"The map and how big it is are on the Map tab; who can fly is on Players.",
 			"Switch to Battle royale for teams, weapons and the shrinking storm."]:
 		var bullet := Label.new()
 		bullet.text = "•   " + str(line)
@@ -583,12 +580,17 @@ func _build_game_tab() -> void:
 		_min(btn2, 150, 44)
 		_drop_btns[drop_val] = btn2
 
-	# Capture-the-flag-only settings.
-	var ctf_group := VBoxContainer.new()
-	ctf_group.add_theme_constant_override("separation", _s(8))
-	box.add_child(ctf_group)
-	_ctf_only.append(ctf_group)
-	var ctf_card := _section(ctf_group, "Capturing",
+	# CAPTURING IS NOT IN EVERY FLAG MODE. This card went in `_ctf_only`,
+	# which is shown for `flag_mode()` — and that covers last flag
+	# standing as well, where there is no capturing and no target to reach:
+	# you take a flag to knock a team OUT, and the round ends when one
+	# side is left or the clock runs down. So "First to 3" sat there in a
+	# mode it means nothing in, which is how it was reported.
+	var cap_group := VBoxContainer.new()
+	cap_group.add_theme_constant_override("separation", _s(8))
+	box.add_child(cap_group)
+	_capture_only.append(cap_group)
+	var ctf_card := _section(cap_group, "Capturing",
 		"Touch another team's flag to score. There is no clock — the round "
 		+ "ends when someone reaches the target.")
 	var target_row := _row(ctf_card)
@@ -603,6 +605,12 @@ func _build_game_tab() -> void:
 	# so a long sentence here stretches the whole menu panel out past the
 	# edge of the screen. Four lines of explanation used to live here and
 	# it made the modal unusable.
+	# Getting back up applies to both flag modes, so it stays in the group
+	# that shows for either.
+	var ctf_group := VBoxContainer.new()
+	ctf_group.add_theme_constant_override("separation", _s(8))
+	box.add_child(ctf_group)
+	_ctf_only.append(ctf_group)
 	var rev_card := _section(ctf_group, "Getting back up",
 		"Fly home and touch your own flag.")
 	var rev_row := _row(rev_card)
@@ -615,6 +623,29 @@ func _build_game_tab() -> void:
 		_min(btn4, 170, 44)
 		_revive_btns[rev_val] = btn4
 
+	# LAST FLAG STANDING HAD NOTHING AT ALL HERE, which is worse than
+	# showing the wrong card: a mode with a clock, an elimination rule and
+	# a scoring table that is unlike anything else in the game, explained
+	# nowhere.
+	var hold_group := VBoxContainer.new()
+	hold_group.add_theme_constant_override("separation", _s(8))
+	box.add_child(hold_group)
+	_holdout_only.append(hold_group)
+	var hold_card := _section(hold_group, "Last flag",
+		"Lose your flag and your whole team is out — there is no coming "
+		+ "back. %d minutes on the clock." % int(HoldoutRules.ROUND_MINUTES))
+	for line in ["%d points if you are the last team holding."
+				% HoldoutRules.ROUND_POINTS,
+			"Two teams left at the whistle: %d each. Three: %d each."
+				% [HoldoutRules.share(2), HoldoutRules.share(3)],
+			"Four or more still holding and nobody scores — dig in, but go "
+				+ "and take one."]:
+		var bullet := Label.new()
+		bullet.text = "•   " + str(line)
+		bullet.add_theme_color_override("font_color", UiTheme.INK_DIM)
+		bullet.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hold_card.add_child(_font(bullet, UiTheme.T_LABEL))
+
 	# Battle-only settings are hidden outright in creative rather than
 	# greyed out — one less thing for a child to poke at.
 	var len_group := VBoxContainer.new()
@@ -622,13 +653,13 @@ func _build_game_tab() -> void:
 	box.add_child(len_group)
 	_battle_only.append(len_group)
 	var len_card := _section(len_group, "How long a battle lasts",
-		"Only used in battle royale. The world's size and flying live on the Map tab.")
+		"Only used in battle royale. The world's size lives on the Map tab.")
 	var len_row := _row(len_card)
 	for preset in [[3, "3 min"], [5, "5 min"], [8, "8 min"], [60, "Unlimited"]]:
 		var minutes: int = preset[0]
 		var btn := _choice(len_row, str(preset[1]), func() -> void:
 			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, minutes, -1, -1, -1))
+				Game.world.sv_match_config.rpc_id(1, minutes, -1))
 		_min(btn, 120, 46)
 		_length_btns[minutes] = btn
 
@@ -762,53 +793,46 @@ func _refresh_players() -> void:
 ## player at a time in a room of fifty is not something anybody would sit
 ## through — but the column in the roster below is there for when you want
 ## exactly one child to be able to float out of trouble.
+## WHO CAN FLY, and it lives here rather than on the Map tab because
+## flying is a property of a PLAYER, not of a world. It was a world switch
+## with a per-player override on top, which is two ideas doing one job:
+## the map said "no flying" while three people were in the air, and the
+## switch looked broken to the one person using both halves.
+##
+## Four answers, and they are the four that people actually want. Two of
+## them cannot be said with a single on/off at all — "computers only" is
+## how you let the bots reach a base over its wall while everybody at the
+## table plays on the ground, and "humans only" is how you give the small
+## ones a way out of trouble without handing it to twenty bots.
+##
+## THE PER-TEAM BUTTONS ARE GONE. A button per team is five more things to
+## read for an answer nobody was giving in terms of teams, and the row
+## grew every time a team was added. Anyone who wants one player in the
+## air taps the ✈ against their name in the table below.
+const FLY_ANSWERS := [
+	["Everyone", "everyone"],
+	["Nobody", "nobody"],
+	["Computers only", "computers"],
+	["Humans only", "humans"],
+]
+
 func _build_flying_card(box: Control) -> void:
 	var card := _section(box, "Who can fly",
-		"Double-tap jump to fly. Everyone follows the world's setting "
-		+ "(Map tab) until they are given their own answer here.")
-	var everyone := _row(card)
-	for spec in [["Everyone", "all", true], ["Nobody", "all", false],
-			["All computers", "bots", true], ["No computers", "bots", false]]:
+		"Double-tap jump to fly. Pick an answer for everybody, or tap ✈ "
+		+ "beside one name below to decide about them on their own.")
+	var row := _row(card)
+	for spec in FLY_ANSWERS:
+		var answer := str(spec[1])
 		# Wide enough for the longest of them. At 150 "No computers" lost
 		# its last letter and read as "No computer", which is a different
 		# and wrong instruction.
-		var scope := str(spec[1])
-		var on: bool = spec[2]
-		var btn := _button(str(spec[0]), func() -> void:
+		var btn := _choice(row, str(spec[0]), func() -> void:
 			if Game.world != null:
-				Game.world.sv_set_fly.rpc_id(1, scope, -1, on)
+				Game.world.sv_set_fly.rpc_id(1, answer, -1, true)
 			Sfx.play("pop", -6.0))
 		_min(btn, 178, 44)
-		everyone.add_child(btn)
+		_fly_answer_btns[answer] = btn
 
-	var teams := _row(card)
-	var team_count: int = Game.world.client_team_names.size() if Game.world != null else 0
-	for t in team_count:
-		var team_i := t
-		# One button per team that turns the whole team ON unless it
-		# already is, in which case it turns the whole team OFF. A single
-		# button rather than a pair: with five teams a pair each is ten
-		# buttons for a thing a grown-up presses twice a game.
-		var btn := _button(_team_name(team_i), func() -> void:
-			if Game.world == null:
-				return
-			var all_flying := true
-			var any_there := false
-			for id: String in Game.roster.keys():
-				if int(Game.roster[id].get("team", -1)) != team_i:
-					continue
-				any_there = true
-				if not Game.world.fly_allowed_for(id):
-					all_flying = false
-			if not any_there:
-				return
-			Game.world.sv_set_fly.rpc_id(1, "team", team_i, not all_flying)
-			Sfx.play("pop", -6.0))
-		btn.tooltip_text = "Give this team flight, or take it away"
-		var swatch: Color = WorldNode.TEAM_COLORS[team_i % WorldNode.TEAM_COLORS.size()]
-		btn.add_theme_color_override("font_color", swatch)
-		_min(btn, 96, 44)
-		teams.add_child(btn)
 
 ## Whatever the team is actually CALLED — teams can be renamed, and the
 ## header used to show the hard-coded colour list instead.
@@ -1213,8 +1237,8 @@ func _refresh(force := false) -> void:
 		_mark(_length_btns[minutes], minutes == world.client_minutes)
 	for arena: int in _size_btns:
 		_mark(_size_btns[arena], arena == world.client_size)
-	for val: int in _fly_btns:
-		_mark(_fly_btns[val], (val == 1) == world.client_fly)
+	for answer: String in _fly_answer_btns:
+		_mark(_fly_answer_btns[answer], answer == world.fly_answer())
 	var battling: bool = world.client_mode == "battle"
 	var ctf: bool = world.flag_mode()
 	for node in _battle_only:
@@ -1223,6 +1247,12 @@ func _refresh(force := false) -> void:
 	for node in _ctf_only:
 		if is_instance_valid(node):
 			(node as Control).visible = ctf
+	for node in _capture_only:
+		if is_instance_valid(node):
+			(node as Control).visible = world.client_mode == "ctf"
+	for node in _holdout_only:
+		if is_instance_valid(node):
+			(node as Control).visible = world.client_mode == "holdout"
 	for node in _fight_only:
 		if is_instance_valid(node):
 			(node as Control).visible = battling or ctf

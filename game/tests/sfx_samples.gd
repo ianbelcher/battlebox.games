@@ -8,11 +8,14 @@ extends SceneTree
 ##
 ##     godot --headless --path game --script res://tests/sfx_samples.gd
 
+## Explosions are NOT in here on purpose — they are synthesised, and the
+## recordings that briefly replaced them were taken straight back out.
+## See the note above Sfx.SAMPLES.
 const WANTED := {
-	"boom": 2,        # near and far, so forty of them in a round vary
-	"rumble": 1,
 	"dig": 5,
 	"bonk": 3,
+	"place": 4,
+	"land": 3,
 }
 
 func _initialize() -> void:
