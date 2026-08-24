@@ -210,8 +210,7 @@ func tick_revive(delta: float) -> void:
 		var d: float = Vector3(world.player_state.get(other, {}).get(
 			"pos", Vector3.INF)).distance_to(body)
 		nearest = minf(nearest, d)
-		if ReviveReach.in_reach(body, Vector3(
-				world.player_state.get(other, {}).get("pos", Vector3.INF))):
+		if d < world.REVIVE_RADIUS:
 			near += 1
 	print("REVIVE: downed=%s progress=%.2f body=%v mates_in_range=%d nearest=%.2f out=%s"
 		% [world.downed_ids.has(_rev_who),

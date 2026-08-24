@@ -35,19 +35,11 @@ var _ride_was_yaw := 0.0
 ## Sent to the server about as often as a position is.
 var _ride_send := 0.0
 const RIDE_SEND_HZ := 15.0
-## The push that gets you OVER the top once the wall has been cleared.
-##
-## Without it the climb stopped dead at the lip and buzzed there. The
-## climb only pushes while you are pressed against something, so the
-## moment your body cleared the top there was nothing holding you up but
-## one block per second of rise — gravity won immediately, you dropped
-## back against the wall, the climb re-engaged, and you shook at the top
-## of every wall you tried to get out of rather than getting out.
-##
-## So clearing the wall is its own event, and it hands over a real hop.
-## Big enough to beat gravity outright, which is what makes it decisive:
-## anything gentler leaves the same oscillation running, just slower.
-const WALL_TOP_HOP := 5.4
+## The nudge that finishes a climb. Just enough to put your feet over the
+## lip, and no more — you are already travelling upwards when this fires,
+## so anything bigger reads as being flung into the air by touching a
+## wall. About a third of a block of rise.
+const CLIMB_TOP_HOP := 3.8
 ## True while pressed against a wall and rising up it. Read on the frame
 ## the wall STOPS blocking, which is the moment worth acting on.
 var _climbing := false
@@ -150,7 +142,8 @@ func revive_locked() -> bool:
 			continue
 		for child in world.players.get_children():
 			if child is Player and child.player_id == rid \
-					and ReviveReach.in_reach(child.position, position):
+					and child.position.distance_to(position) \
+						< WorldNode.REVIVE_RADIUS + 0.5:
 				return true
 	return false
 
@@ -1060,18 +1053,19 @@ func _local_move(delta: float) -> void:
 	match ClimbRule.decide(blocked_h, pushing, room_up, on_floor, in_water,
 			_climbing, downed, fly_mode):
 		ClimbRule.STEP_UP:
-			velocity.y = 7.2
+			# GENTLER OFF A CLIMB than off the ground. Stepping up a kerb
+			# wants a proper hop; finishing a climb wants the smallest
+			# nudge that clears the lip, because you are already moving
+			# up. Sharing the kerb's 7.2 threw you a block and a bit into
+			# the air the instant you touched the top of a wall, which is
+			# not "getting over it", it is being launched.
+			velocity.y = CLIMB_TOP_HOP if _climbing else 7.2
 			_climbing = false
 		ClimbRule.CLIMB:
 			velocity.y = maxf(velocity.y, WALL_CLIMB_SPEED)
 			on_floor = false
 			anim = Anim.FLY
 			_climbing = true
-		ClimbRule.TOP_OUT:
-			_climbing = false
-			velocity.y = maxf(velocity.y, WALL_TOP_HOP)
-			on_floor = false
-			anim = Anim.FLY
 		_:
 			if not blocked_h:
 				_climbing = false

@@ -79,12 +79,34 @@ func _draw_big_map() -> void:
 			image.set_pixel(px, py, _map_ground(wx, wz, half))
 	# Everyone playing, as a fat blip — this is a radar, the ground is
 	# only there so you can tell where the blips ARE.
+	# Whose map this is. Taken from the player node rather than from a
+	# peer id, because this is not a Node and has no multiplayer to ask.
+	var my_team := -1
 	for child in hud.world.players.get_children():
-		if child is Player and not hud.world.out_ids.has(child.player_id):
-			var team := int(Game.roster.get(child.player_id, {}).get("team", -1))
-			var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
-				else Color.WHITE
-			_map_blip(image, child.position, tint, size_px, child.is_local)
+		if child is Player and child.is_local and child.slot == hud.slot:
+			my_team = int(Game.roster.get(child.player_id, {}).get("team", -1))
+			break
+	for child in hud.world.players.get_children():
+		if not (child is Player) or hud.world.out_ids.has(child.player_id):
+			continue
+		var team := int(Game.roster.get(child.player_id, {}).get("team", -1))
+		var downed: bool = hud.world.client_downed.has(child.player_id)
+		# A GHOST IS ONLY YOUR TEAM'S BUSINESS.
+		#
+		# Seeing one means "go and pick that up" — it is the whole reason
+		# there is no longer a label over their head. An enemy ghost means
+		# nothing you can act on, and worse: every grey blip becomes a
+		# question, mine or not. So the other side's are simply not drawn,
+		# on the map exactly as in the world.
+		if downed and team != my_team:
+			continue
+		var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
+			else Color.WHITE
+		# ...and your own team's ghosts are washed out, so a glance tells
+		# you who is playing and who is waiting for you.
+		if downed:
+			tint = tint.lerp(Color(0.92, 0.94, 0.98), 0.62)
+		_map_blip(image, child.position, tint, size_px, child.is_local)
 	# Flags last, over the terrain and the player blips: in capture the
 	# flag they are the only thing on this map anybody actually needs.
 	for entry: Array in hud.world.flags:

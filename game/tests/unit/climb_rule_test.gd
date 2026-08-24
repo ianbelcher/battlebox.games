@@ -50,9 +50,13 @@ func test_the_second_block_of_a_climb_keeps_climbing() -> void:
 	equal(_decide(true, true, false, false, true), ClimbRule.CLIMB,
 		"still climbing while off the floor")
 
-func test_clearing_the_wall_tops_out() -> void:
-	equal(_decide(false, true, false, false, true), ClimbRule.TOP_OUT,
-		"nothing in the way any more, and we were climbing")
+func test_clearing_the_wall_is_just_walking() -> void:
+	# There was a fourth case here that gave you a hop the moment the wall
+	# stopped blocking. It is gone: once nothing is in the way you are
+	# walking, and adding a jump to that is how touching a wall came to
+	# fling you into the air.
+	equal(_decide(false, true, false, false, true), ClimbRule.NOTHING,
+		"nothing in the way is nothing to do")
 
 # ---- the cases that must do nothing ----------------------------------
 
@@ -77,10 +81,6 @@ func test_you_do_not_climb_in_water() -> void:
 	equal(_decide(true, true, false, false, false, true), ClimbRule.NOTHING,
 		"water is for swimming")
 
-func test_a_downed_player_clearing_a_wall_does_not_top_out() -> void:
-	equal(_decide(false, true, false, false, true, false, true),
-		ClimbRule.NOTHING, "no free hop while knocked out")
-
 ## Every combination returns exactly one of the four, and never crashes.
 ## Cheap, and it is the check that would catch a future arm being added
 ## with its conditions overlapping an existing one.
@@ -89,5 +89,5 @@ func test_the_table_is_total() -> void:
 		var out := ClimbRule.decide(
 			bits & 1 != 0, bits & 2 != 0, bits & 4 != 0, bits & 8 != 0,
 			bits & 16 != 0, bits & 32 != 0, bits & 64 != 0, bits & 128 != 0)
-		check(out >= ClimbRule.NOTHING and out <= ClimbRule.TOP_OUT,
+		check(out >= ClimbRule.NOTHING and out <= ClimbRule.CLIMB,
 			"case %d returned %d" % [bits, out])

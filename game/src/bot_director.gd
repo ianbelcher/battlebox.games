@@ -1332,7 +1332,7 @@ func _bot_holding_a_revive(id: String, pos: Vector3) -> bool:
 		var st: Dictionary = world.player_state.get(rid, {})
 		if st.is_empty():
 			continue
-		if ReviveReach.in_reach(Vector3(st.pos), pos):
+		if pos.distance_to(st.pos) < world.REVIVE_RADIUS + 0.5:
 			return true
 	return false
 

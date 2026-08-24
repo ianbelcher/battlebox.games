@@ -123,6 +123,16 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# So a headless run can count them and prove the interface was built.
 	add_to_group("player_hud")
+	# FIRST, AND THAT IS THE WHOLE POINT OF IT. This shader reads what has
+	# already been drawn, so it drains everything BEFORE it and nothing
+	# after. Built first, that is the world and only the world: the map,
+	# the hotbar and the hearts keep their colours.
+	#
+	# It used to be built half way down, which took the map with it — and
+	# a grey map is exactly the wrong thing to hand somebody who has just
+	# been knocked out in capture the flag and needs to find their own
+	# base. Getting lost in Isles was this line's fault.
+	_build_grey_wash()
 	map = MiniMap.new(self)
 	_build_identity_chip()
 	_build_hotbar()
@@ -435,12 +445,9 @@ func _build_storm_line() -> void:
 	_storm_label.visible = false
 	add_child(_storm_label)
 
-## The red wash and card shown when this player goes down.
-func _build_death_wash() -> void:
-	# Dying deserves more than silently falling over: a red wash plus a
-	# big center card, cleared after a couple of seconds.
-	# FIRST, so everything added after this draws on top of it and keeps
-	# its colour. The world goes grey; the HUD telling you why does not.
+## The colour draining out of the world while you are out of the fight.
+## Built before anything else — see the note in _ready.
+func _build_grey_wash() -> void:
 	_grey = ColorRect.new()
 	_grey.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_grey.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -450,6 +457,11 @@ func _build_death_wash() -> void:
 	grey_mat.set_shader_parameter("amount", 0.0)
 	_grey.material = grey_mat
 	add_child(_grey)
+
+## The red wash and card shown when this player goes down.
+func _build_death_wash() -> void:
+	# Dying deserves more than silently falling over: a red wash plus a
+	# big center card, cleared after a couple of seconds.
 	_death_flash = ColorRect.new()
 	_death_flash.color = Color(0.75, 0.05, 0.05, 0.0)
 	_death_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -1810,7 +1822,7 @@ func _update_revive_ring(player: Player) -> void:
 					mate = child
 					break
 			if mate == null \
-					or not ReviveReach.in_reach(mate.position, player.position):
+					or mate.position.distance_to(player.position) > WorldNode.REVIVE_RADIUS + 1.0:
 				continue
 			var frac := float(world.revive_progress[rid])
 			if frac > best:
@@ -2614,8 +2626,7 @@ func _refresh_battle_prompts(player: Player) -> void:
 						if gap < 9.0 and gap < mate_near:
 							mate_near = gap
 							mate_down = str(Game.roster.get(down_id, {}).get("name", "?"))
-							mate_reach = ReviveReach.in_reach(
-								child.position, player.position)
+							mate_reach = gap < WorldNode.REVIVE_RADIUS
 		if not mate_down.is_empty():
 			_revive_hint.visible = true
 			_revive_hint.text = ("⛑  Hold still — picking %s up!" % mate_down) \

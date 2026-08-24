@@ -2081,13 +2081,13 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 			# cannot shoot, build or take a flag on the way.
 			child.downed = is_down
 			child.set_knocked_out_look(is_down)
-			# SEEN BY EVERYONE. Downed players used to be hidden from the
-			# other side, so that a body did not advertise where to finish
-			# somebody off. That was the right fix for a body lying in the
-			# open and the wrong one now: they are grey, ten blocks up and
-			# unmistakably out, and being able to see who is out is the
-			# whole point of the sequence.
-			child.visible = true
+			# ONLY YOUR OWN TEAM SEES A GHOST, and that is the point of
+			# there being one. A ghost means "go and pick that up" — it is
+			# the whole reason the HELP label could be removed. An enemy
+			# ghost means nothing you can act on, and worse, it makes
+			# every grey shape a question: mine, or not? So the other
+			# side's are simply not drawn.
+			child.visible = (not is_down) or _my_team_has(id)
 			if is_down:
 				# THE KNOCKOUT IS SEEN HERE, not only at elimination.
 				#

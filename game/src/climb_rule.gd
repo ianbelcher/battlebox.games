@@ -20,7 +20,7 @@ class_name ClimbRule
 ## Nothing about that is visible from a stack trace, a log, or a
 ## screenshot. It is one missing case in five booleans.
 
-enum { NOTHING, STEP_UP, CLIMB, TOP_OUT }
+enum { NOTHING, STEP_UP, CLIMB }
 
 ## `blocked`   something is in the way horizontally
 ## `pushing`   the stick is being held towards it
@@ -45,9 +45,4 @@ static func decide(blocked: bool, pushing: bool, room_up: bool,
 		if not room_up and not downed and not flying and not in_water:
 			return CLIMB
 		return NOTHING
-	# Nothing in the way any more, and we were climbing a moment ago: the
-	# wall has been cleared. Take the last step onto it rather than
-	# letting go one block short.
-	if climbing and pushing and not downed and not flying:
-		return TOP_OUT
 	return NOTHING
