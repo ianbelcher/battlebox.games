@@ -19,6 +19,7 @@ extends Node
 ##   WORLD_CAPTURE_TEST=1       stand the person on an enemy flag and see
 ##                              whether touching it actually takes it
 ##   WORLD_ROUNDCLOCK_TEST=1    check the round clock runs at real speed
+##   WORLD_ROOF_TEST=1          count what the defenders actually built
 
 ## The world being probed.
 var world: WorldNode = null
@@ -372,7 +373,50 @@ func tick_roundclock(delta: float) -> void:
 	print("ROUNDCLOCK: %.1fs real → %.1fs off the clock, rate=%.2f (want 1.00)"
 		% [window, spent, spent / maxf(0.001, window)])
 
+## WORLD_ROOF_TEST=1: did the defenders actually put a lid on?
+##
+## Building is the one bot behaviour with no visible output at all — no
+## log line, no state, just blocks appearing somewhere nobody is looking.
+## So this counts them: the ring around each base and the roof over it,
+## which is the only way to tell "they are roofing it" from "the code that
+## roofs it never runs".
+var _roof_t := 0.0
+var _roof_said := 0.0
+
+func tick_roof(delta: float) -> void:
+	if OS.get_environment("WORLD_ROOF_TEST") != "1" or world == null:
+		return
+	if world.match_phase == "IDLE" or world.ctf._flags.is_empty():
+		return
+	_roof_t += delta
+	if _roof_t - _roof_said < 30.0:
+		return
+	_roof_said = _roof_t
+	for team_i: int in world.ctf._flags.keys():
+		var home: Vector3 = world.ctf._flags[team_i].get("home", Vector3.INF)
+		if home == Vector3.INF:
+			continue
+		var roof := 0
+		var ry := int(home.y) + world.CTF_POLE_HEIGHT + 1
+		for dz in range(-6, 7):
+			for dx in range(-6, 7):
+				if world.store.get_block(Vector3i(floori(home.x) + dx, ry,
+						floori(home.z) + dz)) != Blocks.AIR:
+					roof += 1
+		var wall := 0
+		for dz2 in range(-11, 12):
+			for dx2 in range(-11, 12):
+				var d := Vector2(dx2, dz2).length()
+				if d < 8.0 or d > 10.5:
+					continue
+				for up in 4:
+					if world.store.get_block(Vector3i(floori(home.x) + dx2,
+							int(home.y) + up, floori(home.z) + dz2)) != Blocks.AIR:
+						wall += 1
+		print("ROOF: t=%.0fs team %d wall=%d roof=%d" % [_roof_t, team_i, wall, roof])
+
 func tick(delta: float) -> void:
+	tick_roof(delta)
 	tick_roundclock(delta)
 	tick_capture(delta)
 	tick_switch(delta)
