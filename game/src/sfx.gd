@@ -136,78 +136,93 @@ func _thoomp() -> AudioStreamWAV:
 		buf[i] = (sin(phase) * 0.9 + smooth * 0.35) * env
 	return _to_wav(buf, 0.7)
 
-## AN EXPLOSION WITH SOME WEIGHT UNDER IT.
+## AN EXPLOSION.
 ##
-## This was a 60 Hz thump and a noise crack, both gone in under a second,
-## and it sounded thin — which it was: there was nothing below 60 Hz in
-## it at all, so it had no bottom on any speaker capable of one.
+## WHAT MAKES A BANG SOUND LIKE A BANG IS THE FILTER FALLING, not the
+## noise and not a bass note under it. Air punches out, the high end dies
+## almost immediately, and what is left rolls away downwards. Get that
+## sweep right and plain white noise becomes an explosion; get it wrong
+## and no amount of low end will save it.
 ##
-## Three layers now, and the SUB is the new part: a slow sine falling from
-## 46 Hz to 26 Hz over more than a second, with a much longer decay than
-## the crack above it. That is the difference between a bang and a bang
-## you feel — the crack tells you what happened, the tail tells you how
-## big it was.
+## Two earlier goes at this both got it wrong in the same way. The first
+## was a burst of noise with a 60 Hz thump: thin, because there was
+## nothing below the thump and nothing shaping the noise. The second put a
+## pure sine underneath — and a pure sine IS a drone, which is exactly
+## what it sounded like: hiss with a hum bolted on.
 ##
-## The mix matters more than the levels do, because _to_wav normalises to
-## the peak: making the sub louder does not make the sound louder, it
-## makes the crack quieter. These weights are the balance, not the volume.
+## So there is no oscillator here at all. Every layer is noise through a
+## filter, which is what an explosion physically is:
+##
+##   CRACK  a few milliseconds of high-passed noise — the punch of air
+##   BODY   noise through a cutoff falling 3 kHz to 90 Hz in a third of a
+##          second, which is the sound of the bang itself
+##   TAIL   noise held under about 100 Hz, decaying slowly — the roll
+##
+## Cascaded one-pole filters, two deep, because a single pole is a gentle
+## tilt and tilted noise still sounds like noise. And a little saturation
+## on the way out for grit: an explosion is not a clean signal.
 func _boom() -> AudioStreamWAV:
-	var seconds := 1.7
+	var seconds := 1.9
 	var count := int(seconds * RATE)
 	var buf := PackedFloat32Array()
 	buf.resize(count)
-	var smooth := 0.0
-	var sub_phase := 0.0
+	var body1 := 0.0
+	var body2 := 0.0
+	var tail1 := 0.0
+	var tail2 := 0.0
+	var hp := 0.0
+	var was := 0.0
 	for i in count:
 		var t := float(i) / RATE
-		var attack := minf(1.0, i / (0.002 * RATE))
-		# The crack, as it always was: quick and bright.
-		var crack := exp(-t * 4.5) * attack
-		smooth = smooth * 0.72 + (randf() * 2.0 - 1.0) * 0.28
-		var body := sin(TAU * 60.0 * t * (1.0 + 0.8 * exp(-t * 8.0)))
-		# The sub, falling and slow to go.
-		var sub_hz := lerpf(46.0, 26.0, clampf(t / 1.2, 0.0, 1.0))
-		sub_phase += TAU * sub_hz / RATE
-		var sub_env := exp(-t * 1.5) * minf(1.0, t / 0.02)
-		buf[i] = (body * 0.55 + smooth * 0.45) * crack \
-			+ sin(sub_phase) * 1.15 * sub_env
-	return _to_wav(buf, 0.8)
+		var n := randf() * 2.0 - 1.0
+		# THE SWEEP. Everything else is dressing.
+		var cut := 90.0 + 2900.0 * exp(-t * 9.0)
+		var a := 1.0 - exp(-TAU * cut / RATE)
+		body1 += (n - body1) * a
+		body2 += (body1 - body2) * a
+		var body := body2 * exp(-t * 3.0)
+		# The roll, well under everything else and slow to go.
+		var low := 52.0 + 48.0 * exp(-t * 1.3)
+		var b := 1.0 - exp(-TAU * low / RATE)
+		tail1 += (n - tail1) * b
+		tail2 += (tail1 - tail2) * b
+		var tail := tail2 * exp(-t * 1.15)
+		# The punch of air, gone in a few milliseconds.
+		hp = 0.86 * (hp + n - was)
+		was = n
+		var crack := hp * exp(-t * 120.0)
+		buf[i] = tanh((body * 3.4 + tail * 9.0 + crack * 0.45) * 1.5)
+	return _to_wav(buf, 0.85)
 
-## THE KNOCKOUT: a long, deep rumble under everything else.
+## THE KNOCKOUT: a long, deep roll under everything else.
 ##
-## Somebody going out is the biggest thing that happens in a round and it
-## sounded like a bubble popping. This is the floor shaking: a sine
-## sliding from 30 Hz down to 19 Hz over two seconds, slow to arrive and
-## slower to leave.
+## Noise, not a tone, for the same reason the explosion is — a swept sine
+## is a drone however low you put it, and it sat under the game humming.
+## This is the same idea as the explosion's tail with the bang taken off:
+## noise held under about 70 Hz, slow in, slow out, so it swells and rolls
+## away rather than starting and stopping.
 ##
-## A second harmonic rides along with it because a laptop speaker cannot
-## reproduce 24 Hz at all — without it the sound would simply not exist
-## for half the people playing, while shaking the house for the other
-## half. The harmonic is what they hear; the fundamental is what a proper
-## speaker feels.
+## Deliberately keeps a little above 120 Hz. A laptop speaker cannot
+## reproduce 30 Hz at all, so a pure sub is silence for half the people
+## playing; the filter leaves enough of an edge to be heard on anything
+## while the weight is there for whoever has the speakers for it.
 func _rumble() -> AudioStreamWAV:
 	var seconds := 2.2
 	var count := int(seconds * RATE)
 	var buf := PackedFloat32Array()
 	buf.resize(count)
-	var phase := 0.0
-	var harm := 0.0
+	var r1 := 0.0
+	var r2 := 0.0
 	for i in count:
 		var t := float(i) / RATE
-		var hz := lerpf(30.0, 19.0, clampf(t / 1.8, 0.0, 1.0))
-		phase += TAU * hz / RATE
-		harm += TAU * hz * 2.0 / RATE
-		# Slow in, so it swells rather than clicks; slow out, so it hangs
-		# over the fight for a moment afterwards.
-		var env := minf(1.0, t / 0.09) * exp(-maxf(0.0, t - 0.25) * 1.35)
-		# Harmonics, and they are not decoration. Measured, the sub alone
-		# put 100% of its energy below 120 Hz — which a laptop speaker
-		# cannot reproduce at all, so half the people playing would have
-		# heard literally nothing. The upper partials are what THEY hear;
-		# the fundamental is what a proper speaker lets you feel.
-		buf[i] = (sin(phase) * 1.0 + sin(harm) * 0.35
-			+ sin(phase * 4.0) * 0.16 + sin(phase * 6.0) * 0.07) * env
-	return _to_wav(buf, 0.85)
+		var n := randf() * 2.0 - 1.0
+		var cut := 38.0 + 60.0 * exp(-t * 1.6)
+		var a := 1.0 - exp(-TAU * cut / RATE)
+		r1 += (n - r1) * a
+		r2 += (r1 - r2) * a
+		var env := minf(1.0, t / 0.10) * exp(-maxf(0.0, t - 0.30) * 1.5)
+		buf[i] = tanh(r2 * 11.0 * env)
+	return _to_wav(buf, 0.9)
 
 ## Crowd cheer: a noise swell plus a few descending whoops and claps.
 func _cheer() -> AudioStreamWAV:

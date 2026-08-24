@@ -1284,7 +1284,13 @@ func _local_actions(delta: float) -> void:
 			world.orbs.shoot_local(self, int(item.id))
 			_edit_cooldown = float(Weapons.spec(int(item.id)).cooldown)
 		elif place_target != Vector3i(0, -99, 0):
-			if item.kind == "structure":
+			if item.kind == "vehicle":
+				# Where you are AIMING, not where you are standing. The
+				# server settles it onto the water or the ground from
+				# there — see VehicleDirector.settle.
+				world.sv_vehicle_place.rpc_id(1, slot, place_target, int(item.id))
+				_edit_cooldown = 1.0
+			elif item.kind == "structure":
 				var facing := 0
 				if absf(heading.x) > absf(heading.z):
 					facing = 1 if heading.x > 0 else 3

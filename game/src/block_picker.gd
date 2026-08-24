@@ -68,6 +68,15 @@ func _init(p_category := "blocks") -> void:
 				entries.append({"kind": "block", "id": block,
 					"name": Blocks.display_name(block),
 					"color": Blocks.color_of(block)})
+			# BOATS AND CARS ARE TOOLS, and they belong here with the
+			# other things you put down. They used to be two buttons in
+			# the WORLD menu, under the map, next to the world size —
+			# which is a settings page for the whole table, not a place
+			# anybody looks for something to place.
+			entries.append({"kind": "vehicle", "id": VehicleGeom.KIND_BOAT,
+				"name": "Boat", "color": Color("8a5a34")})
+			entries.append({"kind": "vehicle", "id": VehicleGeom.KIND_CAR,
+				"name": "Car", "color": Color("c8503c")})
 		"kits":
 			for i in Structures.count():
 				var spec := Structures.spec(i)

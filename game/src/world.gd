@@ -1662,24 +1662,6 @@ func sv_set_fly(scope: String, team: int, on: bool, who := "") -> void:
 # owns the list, the ids and the one-driver rule. See VehicleDirector.
 # ------------------------------------------------------------------
 
-## Put one where the asker is standing. The position comes from the
-## SERVER'S picture of where they are, not from the message — otherwise
-## anybody could drop a boat anywhere on the map from across it.
-@rpc("any_peer", "reliable")
-func sv_vehicle_here(slot: int, kind: int) -> void:
-	if not multiplayer.is_server() or vehicles == null:
-		return
-	var id := Game.player_id(multiplayer.get_remote_sender_id(), slot)
-	if not _is_host(multiplayer.get_remote_sender_id()):
-		return
-	var where: Dictionary = player_state.get(id, {})
-	if where.is_empty():
-		return
-	var at_pos: Vector3 = where.pos
-	if not store.inside_world(floori(at_pos.x), floori(at_pos.z), 2):
-		return
-	vehicles.spawn(clampi(kind, 0, 1), vehicles.settle(clampi(kind, 0, 1), at_pos))
-
 @rpc("any_peer", "reliable")
 func sv_vehicle_board(vid: String, slot: int) -> void:
 	if not multiplayer.is_server() or vehicles == null:
@@ -2499,13 +2481,44 @@ func cl_where(slot: int, pos: Vector3, count: int) -> void:
 			child.teleport(pos)
 	treasures_changed.emit()
 
+## THE NODE FOR A PLAYER ID, without walking every child to find it.
+##
+## Player nodes are named after their id, so the scene tree can do this by
+## hash. It matters because the callers are the hot path: cl_pos scanned
+## every child for every position update, which at a hundred players and
+## fifteen updates a second is a hundred and fifty thousand comparisons a
+## second on every client — quadratic in the player count, for a lookup
+## that is a dictionary hit.
+func player_node(id: String) -> Player:
+	if players == null:
+		return null
+	return players.get_node_or_null("P_" + id.replace(":", "_")) as Player
+
 @rpc("authority", "unreliable_ordered")
 func cl_pos(id: String, pos: Vector3, yaw: float, anim: int) -> void:
-	for child in players.get_children():
-		if child is Player and child.player_id == id and not child.is_local:
-			child.remote_update(pos, yaw, anim)
-			if out_ids.has(id) and child.visible:
-				child.visible = false
+	_place_remote(id, pos, yaw, anim)
+
+## EVERY COMPUTER PLAYER IN ONE PACKET.
+##
+## This was one RPC per player per tick: a hundred players at fifteen a
+## second is fifteen hundred packets a second, each carrying its own node
+## path and method id, for about fifty bytes of actual position. The
+## overhead was most of the traffic and all of the packet count.
+##
+## One packet a tick now, whatever the roster size — fifteen a second
+## instead of fifteen hundred. The entries are [id, pos, yaw, anim].
+@rpc("authority", "unreliable_ordered")
+func cl_pos_batch(moves: Array) -> void:
+	for move: Array in moves:
+		_place_remote(str(move[0]), move[1], float(move[2]), int(move[3]))
+
+func _place_remote(id: String, pos: Vector3, yaw: float, anim: int) -> void:
+	var who := player_node(id)
+	if who == null or who.is_local:
+		return
+	who.remote_update(pos, yaw, anim)
+	if out_ids.has(id) and who.visible:
+		who.visible = false
 
 func _nearest_local_dist(pos: Vector3) -> float:
 	var best := 999.0

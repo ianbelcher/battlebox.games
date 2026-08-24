@@ -162,6 +162,18 @@ static func build(kind: String, id: int) -> Node3D:
 					root.add_child(_box(Vector3(0.31, 0.02, 0.31), top, Vector3(0, 0.26, 0)))
 				_block_detail(root, id, color)
 		return root
+	if kind == "vehicle":
+		# A hull and a little mast, at hand scale.
+		var boat := id == VehicleGeom.KIND_BOAT
+		var hull: Color = Color("8a5a34") if boat else Color("c8503c")
+		root.add_child(_box(Vector3(0.22, 0.1, 0.42), hull, Vector3(0, 0.06, 0)))
+		root.add_child(_box(Vector3(0.2, 0.06, 0.18),
+			hull.lightened(0.25) if boat else Color("2f3a4a"),
+			Vector3(0, 0.14, -0.06)))
+		if boat:
+			root.add_child(_box(Vector3(0.02, 0.24, 0.02),
+				Color("6b4a30"), Vector3(0, 0.24, 0)))
+		return root
 	if kind == "structure":
 		root.add_child(_box(Vector3(0.34, 0.2, 0.3), Structures.spec(id).color, Vector3(0, 0.06, 0)))
 		root.add_child(_box(Vector3(0.4, 0.1, 0.36), Structures.spec(id).color.darkened(0.3), Vector3(0, 0.2, 0)))

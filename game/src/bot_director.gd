@@ -1148,9 +1148,10 @@ const CTF_COVER_HEIGHT := 2
 
 const CTF_COVER_SLOTS := 8
 
-func _bot_build_cover(id: String, bot: Dictionary, team: int, delta: float) -> void:
-	bot.build_cd = float(bot.get("build_cd", 0.0)) - delta
-	if float(bot.build_cd) > 0.0:
+## The cooldown is counted down with the others in the step, and CHECKED
+## by the caller before it pays for a sight test — see there.
+func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> void:
+	if float(bot.get("build_cd", 0.0)) > 0.0:
 		return
 	# Quicker in a siege: the whole round is whether the wall went up in
 	# time, so a defender that lays a block every second and a half is a
@@ -1316,21 +1317,66 @@ func _bot_settle_ground(id: String, bot: Dictionary, delta: float) -> void:
 		pos.y = lerpf(pos.y, floor_y, minf(1.0, delta * 8.0))
 	bot.pos = pos
 
+## INTO THE BATCH, not onto the wire.
+##
+## This used to send its own RPC, so a hundred computer players at fifteen
+## a second was fifteen hundred packets a second — each one carrying a
+## node path and a method id to deliver about fifty bytes of position. The
+## overhead was most of the traffic and all of the packet count, and it
+## grew with the roster, which is why fifty players felt fine and a
+## hundred did not.
+##
+## They go into a list that WorldNode.cl_pos_batch delivers in one packet
+## per tick. See BotDirector._flush_positions.
 func _bot_send_pos(id: String, bot: Dictionary, _delta: float) -> void:
-	if float(bot.get("send_t", 0.0)) <= 0.0:
-		bot.send_t = 1.0 / 15.0
-		# WALK unless they are in the water or in the air, in which case
-		# say so. Everything was sent as WALK, so a computer player in the
-		# sea ran on the spot with its head above the waves — half of what
-		# made them look like they were walking on it.
-		var pose := Player.Anim.WALK
-		var here: Vector3 = bot.pos
-		if bool(bot.get("flying", false)):
-			pose = Player.Anim.FLY
-		elif _water_at(floori(here.x), floori(here.z)) \
-				and here.y < float(WorldGen.SEA_LEVEL):
-			pose = Player.Anim.SWIM
-		world.cl_pos.rpc(id, here, float(bot.yaw), int(pose))
+	if float(bot.get("send_t", 0.0)) > 0.0:
+		return
+	bot.send_t = 1.0 / 15.0
+	# WALK unless they are in the water or in the air, in which case
+	# say so. Everything was sent as WALK, so a computer player in the
+	# sea ran on the spot with its head above the waves — half of what
+	# made them look like they were walking on it.
+	var pose := Player.Anim.WALK
+	var here: Vector3 = bot.pos
+	if bool(bot.get("flying", false)):
+		pose = Player.Anim.FLY
+	elif _water_at(floori(here.x), floori(here.z)) \
+			and here.y < float(WorldGen.SEA_LEVEL):
+		pose = Player.Anim.SWIM
+	_pending.append([id, here, float(bot.yaw), int(pose)])
+
+## Everything that moved this frame, in one packet.
+##
+## Capped, because an unreliable packet that outgrows the MTU is a packet
+## that gets fragmented or dropped — and dropping a hundred positions at
+## once is far worse than sending two packets. Whatever is left goes next
+## frame; it is a position update, and the next one is always more use
+## than a retry of the last.
+const POS_PER_PACKET := 48
+
+var _pk := 0
+var _ent := 0
+var _pk_t := 0.0
+
+func _flush_positions() -> void:
+	if OS.get_environment("WORLD_NETSTAT") == "1":
+		_ent += _pending.size()
+		_pk += int(ceil(float(_pending.size()) / float(POS_PER_PACKET)))
+		_pk_t += get_process_delta_time()
+		if _pk_t >= 5.0:
+			print("NET packets/s=%.0f entries/s=%.0f fps=%.1f bots=%d phase=%s"
+				% [_pk / _pk_t, _ent / _pk_t,
+					1.0 / maxf(get_process_delta_time(), 0.0001),
+					roster.size(), world.match_phase])
+			_pk = 0
+			_ent = 0
+			_pk_t = 0.0
+	while not _pending.is_empty():
+		var take: int = mini(POS_PER_PACKET, _pending.size())
+		world.cl_pos_batch.rpc(_pending.slice(0, take))
+		_pending = _pending.slice(take)
+
+var _pending: Array = []
 
 ## Is this computer player mid-way through picking somebody up? The same
 ## test the people use: a downed team-mate with a revive already running,
@@ -1347,6 +1393,13 @@ func _bot_holding_a_revive(id: String, pos: Vector3) -> bool:
 	return false
 
 func tick(delta: float) -> void:
+	_tick_bots(delta)
+	# One packet for everything that moved, at the END of the step — so a
+	# bot that moves and then a second one that moves share a packet
+	# rather than each buying their own.
+	_flush_positions()
+
+func _tick_bots(delta: float) -> void:
 	for id: String in roster.keys():
 		if not Game.roster.has(id):
 			continue
@@ -1370,6 +1423,7 @@ func tick(delta: float) -> void:
 		bot.shoot_cd = maxf(0.0, float(bot.shoot_cd) - delta)
 		bot.dig_cd = maxf(0.0, float(bot.get("dig_cd", 0.0)) - delta)
 		bot.build_out_cd = maxf(0.0, float(bot.get("build_out_cd", 0.0)) - delta)
+		bot.build_cd = maxf(0.0, float(bot.get("build_cd", 0.0)) - delta)
 		bot.think = float(bot.think) - delta
 		var pos: Vector3 = bot.pos
 		var downed := world.downed_ids.has(id)
@@ -1428,7 +1482,27 @@ func tick(delta: float) -> void:
 					randf_range(-16, 16), 0, randf_range(-16, 16)), 6)
 				bot.think = randf_range(0.4, 0.8)
 		if flat.length() > 0.8:
-			var dir := _bot_steer(bot, pos, Vector3(bot.goal), delta)
+			# THE ROUTE IS WORKED OUT A FEW TIMES A SECOND, NOT EVERY
+			# FRAME.
+			#
+			# Steering is the pathfinder: it walks the ground around
+			# whatever is in the way and hands back a direction. Measured
+			# with ninety-eight computer players, it was 400 of the 870
+			# milliseconds a second the whole bot step cost — nearly half
+			# — and it was being asked sixty times a second for an answer
+			# that changes about ten times a second. Goal-picking, by
+			# comparison, cost 1 ms/s, because it is already on a timer.
+			#
+			# Between recalculations the bot keeps walking the way it was
+			# already walking, which is what walking is. The interval is
+			# jittered so a hundred of them do not all recompute on the
+			# same frame and hand the server one enormous tick.
+			bot.steer_t = float(bot.get("steer_t", 0.0)) - delta
+			var dir: Vector2 = bot.get("steer_dir", Vector2.ZERO)
+			if float(bot.steer_t) <= 0.0:
+				bot.steer_t = randf_range(0.10, 0.18)
+				dir = _bot_steer(bot, pos, Vector3(bot.goal), delta)
+				bot.steer_dir = dir
 			# AIRBORNE: go straight there. The pathfinder walks the
 			# ground, so a flying bot asking it for directions gets routed
 			# round a wall it is currently above — or told there is no way
@@ -1591,9 +1665,27 @@ func tick(delta: float) -> void:
 		if not state.is_empty():
 			state.pos = pos
 		# Fight whatever is in range.
-		if world.match_phase == "BATTLE" and world.match_alive.has(id) and not downed:
+		#
+		# THE COOLDOWN IS CHECKED FIRST, and that ordering is the whole
+		# difference between a server that can hold a hundred players and
+		# one that cannot.
+		#
+		# It used to look for a target every frame and THEN ask whether it
+		# could shoot — so a bot that fires twice a second paid for a full
+		# search sixty times a second. Since targets need line of sight,
+		# that search walks a ray to every candidate: at a 55-block sight
+		# range that is a hundred-odd block lookups each, up to six
+		# candidates, per bot, per frame. Ninety-eight bots came to
+		# millions of block reads a second and the server fell to a
+		# fraction of real time — measured at 37 position updates a second
+		# against a target of 1470.
+		#
+		# Nothing about the behaviour changes: a bot that cannot fire yet
+		# had no use for the answer.
+		if world.match_phase == "BATTLE" and world.match_alive.has(id) \
+				and not downed and bot.shoot_cd <= 0.0:
 			var enemy := _bot_nearest_enemy(id, pos, float(bot.get("sight", 48.0)))
-			if enemy != "" and bot.shoot_cd <= 0.0:
+			if enemy != "":
 				var epos: Vector3 = world.player_state[enemy].pos
 				var muzzle := pos + Vector3(0, 1.4, 0)
 				var aim := epos + Vector3(0, 1.0, 0)
@@ -1637,12 +1729,20 @@ func tick(delta: float) -> void:
 		if world.ctf.active() and not downed and world.match_alive.has(id) \
 				and world.match_phase == "BATTLE":
 			var my_team := int(Game.roster.get(id, {}).get("team", -1))
-			if my_team >= 0 and _bot_ctf_defends(id, my_team) \
+			# THE COOLDOWN BEFORE THE SIGHT CHECK, for the same reason the
+			# shooting does it in that order: "is anybody in sight" walks
+			# a ray to every candidate, and asking it sixty times a second
+			# for a defender that lays a block twice a second is sixty
+			# times the work for the same answer. In last flag standing
+			# two thirds of every team are defenders, so this was most of
+			# the roster paying it.
+			if my_team >= 0 and float(bot.get("build_cd", 0.0)) <= 0.0 \
+					and _bot_ctf_defends(id, my_team) \
 					and _bot_nearest_enemy(id, pos, 30.0) == "":
 				_bot_build_cover(id, bot, my_team, delta)
 		if bot.send_t <= 0.0:
 			bot.send_t = 1.0 / 15.0
-			world.cl_pos.rpc(id, pos, bot.yaw, 1)
+			_pending.append([id, pos, float(bot.yaw), 1])
 
 func spawn_orb(shooter: String, from: Vector3, dir: Vector3, kind: int) -> void:
 	var speed := float(Weapons.spec(kind).get("speed", 34.0))
@@ -1651,9 +1751,26 @@ func spawn_orb(shooter: String, from: Vector3, dir: Vector3, kind: int) -> void:
 	orbs.append({"pos": from, "vel": dir * speed, "shooter": shooter,
 		"kind": kind, "age": 0.0})
 
+## The most hops one orb takes in one frame. See tick_orbs.
+const MAX_ORB_HOPS := 8
+
 func tick_orbs(delta: float) -> void:
 	if orbs.is_empty():
 		return
+	# EVERYONE WHO COULD BE HIT, LOOKED UP ONCE FOR THE WHOLE FRAME.
+	#
+	# The per-orb filter below needs each player's position, and reading
+	# it from player_state is a string-keyed dictionary hit. With hundreds
+	# of orbs and a hundred players that was sixty thousand dictionary
+	# lookups a frame, which costs more than the arithmetic it feeds.
+	# Ninety-eight lookups now, and the filter reads a flat array.
+	var alive: Array = []
+	for pid: String in world.match_alive.keys():
+		if world.downed_ids.has(pid):
+			continue
+		var where: Vector3 = world.player_state.get(pid, {}).get("pos", Vector3.INF)
+		if where != Vector3.INF:
+			alive.append([pid, where])
 	for i in range(orbs.size() - 1, -1, -1):
 		var orb: Dictionary = orbs[i]
 		orb.age = float(orb.age) + delta
@@ -1662,13 +1779,46 @@ func tick_orbs(delta: float) -> void:
 		# short hops — a single jump per frame would tunnel through walls
 		# and players alike.
 		var travel := vel.length() * delta
-		var hops := maxi(int(travel / 0.4), 1)
+		# CAPPED, and the cap is what stops a death spiral. Hops are
+		# derived from how far the orb moves this frame, so a server
+		# running slowly takes a bigger step, which asks for more hops,
+		# which makes it slower still. At eight the step is under a block
+		# and a half at any frame rate this thing should ever see.
+		var hops := clampi(int(travel / 0.4), 1, MAX_ORB_HOPS)
 		var step := vel * (delta / float(hops))
+		var from: Vector3 = orb.pos
+		# WHO COULD POSSIBLY BE HIT THIS FRAME, worked out ONCE.
+		#
+		# This test used to run for every alive player on every hop. With a
+		# hundred bots shooting there are hundreds of orbs in the air, two
+		# dozen hops each, and a hundred players to check — over a million
+		# distance tests a frame, and it grows with the SQUARE of the
+		# roster because more players means both more orbs and more things
+		# to test each one against. That is why fifty was comfortable and a
+		# hundred was not: it is not twice the work, it is four times.
+		#
+		# Almost nobody is ever near an orb's path, so the list is nearly
+		# always empty and the inner loop below costs nothing.
+		var reach := travel + 2.0
+		var near: Array = []
+		for entry: Array in alive:
+			var who := str(entry[0])
+			if who == orb.shooter or not world.teams_differ(orb.shooter, who):
+				continue
+			if Vector3(entry[1]).distance_to(from) <= reach:
+				near.append(entry)
 		var dead := false
 		for _h in hops:
 			orb.pos = (orb.pos as Vector3) + step
 			var at: Vector3 = orb.pos
 			if at.y < -4.0 or at.y > WorldGen.CHUNK_H + 40.0:
+				dead = true
+				break
+			# Off the map is gone. Without this an orb that hits nothing
+			# flies for its full six seconds — at seventy blocks a second
+			# that is four hundred blocks, well past the edge of any world
+			# here, being simulated the whole way.
+			if not world.store.inside_world(floori(at.x), floori(at.z), 0):
 				dead = true
 				break
 			if Blocks.is_solid(world.store.get_block(Vector3i(floori(at.x),
@@ -1677,19 +1827,20 @@ func tick_orbs(delta: float) -> void:
 					print("BOTORB stopped by a block after %.2fs" % orb.age)
 				dead = true
 				break
-			for pid: String in world.match_alive.keys():
-				if pid == orb.shooter or world.downed_ids.has(pid) \
-						or not world.teams_differ(orb.shooter, pid):
-					continue
-				var target: Vector3 = world.player_state.get(pid, {}).get("pos", Vector3.INF)
+			for entry: Array in near:
+				var target: Vector3 = entry[1]
 				if target.distance_to(at - Vector3(0, 0.8, 0)) < 1.1:
 					if OS.get_environment("WORLD_ORB_DEBUG") == "1":
-						print("BOTORB hit %s after %.2fs in flight" % [pid, orb.age])
-					world.match_hurt(pid, 1, at, orb.shooter)
+						print("BOTORB hit %s after %.2fs in flight" % [entry[0], orb.age])
+					world.match_hurt(str(entry[0]), 1, at, orb.shooter)
 					dead = true
 					break
 			if dead:
 				break
-		if dead or float(orb.age) > 6.0:
+		# Three seconds, down from six. At seventy blocks a second that is
+		# still two hundred blocks — across any world here — and it halves
+		# how many are in the air at once, which is what everything above
+		# is multiplied by.
+		if dead or float(orb.age) > 3.0:
 			orbs.remove_at(i)
 
