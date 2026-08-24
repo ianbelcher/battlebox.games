@@ -274,6 +274,14 @@ func _bot_rescue_goal(id: String, pos: Vector3) -> Vector3:
 		var away := pos.distance_to(body)
 		if away >= BOT_REVIVE_REACH:
 			continue
+		# ONE PAIR OF HANDS IS ENOUGH. Every able team-mate runs this same
+		# search and every one of them used to pick the same nearest body,
+		# so a single knockout pulled a whole side out of the fight to walk
+		# to one spot — "they'll all stop fighting and then run out to try
+		# and help that person". Picking somebody up is a one-player job.
+		# Whoever is closest goes and the rest carry on with the round.
+		if _closer_mate(id, mate, body, away):
+			continue
 		var is_person := not bool(Game.roster.get(mate, {}).get("bot", false))
 		var danger := BOT_REVIVE_DANGER
 		if is_person:
@@ -294,6 +302,32 @@ func _bot_rescue_goal(id: String, pos: Vector3) -> Vector3:
 			best = body
 	return best
 
+## Is somebody else better placed to pick this body up than I am?
+##
+## Only counts team-mates who would ACTUALLY GO: able, still standing, and
+## not minding a flag. A keeper being nearest is not a rescuer being
+## nearest, and counting one as though it were leaves the body on the floor
+## with everybody waiting for somebody who is never coming. People are not
+## counted either — a person may well have their own ideas, and standing
+## down on the assumption that a child is about to walk over is how nobody
+## gets picked up at all.
+func _closer_mate(id: String, mate: String, body: Vector3, away: float) -> bool:
+	var team := int(Game.roster.get(id, {}).get("team", -1))
+	var rivals: Array = []
+	for other: String in world.match_alive.keys():
+		if other == id or other == mate or world.downed_ids.has(other) \
+				or world.out_ids.has(other) or world.teams_differ(id, other):
+			continue
+		if not bool(Game.roster.get(other, {}).get("bot", false)):
+			continue
+		if world.ctf.active() and team >= 0 and _bot_ctf_defends(other, team):
+			continue
+		var st: Dictionary = world.player_state.get(other, {})
+		if st.is_empty():
+			continue
+		rivals.append(Vector3(st.pos).distance_to(body))
+	return not RallyRules.mine_to_take(away, rivals)
+
 ## How many able team-mates are already close to this body — the ones who
 ## could be going in with you.
 func _mates_near(mate: String, body: Vector3) -> int:
@@ -307,25 +341,42 @@ func _mates_near(mate: String, body: Vector3) -> int:
 			count += 1
 	return count
 
-## Where a knocked-down computer player drags itself. Towards the nearest
-## team-mate who could actually pick it up, or failing that directly away
-## from whoever put it there. A crawl covers very little ground, so this is
-## a few blocks of sense, not an escape.
+## How far a knocked-out player will look for somebody to pick them up.
+const RALLY_REACH := 20.0
+
+## Where a knocked-out computer player goes. Towards the nearest team-mate
+## who could actually pick it up, or failing that away from whoever put it
+## there.
+##
+## THE TEAM TEST HERE WAS INVERTED. It read `not teams_differ(...): continue`,
+## which skips your own side and leaves you walking at the nearest ENEMY —
+## and since there is usually no enemy within twenty blocks of where you
+## went down, it fell through to "head for your own flag" nearly every
+## time. That is the whole of "when a bot gets downed it seems to want to
+## run all the way back to the flag as opposed to running to the nearest
+## player": it was not choosing the flag, it was failing to find anybody.
+##
+## The consequence was worse than a wasted walk. Rescuers close on a body
+## while the body walks away from them, so the two never meet and you end
+## up chasing a knocked-out team-mate who runs straight past you. Both
+## halves have to move towards each other for a revive to ever happen.
 func _bot_cover_goal(id: String, pos: Vector3) -> Vector3:
-	var mate_at := Vector3.INF
-	var mate_d := 20.0
+	var my_team := int(Game.roster.get(id, {}).get("team", -1))
+	var others: Array = []
 	for other: String in world.match_alive.keys():
-		if other == id or world.downed_ids.has(other) or not world.teams_differ(id, other):
+		if other == id:
 			continue
 		var st: Dictionary = world.player_state.get(other, {})
 		if st.is_empty():
 			continue
-		var d: float = pos.distance_to(st.pos)
-		if d < mate_d:
-			mate_d = d
-			mate_at = st.pos
-	if mate_at != Vector3.INF:
-		return mate_at
+		others.append({
+			"team": int(Game.roster.get(other, {}).get("team", -1)),
+			"pos": Vector3(st.pos),
+			"downed": world.downed_ids.has(other),
+			"out": world.out_ids.has(other)})
+	var pick := RallyRules.pick_up_at(my_team, pos, others, RALLY_REACH)
+	if pick >= 0:
+		return others[pick].pos
 	# Nobody coming: head for your own flag. You will not crawl the whole
 	# way, but you will crawl the right way — and in capture the flag your
 	# own base is where help lives, so this is both "get to cover" and
@@ -357,9 +408,24 @@ func _bot_ctf_keepers(team: int) -> int:
 	# LAST FLAG STANDING IS A SIEGE. Losing your flag ends your round, so
 	# a team that empties out to go raiding has already lost — nearly all
 	# of it stays home and builds. See HoldoutRules.keepers.
+	# …until the clock is nearly gone, when half the guard goes looking for
+	# a flag instead. See HoldoutRules.keepers_left.
 	if world.ctf.elimination():
-		return HoldoutRules.keepers(size)
+		return HoldoutRules.keepers_left(size, world.battle.holdout_fraction())
 	return clampi(size / 3, 0, 2)
+
+## How far from its own flag a keeper will go to pick somebody up.
+const KEEPER_RESCUE_RANGE := 14.0
+
+## May this one walk to a body, or is it minding a flag?
+func _may_leave_post(id: String, body: Vector3) -> bool:
+	if not world.ctf.active():
+		return true
+	var team := int(Game.roster.get(id, {}).get("team", -1))
+	if team < 0 or not _bot_ctf_defends(id, team):
+		return true
+	var home: Vector3 = world.ctf._flags.get(team, {}).get("home", Vector3.INF)
+	return home != Vector3.INF and home.distance_to(body) <= KEEPER_RESCUE_RANGE
 
 func _bot_ctf_defends(id: String, team: int) -> bool:
 	var seat := world.ctf.seats_of(team).find(id)
@@ -384,6 +450,16 @@ func _bot_ctf_target_team(id: String, team: int) -> int:
 		if other_team == team:
 			continue
 		if int(world.ctf._flags[other_team].back_at) > 0:
+			continue
+		# OUT IS NOT THE SAME AS AWAY, and only `back_at` was being
+		# tested. A flag taken for good in last flag standing is marked
+		# `out` and never gets a `back_at` — so an eliminated team's flag
+		# still counted as standing, raiders went on being dealt to it,
+		# and its `pos` is INF, so `ctf_goal` returned "nothing to do" and
+		# they wandered off. Every capture idled a share of the survivors
+		# and the field went quiet, which is exactly what "the moment they
+		# capture the flag it seems like all the players hang back" was.
+		if bool(world.ctf._flags[other_team].get("out", false)):
 			continue
 		standing.append(other_team)
 	if standing.is_empty():
@@ -583,9 +659,16 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 		# And a bot on its last couple of hearts does not attempt a rescue
 		# at all. It is the least likely to survive the attempt and the
 		# most likely to become the next body.
+		#
+		# AND A KEEPER DOES NOT LEAVE THE FLAG TO DO IT. This rung sits
+		# above the objective rung, so one knockout anywhere on the map
+		# emptied the base — which is how a side ends up defending a flag
+		# nobody is watching. A keeper still picks up anyone who went down
+		# ON the base, because that is not leaving the post, that is the
+		# post.
 		if hp > 2:
 			var rescue := _bot_rescue_goal(id, pos)
-			if rescue != Vector3.INF:
+			if rescue != Vector3.INF and _may_leave_post(id, rescue):
 				return rescue
 		# Loot when unarmed.
 		if int(bot.weapon) == 13:
@@ -1144,9 +1227,23 @@ func _bot_steer(bot: Dictionary, pos: Vector3, goal: Vector3, delta: float) -> V
 
 const CTF_COVER_RADIUS := 9
 
-const CTF_COVER_HEIGHT := 2
+## How high and how dense the ring gets, and it depends on the mode.
+##
+## In capture the flag a flag has to stay TAKEABLE — a base nobody can get
+## into is a nil-all draw for the whole round — so it stays at a scatter of
+## waist-high cover you can walk between.
+##
+## Last flag standing is the opposite game: holding what you built IS the
+## mode, and there is a clock to stop two dug-in sides staring at each
+## other forever. So the ring goes up to head height and twice as dense,
+## which reads as a wall with gaps in it rather than eight lonely pillars.
+## It is team wool either way, and wool digs out, so a wall is a delay and
+## never a lock.
+func _cover_height() -> int:
+	return 3 if world.ctf.elimination() else 2
 
-const CTF_COVER_SLOTS := 8
+func _cover_slots() -> int:
+	return 16 if world.ctf.elimination() else 8
 
 ## The cooldown is counted down with the others in the step, and CHECKED
 ## by the caller before it pays for a sight test — see there.
@@ -1164,8 +1261,9 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> 
 	var home: Vector3 = flag.get("home", Vector3.INF)
 	if home == Vector3.INF:
 		return
-	var pick := randi() % CTF_COVER_SLOTS
-	var angle := TAU * float(pick) / float(CTF_COVER_SLOTS)
+	var slots := _cover_slots()
+	var pick := randi() % slots
+	var angle := TAU * float(pick) / float(slots)
 	var wx := floori(home.x + cos(angle) * float(CTF_COVER_RADIUS))
 	var wz := floori(home.z + sin(angle) * float(CTF_COVER_RADIUS))
 	if not world.store.inside_world(wx, wz, 2):
@@ -1175,7 +1273,7 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> 
 		return
 	# One block per go, lowest gap first, so the ring rises evenly rather
 	# than one tall pillar appearing before anything else exists.
-	for up in CTF_COVER_HEIGHT:
+	for up in _cover_height():
 		var cell := Vector3i(wx, ground + 1 + up, wz)
 		if world.store.get_block(cell) != Blocks.AIR:
 			continue
@@ -1726,8 +1824,15 @@ func _tick_bots(delta: float) -> void:
 		# actually minding its own flag, actually in the round, and there
 		# is nobody in sight — a bot laying blocks mid-firefight would be
 		# a bot losing a firefight.
-		if world.ctf.active() and not downed and world.match_alive.has(id) \
-				and world.match_phase == "BATTLE":
+		# AND THEY START BEFORE THE BELL. Building was gated on BATTLE, so
+		# the one stretch of the round with nobody shooting at you — the
+		# setup phase, which in last flag standing is the whole point of
+		# the mode — was spent standing about. A siege you have not built
+		# anything for is just a fight in a field.
+		var digging_in: bool = world.match_phase == "SETUP" and world.ctf.elimination()
+		if world.ctf.active() and not downed and not world.out_ids.has(id) \
+				and ((world.match_phase == "BATTLE" and world.match_alive.has(id)) \
+					or digging_in):
 			var my_team := int(Game.roster.get(id, {}).get("team", -1))
 			# THE COOLDOWN BEFORE THE SIGHT CHECK, for the same reason the
 			# shooting does it in that order: "is anybody in sight" walks

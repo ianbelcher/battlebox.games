@@ -118,7 +118,7 @@ func tick(delta: float) -> void:
 				# Last flag standing has a round length of its own: it is
 				# not a storm closing in, it is how long you have to hold
 				# what you built.
-				_timer = HoldoutRules.ROUND_MINUTES * 60.0 \
+				_timer = holdout_seconds() \
 					if world.ctf.elimination() else world.storm_minutes * 60.0
 				world.cl_match.rpc("BATTLE", _timer)
 		"BATTLE":
@@ -754,6 +754,31 @@ func finish(winner: int) -> void:
 	record_result(winner)
 	world.cl_match_end.rpc(winner)
 
+## HOW LONG A ROUND OF LAST FLAG STANDING RUNS.
+##
+## Ten minutes, unless WORLD_HOLDOUT_MINUTES says otherwise. A mode that
+## can only be seen by waiting ten minutes is a mode that never gets
+## checked end to end, and the scoring only happens at the very end — so
+## the one part most worth testing was the part hardest to reach.
+## Read once, not per call: this is reached from the bot goal path, which
+## asks how much of the round is left for every computer player deciding
+## whether it is still minding the flag — and an environment lookup is a
+## syscall, not a variable.
+var _holdout_seconds := -1.0
+
+func holdout_seconds() -> float:
+	if _holdout_seconds < 0.0:
+		var knob := OS.get_environment("WORLD_HOLDOUT_MINUTES")
+		_holdout_seconds = knob.to_float() * 60.0 \
+			if knob.is_valid_float() and knob.to_float() > 0.0 \
+			else HoldoutRules.ROUND_MINUTES * 60.0
+	return _holdout_seconds
+
+## How much of the round is left, 1 at the bell and 0 at the whistle.
+func holdout_fraction() -> float:
+	var whole := holdout_seconds()
+	return clampf(_timer / whole, 0.0, 1.0) if whole > 0.0 else 1.0
+
 ## Is last flag standing over because only one team still has a flag?
 func check_holdout_over() -> void:
 	if world.match_phase != "BATTLE" or not world.ctf.elimination():
@@ -777,14 +802,15 @@ func check_holdout_over() -> void:
 func end_holdout() -> void:
 	if world.match_phase != "BATTLE":
 		return
-	var held: Array = world.ctf.teams_holding()
+	# SURVIVING, not merely holding — see CtfDirector.teams_surviving.
+	var held: Array = world.ctf.teams_surviving()
 	var each := HoldoutRules.share(held.size())
 	for team_v: Variant in held:
 		var team := int(team_v)
 		world.ctf_scores[team] = int(world.ctf_scores.get(team, 0)) + each
 	world.ctf.broadcast_flags()
-	print("HOLDOUT: %d team(s) held, %d point(s) each (scores %s)"
-		% [held.size(), each, world.ctf_scores])
+	print("HOLDOUT: %d team(s) survived of %d holding, %d point(s) each (scores %s)"
+		% [held.size(), world.ctf.teams_holding().size(), each, world.ctf_scores])
 	finish(int(held[0]) if held.size() == 1 else -1)
 
 ## One knockout, for the board.

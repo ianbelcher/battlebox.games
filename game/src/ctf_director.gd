@@ -550,6 +550,35 @@ func teams_holding() -> Array:
 			held.append(team_i)
 	return held
 
+## WHO ACTUALLY SURVIVED THE ROUND, which is not the same question as
+## which flags are still up, and the scoring wants this one.
+##
+## The pot was shared out among `teams_holding()` — every flag not marked
+## out. A flag is an object in the world and it does not care whether
+## anybody is left behind it, so a side that had been wiped off the field
+## still counted as a survivor and still took a share. Five flags standing
+## divides the pot five ways and the table gives nothing at all past three,
+## so a round that really came down to three teams paid everybody zero.
+## That is "there was only three teams left at the end ... that doesn't
+## seem to be what happened".
+##
+## Alive means STANDING: in the round and not on the floor. A side whose
+## every player is knocked out at the final whistle did not hold anything,
+## whatever its flagpole says.
+func teams_surviving() -> Array:
+	var left: Array = []
+	for team_i: int in _flags.keys():
+		if bool(_flags[team_i].get("out", false)):
+			continue
+		for id: String in world.match_alive.keys():
+			if int(Game.roster.get(id, {}).get("team", -1)) != team_i:
+				continue
+			if world.downed_ids.has(id) or world.out_ids.has(id):
+				continue
+			left.append(team_i)
+			break
+	return left
+
 ## Back in the game, standing at your own flag.
 ##
 ## THERE IS NO WAY BACK ONCE YOUR FLAG IS GONE, and this is the one place

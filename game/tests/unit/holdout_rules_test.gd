@@ -50,8 +50,14 @@ func test_somebody_always_goes_out() -> void:
 		check(HoldoutRules.keepers(size) < size,
 			"a team of %d must send somebody out" % size)
 
-func test_a_lone_player_defends() -> void:
-	equal(HoldoutRules.keepers(1), 1, "on your own, you mind the flag")
+## THIS USED TO ASSERT THE OPPOSITE — "on your own, you mind the flag" —
+## and it was wrong for the reason the test below it already knew: a fort
+## nobody leaves is a draw by boredom. It exempted a team of one from that
+## rule, and a five-team round of one player each is therefore five people
+## standing on five flags for ten minutes. Measured: no flags taken, all
+## five holding at the whistle, and the table pays nothing past three.
+func test_a_lone_player_goes_out() -> void:
+	equal(HoldoutRules.keepers(1), 0, "on your own, standing still wins nothing")
 	equal(HoldoutRules.keepers(0), 0, "and an empty team has nobody to post")
 
 func test_a_pair_splits_one_and_one() -> void:
@@ -63,3 +69,41 @@ func test_defending_is_the_majority_once_there_is_a_team() -> void:
 	for size in range(5, 25):
 		check(HoldoutRules.keepers(size) * 2 > size,
 			"a team of %d keeps more than half at home" % size)
+
+## A LONE PLAYER GOES OUT. Keeping one back is keeping the whole team
+## back: five one-player teams all minding their own base is five bases
+## nobody ever attacks, and a measured round of exactly that took no flags
+## and paid nobody.
+func test_a_team_of_one_attacks() -> void:
+	equal(HoldoutRules.keepers(1), 0, "nobody left to mind the shop with")
+
+func test_every_team_size_sends_somebody_out() -> void:
+	for size in range(1, 13):
+		check(size - HoldoutRules.keepers(size) >= 1,
+			"a team of %d puts at least one attacker on the field" % size)
+
+func test_every_team_of_two_or_more_keeps_somebody_home() -> void:
+	for size in range(2, 13):
+		check(HoldoutRules.keepers(size) >= 1,
+			"a team of %d leaves somebody on the pole" % size)
+
+## The last push: with the clock nearly gone, holding is worth nothing.
+func test_the_guard_thins_out_at_the_end() -> void:
+	check(HoldoutRules.keepers_left(6, 0.05) < HoldoutRules.keepers(6),
+		"more of them go out when time is short")
+
+func test_and_stands_full_strength_before_that() -> void:
+	for left in [1.0, 0.8, 0.5, 0.25]:
+		equal(HoldoutRules.keepers_left(6, left), HoldoutRules.keepers(6),
+			"no early push at %.2f left" % left)
+
+func test_the_push_never_leaves_a_flag_unwatched() -> void:
+	for size in range(2, 13):
+		check(HoldoutRules.keepers_left(size, 0.0) >= 1,
+			"a team of %d still has somebody home at the whistle" % size)
+
+func test_the_push_never_adds_defenders() -> void:
+	for size in range(1, 13):
+		for left in [0.0, 0.1, 0.2, 0.5, 1.0]:
+			check(HoldoutRules.keepers_left(size, left) <= HoldoutRules.keepers(size),
+				"the clock never sends MORE of them home (%d at %.2f)" % [size, left])

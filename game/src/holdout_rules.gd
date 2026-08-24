@@ -60,9 +60,37 @@ static func share(survivors: int) -> int:
 ## Still far more defensive than capture the flag, which posts at most two
 ## keepers however big the team is: at ten a side that is two against this
 ## mode's six.
+## AND A TEAM OF ONE GOES OUT. This returned `team_size` — so a lone
+## player was a lone KEEPER, with nobody to attack with and nobody to
+## attack for. Five one-player teams is therefore five bases nobody ever
+## walks towards: a measured round of it took not one flag, ended with all
+## five holding, and paid every one of them nothing. Guarding a base that
+## is not under threat is not a strategy, it is a way of not playing.
 static func keepers(team_size: int) -> int:
 	if team_size <= 1:
-		return team_size
+		return 0
 	if team_size == 2:
 		return 1          # one minds the flag, one goes out
 	return team_size - maxi(2, team_size / 3)
+
+## The last fifth of the round, when the guard thins out.
+const PUSH_FRACTION := 0.2
+
+## HOW MUCH OF A TEAM STAYS HOME WITH THE CLOCK NEARLY GONE.
+##
+## Defence wins this mode, which is the point of it — and it means that
+## left to themselves every side digs in and nothing happens for ten
+## minutes. The table pays nothing past three survivors, so a round where
+## everybody successfully holds is a round where nobody scores: the most
+## defensive play available is also the one that guarantees you gain
+## nothing. That is a rule fighting itself.
+##
+## So the clock does the arguing. With most of the round gone, half the
+## guard goes out and looks for a flag, because at that point holding one
+## is worth nothing and taking one is worth everything. A side is never
+## left completely open — somebody always stays on the pole.
+static func keepers_left(team_size: int, time_fraction: float) -> int:
+	var home := keepers(team_size)
+	if time_fraction > PUSH_FRACTION or home <= 1:
+		return home
+	return maxi(1, home / 2)

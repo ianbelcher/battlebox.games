@@ -2843,10 +2843,25 @@ func _refresh_scoreline(player: Player, delta: float) -> void:
 	if _vignette != null and world != null:
 		# The hurt vignette: strongest when hearts are low, eases back as
 		# regen tops you up.
-		var vg_hp := int(world.hearts.get(Game.player_id(
-			multiplayer.get_unique_id(), slot), 8))
+		#
+		# NOT WHILE YOU ARE DOWN. It is driven off hearts alone, and a
+		# knocked-out player has none — so it sat at full strength for the
+		# entire time you were out, which is a dark red ring around the
+		# screen exactly where the MAP is. That is the one thing somebody
+		# who is out actually needs to read: where their own base is, and
+		# which way to go to get picked up. The red wash went for this
+		# reason and this is the last of it.
+		#
+		# There is nothing lost by hiding it. The vignette means "mind
+		# yourself, you are nearly out" — advice that has already expired
+		# by the time it was being shown, and the colour draining out of
+		# the world says the rest.
+		var me := Game.player_id(multiplayer.get_unique_id(), slot)
+		var vg_hp := int(world.hearts.get(me, 8))
 		var vg_target := clampf((5.0 - vg_hp) / 5.0, 0.0, 0.75) \
 			if world.match_phase == "BATTLE" else 0.0
+		if world.client_downed.has(me) or world.out_ids.has(me):
+			vg_target = 0.0
 		_vignette.modulate.a = lerpf(_vignette.modulate.a, vg_target, 0.06)
 	if _damage_flash != null:
 		_damage_t = maxf(0.0, _damage_t - delta)
