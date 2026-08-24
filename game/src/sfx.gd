@@ -60,8 +60,21 @@ func _ready() -> void:
 		"warp": _notes([[880, 0.06], [660, 0.06], [440, 0.07], [880, 0.0], [1320, 0.12]], 0.5, "soft"),
 		"cheer": _cheer(),
 	}
-	# Kenney sample overrides: arrays are per-play random variants.
-	const KENNEY := {
+	# RECORDED SAMPLES BEAT SYNTHESIS, and the explosions are why this
+	# comment is here. Two goes at building one out of oscillators and
+	# filters both came back as "sounds shite": the first was noise with a
+	# thump under it, the second was noise through a falling filter, and
+	# measured against a real recording both were missing the thing that
+	# actually makes a bang — the messy, un-modellable transient of air
+	# moving. Real ones are public domain and take an afternoon to find.
+	#
+	# Arrays are per-play random variants, which matters most for the
+	# sounds you hear most: one explosion sample played forty times in a
+	# round starts to read as a bug.
+	#
+	# Anything here overrides the built-in above, and the built-in stays as
+	# the fallback for a missing file.
+	const SAMPLES := {
 		"tick": ["click_001", "click_002"],
 		"pop": ["pluck_001", "pluck_002"],
 		"collect": ["confirmation_002"],
@@ -75,10 +88,18 @@ func _ready() -> void:
 			"impactSoft_heavy_002"],
 		"bonk": ["impactPunch_medium_000", "impactPunch_medium_001",
 			"impactPunch_medium_002"],
+		# Real explosions, trimmed to the bang — the recordings both open
+		# with a fifth of a second of room tone, and a sound that arrives
+		# a fifth of a second after the flash reads as lag, not as weight.
+		"boom": ["explosion_near", "explosion_far"],
+		# The knockout: the same blast heard through a wall. Low-passed
+		# and slowed rather than replaced, so what rumbles the house is
+		# the real thing rather than a sine pretending to be one.
+		"rumble": ["explosion_deep"],
 	}
-	for clip: String in KENNEY:
+	for clip: String in SAMPLES:
 		var variants: Array = []
-		for file: String in KENNEY[clip]:
+		for file: String in SAMPLES[clip]:
 			var stream: AudioStream = load("res://assets/sounds/%s.ogg" % file)
 			if stream != null:
 				variants.append(stream)
