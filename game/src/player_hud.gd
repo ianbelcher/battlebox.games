@@ -446,6 +446,36 @@ func _build_storm_line() -> void:
 
 ## The colour draining out of the world while you are out of the fight.
 ## Built before anything else — see the note in _ready.
+## This screen's player.
+func _me() -> String:
+	return Game.player_id(multiplayer.get_unique_id(), slot)
+
+## NOTHING RED WHILE YOU ARE OUT OF IT, and this is the single place that
+## decides it.
+##
+## Being knocked out has been reported as "a red surround" three times,
+## and each time a different layer turned out to be the one lit: first the
+## full-screen death wash, then the hurt vignette, and then — measured
+## against a real knockout rather than a guess — the DAMAGE FLASH, sitting
+## at its ceiling of 0.36 with the whole screen and the map underneath it
+## the colour of a darkroom.
+##
+## They are four separate layers with four separate triggers, and fixing
+## them one at a time is what took three goes. So they now all ask one
+## question, and it is a rule rather than a coincidence: every one of
+## these means "mind yourself, you are still in this" — a warning, and a
+## warning is worthless to somebody already on the floor. What a
+## knocked-out player needs is to read the map and find their way back.
+##
+## Snapped to zero rather than eased. These layers lerp at 0.06 a frame,
+## so easing from a full red flash still paints most of a second of red
+## over the one moment the player is trying to work out where to go.
+func _out_of_it() -> bool:
+	if world == null:
+		return false
+	var me := _me()
+	return world.client_downed.has(me) or world.out_ids.has(me)
+
 func _build_grey_wash() -> void:
 	_grey = ColorRect.new()
 	_grey.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -2856,15 +2886,17 @@ func _refresh_scoreline(player: Player, delta: float) -> void:
 		# yourself, you are nearly out" — advice that has already expired
 		# by the time it was being shown, and the colour draining out of
 		# the world says the rest.
-		var me := Game.player_id(multiplayer.get_unique_id(), slot)
-		var vg_hp := int(world.hearts.get(me, 8))
+		var vg_hp := int(world.hearts.get(_me(), 8))
 		var vg_target := clampf((5.0 - vg_hp) / 5.0, 0.0, 0.75) \
 			if world.match_phase == "BATTLE" else 0.0
-		if world.client_downed.has(me) or world.out_ids.has(me):
+		if _out_of_it():
 			vg_target = 0.0
+			_vignette.modulate.a = 0.0   # snapped, not eased: see _out_of_it
 		_vignette.modulate.a = lerpf(_vignette.modulate.a, vg_target, 0.06)
 	if _damage_flash != null:
 		_damage_t = maxf(0.0, _damage_t - delta)
+		if _out_of_it():
+			_damage_t = 0.0
 		_damage_flash.color.a = minf(_damage_t, 0.45) * 0.8
 		_damage_arrow.visible = _damage_t > 0.0
 		if _damage_arrow.visible:
@@ -2965,13 +2997,15 @@ func _refresh_tints(player: Player) -> void:
 		_water_tint.color.a = lerpf(_water_tint.color.a, 0.35 if under else 0.0, 0.25)
 	if _storm_tint != null and world != null:
 		var danger := 0.0
-		if world.match_phase == "BATTLE" and world.storm_radius > 0.0 \
+		if not _out_of_it() and world.match_phase == "BATTLE" \
+				and world.storm_radius > 0.0 \
 				and Vector2(player.position.x - world.storm_center.x,
 					player.position.z - world.storm_center.z).length() > world.storm_radius:
 			danger = 0.25
 		_storm_tint.color.a = lerpf(_storm_tint.color.a, danger, 0.1)
 	# Caught outside the storm: a big arrow home plus the distance.
-	if world != null and world.match_phase == "BATTLE" and world.storm_radius > 0.0:
+	if world != null and not _out_of_it() and world.match_phase == "BATTLE" \
+			and world.storm_radius > 0.0:
 		var flat := Vector2(player.position.x - world.storm_center.x,
 			player.position.z - world.storm_center.z)
 		var outside: float = flat.length() - world.storm_radius

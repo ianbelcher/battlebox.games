@@ -85,6 +85,13 @@ func _ready() -> void:
 		print(room.describe())
 		Game.room = room
 		Game.create_world()
+		# WORLD_KNOCKOUT_TEST=<seconds>: put the person on the floor once a
+		# battle is running. It is armed HERE and not with the other probes
+		# below, because this branch returns and never reaches them — which
+		# is why it sat silent through three runs looking like it had found
+		# nothing to do.
+		if not OS.get_environment("WORLD_KNOCKOUT_TEST").is_empty():
+			add_child(load("res://tests/knockout_probe.gd").new())
 		_arm_selfcheck()
 		return
 	# The 3D world lives in the root viewport's World3D but is only ever
@@ -139,6 +146,9 @@ func _ready() -> void:
 	# WORLD_BOAT_TEST=1: stand a player on a boat and move it under them.
 	if OS.get_environment("WORLD_BOAT_TEST") == "1":
 		add_child(load("res://tests/boat_probe.gd").new())
+	# WORLD_DOWNED_TINTS=1: knock this player out and report what is red.
+	if OS.get_environment("WORLD_DOWNED_TINTS") == "1":
+		add_child(load("res://tests/downed_tints.gd").new())
 	_arm_selfcheck()
 	# WORLD_SHOTS=<dir>: save a screenshot every 1.5s (visual debugging).
 	var shots_dir := OS.get_environment("WORLD_SHOTS")

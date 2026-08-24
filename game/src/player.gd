@@ -908,10 +908,13 @@ func _local_move(delta: float) -> void:
 	# Downed counts as out for flying: you have been knocked over, you
 	# float up out of it (see `begin_knockout_rise`), and the world's
 	# no-flying rules are about people who are PLAYING.
+	# PER PLAYER, not the world default — see FlyRule. This asked
+	# `world.client_fly`, which is only the setting for anybody nobody has
+	# decided about, so a player whose flight had been switched off on
+	# their own kept flying after being revived.
 	var is_out: bool = world.out_ids.has(player_id) or downed
-	var fly_ok: bool = world.client_fly
-	if fly_mode and (world.survival_active or not fly_ok) and not is_out:
-		fly_mode = false  # no flying away from raids or matches (the out may)
+	fly_mode = FlyRule.keeps_flying(fly_mode, world.fly_allowed_for(player_id),
+		world.survival_active, is_out)
 	if world != null and world.match_phase == "SETUP":
 		dropping = true
 	# KNOCKED OUT: drift up out of the fight, Tom-and-Jerry fashion.
