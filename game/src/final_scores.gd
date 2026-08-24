@@ -122,7 +122,7 @@ func _final_teams(world: Node, sc: float) -> Control:
 	# about the round everybody just played — which is the bit they want to
 	# argue about. In capture the flag that round has a real scoreline, so
 	# show it: taken, lost, and the net each team finished on.
-	if str(world.client_mode) == "ctf":
+	if world.flag_mode():
 		wrap.add_child(_final_head("THIS GAME", sc))
 		var head := HBoxContainer.new()
 		head.add_theme_constant_override("separation", UiTheme.px(10, sc))

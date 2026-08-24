@@ -42,6 +42,13 @@ var client_ctf_target := 3
 var client_team_names: Array = TEAM_NAMES.slice(0, DEFAULT_TEAMS)
 var client_world := ""
 var client_mode := "creative"
+
+## EITHER FLAG MODE, as the client sees it. Capture the flag and last
+## flag standing are the same board — bases, poles, flags, the panel that
+## lists them — and everything that draws that board wants both. The
+## server-side twin is CtfDirector.active().
+func flag_mode() -> bool:
+	return client_mode == "ctf" or client_mode == "holdout"
 var map_list: Array = []
 ## Low-res whole-island backdrop for the radar (192x192, 4 blocks/px) so
 ## the map shows the world beyond what's rendered, even on slow machines.
@@ -1313,7 +1320,7 @@ func _do_world_reset(map_name := "", new_size := 0) -> void:
 	# so regenerating the world in CTF dropped everybody into an empty map
 	# with no bases and no way to ask for them back.
 	_resetting = false
-	if game_mode == "battle" or game_mode == "ctf":
+	if game_mode != "creative":
 		match_loop = true
 		battle.open_lobby()
 
@@ -1389,11 +1396,12 @@ func sv_remove_bot(target_id: String = "") -> void:
 func sv_set_mode(mode: String) -> void:
 	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
 		return
-	if mode != "battle" and mode != "creative" and mode != "ctf":
+	if mode != "battle" and mode != "creative" and mode != "ctf" \
+			and mode != "holdout":
 		return
 	var changed := game_mode != mode
 	game_mode = mode
-	match_loop = mode == "battle" or mode == "ctf"
+	match_loop = mode != "creative"
 	if mode == "creative" and match_phase != "IDLE":
 		match_phase = "IDLE"
 		match_alive.clear()

@@ -556,7 +556,8 @@ func _build_game_tab() -> void:
 		"Just building is the calm one: no storm, no hearts, nothing can hurt you.")
 	var mode_row := _row(mode_card)
 	for spec in [["creative", "🔨  Just building"], ["battle", "🏆  Battle royale"],
-			["ctf", "⚑  Capture the flag"]]:
+			["ctf", "⚑  Capture the flag"],
+			["holdout", "🛡  Last flag standing"]]:
 		var key := str(spec[0])
 		var btn := _choice(mode_row, str(spec[1]), func() -> void:
 			if Game.world != null:
@@ -1234,7 +1235,7 @@ func _refresh(force := false) -> void:
 	for val: int in _fly_btns:
 		_mark(_fly_btns[val], (val == 1) == world.client_fly)
 	var battling: bool = world.client_mode == "battle"
-	var ctf: bool = world.client_mode == "ctf"
+	var ctf: bool = world.flag_mode()
 	for node in _battle_only:
 		if is_instance_valid(node):
 			(node as Control).visible = battling

@@ -85,8 +85,11 @@ const TOOL_PAGE_ORDER := [
 	14, 19, 18, 8,          # flare, smoke, sprayer, paint bomb
 ]
 
+## Both flag modes get the flag kit: last flag standing is the same board
+## with one rule different, and it wants the same tools — more so, since
+## the whole round is what you can build before they arrive.
 static func starting_kit(mode: String) -> Array:
-	return STARTING_KIT_CTF if mode == "ctf" else STARTING_KIT
+	return STARTING_KIT_CTF if mode == "ctf" or mode == "holdout" else STARTING_KIT
 
 static func count() -> int:
 	return WEAPONS.size()

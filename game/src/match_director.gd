@@ -115,9 +115,31 @@ func tick(delta: float) -> void:
 		"SETUP":
 			if _timer <= 0.0:
 				world.match_phase = "BATTLE"
-				_timer = world.storm_minutes * 60.0
+				# Last flag standing has a round length of its own: it is
+				# not a storm closing in, it is how long you have to hold
+				# what you built.
+				_timer = HoldoutRules.ROUND_MINUTES * 60.0 \
+					if world.ctf.elimination() else world.storm_minutes * 60.0
 				world.cl_match.rpc("BATTLE", _timer)
 		"BATTLE":
+			if world.ctf.elimination():
+				# LAST FLAG STANDING runs on a clock, because two teams
+				# properly dug in will never finish each other off — and
+				# that stalemate is a real result here rather than a
+				# failure, so it has to be allowed to end and score.
+				world.storm_radius = -1.0
+				_timer -= delta
+				_tick_regen()
+				_tick_fire()
+				world.bots.tick_orbs(delta)
+				tick_revives(delta)
+				world.ctf.tick(delta)
+				world.match_seconds = maxf(0.0, _timer)
+				if _timer <= 0.0:
+					end_holdout()
+				else:
+					check_holdout_over()
+				return
 			if world.ctf.active():
 				# No storm and no clock — capture the flag runs until
 				# somebody reaches the target score.
@@ -723,9 +745,47 @@ func finish(winner: int) -> void:
 	# next battle places everyone properly at their team's site, so there
 	# is nothing to see in between.
 	_timer = 14.0
-	print("%s over: team %d" % ["Capture the flag" if world.ctf.active() else "Battle royale", winner])
+	var what := "Battle royale"
+	if world.ctf.elimination():
+		what = "Last flag standing"
+	elif world.ctf.active():
+		what = "Capture the flag"
+	print("%s over: team %d" % [what, winner])
 	record_result(winner)
 	world.cl_match_end.rpc(winner)
+
+## Is last flag standing over because only one team still has a flag?
+func check_holdout_over() -> void:
+	if world.match_phase != "BATTLE" or not world.ctf.elimination():
+		return
+	if Game.roster.is_empty():
+		finish(-2)
+		return
+	if world.ctf.teams_holding().size() <= 1:
+		end_holdout()
+
+## SETTLE THE ROUND. Whoever still has a flag shares the pot, and the
+## share depends on how many of them there are — see HoldoutRules.
+##
+## Points go into the same per-team score capture the flag uses, so they
+## accumulate across rounds and the existing scoreboard shows them with no
+## second system to build.
+##
+## The winner reported is the top team, or -1 when more than one held: a
+## shared round is a draw and saying otherwise on the end card would be a
+## lie about what just happened.
+func end_holdout() -> void:
+	if world.match_phase != "BATTLE":
+		return
+	var held: Array = world.ctf.teams_holding()
+	var each := HoldoutRules.share(held.size())
+	for team_v: Variant in held:
+		var team := int(team_v)
+		world.ctf_scores[team] = int(world.ctf_scores.get(team, 0)) + each
+	world.ctf.broadcast_flags()
+	print("HOLDOUT: %d team(s) held, %d point(s) each (scores %s)"
+		% [held.size(), each, world.ctf_scores])
+	finish(int(held[0]) if held.size() == 1 else -1)
 
 ## One knockout, for the board.
 func credit_frag(attacker_id: String) -> void:

@@ -56,8 +56,15 @@ var _revive_pulse_t: Dictionary = {}
 func guarded(id: String) -> bool:
 	return Time.get_ticks_msec() < int(_capture_guard.get(id, 0))
 
+## Bases, poles and flags — the machinery both flag modes are built on.
 func active() -> bool:
-	return world.game_mode == "ctf"
+	return world.game_mode == "ctf" or world.game_mode == "holdout"
+
+## LAST FLAG STANDING: the same board, one rule different. Losing your
+## flag does not cost you a point, it costs you the round. See
+## HoldoutRules.
+func elimination() -> bool:
+	return world.game_mode == "holdout"
 
 ## Put a block down as part of building a base, remembering it for one
 ## bulk broadcast. Skips anything already correct so the payload is walls
@@ -131,7 +138,8 @@ func build_all_bases() -> void:
 			world.battle.team_site[team_i] = world.battle.find_team_site(world.battle.team_site.size())
 		var pairs: Array = []
 		var flag_at := _ctf_build_base(team_i, world.battle.team_site[team_i], pairs)
-		_flags[team_i] = {"home": flag_at, "pos": flag_at, "back_at": 0}
+		_flags[team_i] = {"home": flag_at, "pos": flag_at, "back_at": 0,
+			"out": false}
 		if not pairs.is_empty():
 			world.cl_edits.rpc(pairs)
 	refresh_no_carve()
@@ -296,6 +304,8 @@ func tick(delta: float) -> void:
 	var now := Time.get_ticks_msec()
 	for team_i: int in _flags.keys():
 		var flag: Dictionary = _flags[team_i]
+		if bool(flag.get("out", false)):
+			continue          # taken for good: that team is out
 		if int(flag.back_at) > 0 and now >= int(flag.back_at):
 			flag.back_at = 0
 			flag.pos = flag.home
@@ -434,11 +444,21 @@ func _at_flag(pos: Vector3, flag_at: Vector3) -> bool:
 	return flat < world.CTF_FLAG_TOUCH and absf(pos.y - flag_at.y) < world.CTF_FLAG_REACH_Y
 
 func capture(id: String, team: int, from_team: int) -> void:
-	world.ctf_scores[team] = int(world.ctf_scores.get(team, 0)) + 1
-	world.ctf_scores[from_team] = int(world.ctf_scores.get(from_team, 0)) - 1
 	world.ctf_caps[team] = int(world.ctf_caps.get(team, 0)) + 1
 	world.ctf_lost[from_team] = int(world.ctf_lost.get(from_team, 0)) + 1
 	world.ctf_player_caps[id] = int(world.ctf_player_caps.get(id, 0)) + 1
+	if elimination():
+		# THAT IS THEIR ROUND. No point, no respawning flag, no coming
+		# back: the whole reason to dig in is that there is no second
+		# chance. Points are settled once, at the end — see
+		# MatchDirector.end_holdout.
+		knock_out_team(from_team)
+		print("HOLDOUT: %s took team %d's flag — team %d is out"
+			% [id, from_team, from_team])
+		world.battle.check_holdout_over()
+		return
+	world.ctf_scores[team] = int(world.ctf_scores.get(team, 0)) + 1
+	world.ctf_scores[from_team] = int(world.ctf_scores.get(from_team, 0)) - 1
 	var flag: Dictionary = _flags[from_team]
 	flag.pos = Vector3.INF
 	flag.back_at = Time.get_ticks_msec() + world.CTF_FLAG_RETURN_MS
@@ -479,6 +499,43 @@ func capture(id: String, team: int, from_team: int) -> void:
 	print("CTF: %s took team %d's flag (scores %s)" % [id, from_team, world.ctf_scores])
 	if int(world.ctf_scores.get(team, 0)) >= world.ctf_target:
 		world.battle.finish(team)
+
+## EVERY PLAYER ON A TEAM, OUT. Their flag comes down with them, so the
+## board shows at a glance who is still in it.
+##
+## They stay in the world as ghosts and can watch — being out of a round
+## should not mean staring at a menu — but nothing they do counts, and the
+## way back in at your own flag is closed because there is no longer a
+## flag to touch.
+func knock_out_team(team: int) -> void:
+	for id: String in Game.roster.keys():
+		if int(Game.roster[id].get("team", -1)) != team:
+			continue
+		world.match_alive.erase(id)
+		world.downed_ids.erase(id)
+		world.battle.revive_progress.erase(id)
+		_flag_progress.erase(id)
+		_revive_pulse_t.erase(id)
+		if not world.out_ids.has(id):
+			world.out_ids[id] = true
+			world.cl_eliminated.rpc(id)
+	if _flags.has(team):
+		var gone: Dictionary = _flags[team]
+		gone.pos = Vector3.INF
+		# MARKED, not timed. `back_at` is an absolute clock reading and
+		# `tick` brings a flag back the moment it passes — so "a very long
+		# time" is not a way to say "never", it is a way to say "later".
+		gone.out = true
+		show_flag(team, false)
+	broadcast_flags()
+
+## Which teams still have a flag standing.
+func teams_holding() -> Array:
+	var held: Array = []
+	for team_i: int in _flags.keys():
+		if not bool(_flags[team_i].get("out", false)):
+			held.append(team_i)
+	return held
 
 ## Back in the game, standing at your own flag.
 func respawn(id: String) -> void:

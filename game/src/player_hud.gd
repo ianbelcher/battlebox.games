@@ -24,7 +24,6 @@ var _note_card: PanelContainer
 var _news := ""
 var _news_t := 0.0
 var _death_note: Label
-var _death_flash: ColorRect
 ## The colour draining out of the screen while you are out of the fight.
 var _grey: ColorRect
 var _grey_amount := 0.0
@@ -462,11 +461,11 @@ func _build_grey_wash() -> void:
 func _build_death_wash() -> void:
 	# Dying deserves more than silently falling over: a red wash plus a
 	# big center card, cleared after a couple of seconds.
-	_death_flash = ColorRect.new()
-	_death_flash.color = Color(0.75, 0.05, 0.05, 0.0)
-	_death_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_death_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_death_flash)
+	# NO RED WASH. There used to be a full-screen red one here for a
+	# couple of seconds after going down, and it is gone: the colour
+	# draining out of the world already says you are out, and the red sat
+	# over the MAP as well — which is the one thing a knocked-out player
+	# in capture the flag actually needs to read.
 	_death_note = Label.new()
 	_death_note.add_theme_font_size_override("font_size", _us(44))
 	_death_note.add_theme_color_override("font_color", Color("ff5a4d"))
@@ -1474,7 +1473,7 @@ func _page_visible(page: int) -> bool:
 	match page:
 		PAGE_SCORES:
 			return world != null and (world.client_mode == "battle"
-				or world.client_mode == "ctf")
+				or world.flag_mode())
 		_:
 			return true
 
@@ -1606,7 +1605,7 @@ func _refresh_scores_tab() -> void:
 	# flags out, not games won and knockouts — so it gets its own table
 	# rather than the battle one relabelled. The next mode will want its
 	# own again; this is where that goes.
-	if str(world.client_mode) == "ctf":
+	if world.flag_mode():
 		_refresh_ctf_scores()
 		return
 	var sig := "%d|%s|%s" % [int(world.matches_played), str(world.team_wins),
@@ -2175,7 +2174,7 @@ func _refresh_team_panel() -> void:
 func _refresh_ctf_panel() -> void:
 	if _ctf_panel == null or world == null:
 		return
-	var on: bool = str(world.client_mode) == "ctf" and not world.flags.is_empty()
+	var on: bool = world.flag_mode() and not world.flags.is_empty()
 	_ctf_panel.visible = on
 	if not on:
 		for stale in _ctf_panel.get_children():
@@ -2654,6 +2653,12 @@ func _refresh_notices(player: Player, delta: float) -> void:
 		if world.match_phase == "LOBBY" and not _menu.visible:
 			say = ("🏆  Next battle in %d" % secs) if secs > 0 \
 				else "🏆  Battle starting…"
+		elif world.match_phase == "BATTLE" and str(world.client_mode) == "holdout":
+			# THE ROUND CLOCK. Last flag standing has no storm closing in
+			# to tell you how long is left, and "how long do I have to
+			# hold this" is the question the whole mode is about.
+			var left := int(ceil(world.match_seconds))
+			say = "🛡  %d:%02d" % [left / 60, left % 60]
 		elif world.match_phase == "BATTLE" and not world.alive_ids.has(
 				Game.player_id(multiplayer.get_unique_id(), slot)) \
 				and not world.out_ids.has(
@@ -2718,7 +2723,6 @@ func _refresh_notices(player: Player, delta: float) -> void:
 				player.visible = true
 		_death_t = maxf(0.0, _death_t - delta)
 		_death_note.visible = _death_t > 0.0
-		_death_flash.color.a = (minf(_death_t / 2.6, 1.0) * 0.4) if _death_t > 0.0 else 0.0
 		_drain_colour(down_now or out_now, delta)
 
 ## Out of the fight, so the fight stops looking like something you are in.
@@ -2758,7 +2762,7 @@ func _keep_home_in_colour() -> void:
 	var mat := _grey.material as ShaderMaterial
 	var radius := 0.0
 	var at := Vector2(-1.0, -1.0)
-	if cam != null and world != null and str(world.client_mode) == "ctf" \
+	if cam != null and world != null and world.flag_mode() \
 			and _grey_amount > 0.001:
 		var me := Game.player_id(multiplayer.get_unique_id(), slot)
 		var mine := int(Game.roster.get(me, {}).get("team", -1))

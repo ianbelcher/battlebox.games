@@ -353,7 +353,13 @@ func _bot_cover_goal(id: String, pos: Vector3) -> Vector3:
 ## home, because a pair with one of them sat at the flag is one attacker,
 ## and watching your own side not attack was the original complaint.
 func _bot_ctf_keepers(team: int) -> int:
-	return clampi(world.ctf.seats_of(team).size() / 3, 0, 2)
+	var size := world.ctf.seats_of(team).size()
+	# LAST FLAG STANDING IS A SIEGE. Losing your flag ends your round, so
+	# a team that empties out to go raiding has already lost — nearly all
+	# of it stays home and builds. See HoldoutRules.keepers.
+	if world.ctf.elimination():
+		return HoldoutRules.keepers(size)
+	return clampi(size / 3, 0, 2)
 
 func _bot_ctf_defends(id: String, team: int) -> bool:
 	var seat := world.ctf.seats_of(team).find(id)
@@ -1146,7 +1152,11 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, delta: float) -> v
 	bot.build_cd = float(bot.get("build_cd", 0.0)) - delta
 	if float(bot.build_cd) > 0.0:
 		return
-	bot.build_cd = randf_range(1.0, 1.9)
+	# Quicker in a siege: the whole round is whether the wall went up in
+	# time, so a defender that lays a block every second and a half is a
+	# defender that loses.
+	bot.build_cd = randf_range(0.45, 0.9) if world.ctf.elimination() \
+		else randf_range(1.0, 1.9)
 	var flag: Dictionary = world.ctf._flags.get(team, {})
 	if flag.is_empty():
 		return

@@ -5,16 +5,26 @@ extends Node
 ## The server (peer 1) owns the roster; the World node (created here, same
 ## path everywhere) handles everything spatial.
 
-## 50. We tried 100 to find out where it broke, and it broke — not on the
-## server, which held up, but in the BROWSER, where every one of those
-## players is a mesh to skin and every shot is a particle system to run.
-## It sat at 24 after that, which was comfortable and small.
+## 100, which is where this started and where it broke the first time —
+## and it is worth writing down WHY it works now, because the number on
+## its own says the earlier measurement was wrong and it was not.
 ##
-## 50 is the middle of the two: five tens, or ten fives, and half the load
-## that was measured as too much. The ceiling on simultaneous explosions
-## is what actually protects the frame rate here (see WorldFx), and that
-## is unchanged.
-const MAX_PLAYERS := 50
+## What made a hundred players unplayable was not the count, it was that
+## they all ended up in the same place: computer players picked the
+## nearest enemy by distance alone and walked straight at it, so the whole
+## roster converged into one heap and every frame drew every mesh, every
+## shot and every explosion in it, at once, on one screen.
+##
+## They spread out now. Attackers go in squads, from bearings around the
+## compass, avoiding the ground where the last knockouts happened; and
+## they need line of sight before they will chase anybody at all. A
+## hundred players across a map is a very different frame from a hundred
+## players in a field.
+##
+## The ceiling on simultaneous explosions (see WorldFx) is still what
+## actually protects the frame rate, and BOT_NAMES has 104 entries against
+## this cap, so the pool cannot run dry.
+const MAX_PLAYERS := 100
 const MAX_LOCAL := 4
 
 ## People get animals, computers get the phonetic alphabet. Two name
