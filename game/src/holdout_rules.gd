@@ -41,15 +41,28 @@ static func share(survivors: int) -> int:
 		return 0
 	return ROUND_POINTS / survivors
 
-## HOW MUCH OF A TEAM STAYS HOME. Nearly all of it: this mode is about
+## HOW MUCH OF A TEAM STAYS HOME. Two thirds of it: this mode is about
 ## holding a base, and a team that empties out to go raiding has already
-## lost — there is no coming back from losing your flag.
+## lost, because there is no coming back from losing your flag.
 ##
-## Never the whole team, though. A base nobody ever leaves is a base
-## nobody can be knocked out of, and four teams sitting in four forts
-## until the clock runs out is a draw by boredom. One in four goes out,
-## with a minimum of one so somebody always does.
+## NEVER FEWER THAN A PAIR GOING OUT, and that rule is the difference
+## between a game and a stalemate. The first version kept three quarters
+## home, which for a team of four is three defenders and ONE attacker —
+## and one attacker against a dug-in base is not an attack, it is a
+## delivery. Watched it: five teams, four minutes, not a single flag
+## taken, and under the scoring table five survivors share nothing. A
+## round that cannot be won is worth exactly as much as it sounds.
+##
+## Two is also the smallest group the squad logic will advance with (see
+## BotSquads.ready_to_push), so it is the smallest number that attacks at
+## all rather than milling about at a rally point.
+##
+## Still far more defensive than capture the flag, which posts at most two
+## keepers however big the team is: at ten a side that is two against this
+## mode's six.
 static func keepers(team_size: int) -> int:
 	if team_size <= 1:
 		return team_size
-	return maxi(1, team_size - maxi(1, team_size / 4))
+	if team_size == 2:
+		return 1          # one minds the flag, one goes out
+	return team_size - maxi(2, team_size / 3)

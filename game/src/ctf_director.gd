@@ -321,6 +321,13 @@ func tick(delta: float) -> void:
 		# SOMEBODY WHO IS OUT touching their OWN flag comes back. That is the whole
 		# respawn rule when reviving is off: fly home, tag up, rejoin.
 		if world.out_ids.has(id):
+			# Nothing to walk home TO. Their flag has been taken for good,
+			# so there is no tag-in to attempt and no backstop to fire —
+			# and without this they trudge to where their base was for the
+			# rest of the round, which looks exactly like a bot that has
+			# lost the plot.
+			if elimination() and team_is_out(team):
+				continue
 			# A computer player WALKS HOME like everybody else. Its goal
 			# while it is out is its own flag (see `_ctf_bot_goal`), so
 			# the ordinary rule below — touch your flag, tag back in —
@@ -516,6 +523,7 @@ func knock_out_team(team: int) -> void:
 		world.battle.revive_progress.erase(id)
 		_flag_progress.erase(id)
 		_revive_pulse_t.erase(id)
+		_bot_out_since.erase(id)
 		if not world.out_ids.has(id):
 			world.out_ids[id] = true
 			world.cl_eliminated.rpc(id)
@@ -529,6 +537,11 @@ func knock_out_team(team: int) -> void:
 		show_flag(team, false)
 	broadcast_flags()
 
+## Has this team lost its flag for good? Only ever true in last flag
+## standing — in capture the flag a taken flag always comes back.
+func team_is_out(team: int) -> bool:
+	return bool(_flags.get(team, {}).get("out", false))
+
 ## Which teams still have a flag standing.
 func teams_holding() -> Array:
 	var held: Array = []
@@ -538,7 +551,20 @@ func teams_holding() -> Array:
 	return held
 
 ## Back in the game, standing at your own flag.
+##
+## THERE IS NO WAY BACK ONCE YOUR FLAG IS GONE, and this is the one place
+## that has to know it. Every route back into a round ends here — touching
+## your own flag, the channel a computer player stands through, and the
+## backstop that recovers a bot walled into a pit — and that backstop
+## called this unconditionally on a timer. So a team whose flag had been
+## taken went out, waited, and then walked back into the round still
+## fighting, which is precisely what was reported.
+##
+## Guarding the junction rather than each of the three routes is the point:
+## a fourth route added later cannot forget.
 func respawn(id: String) -> void:
+	if elimination() and team_is_out(int(Game.roster.get(id, {}).get("team", -1))):
+		return
 	world.out_ids.erase(id)
 	_flag_progress.erase(id)
 	_bot_out_since.erase(id)

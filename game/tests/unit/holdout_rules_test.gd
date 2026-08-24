@@ -33,8 +33,16 @@ func test_sharing_never_pays_more_for_more_survivors() -> void:
 # ---- how many defend -------------------------------------------------
 
 func test_most_of_a_team_stays_home() -> void:
-	equal(HoldoutRules.keepers(8), 6, "eight players, six of them defending")
-	equal(HoldoutRules.keepers(4), 3, "four players, three defending")
+	equal(HoldoutRules.keepers(9), 6, "nine players, six of them defending")
+	equal(HoldoutRules.keepers(12), 8, "twelve players, eight defending")
+
+## THE RULE THAT KEEPS IT A GAME. One attacker against a dug-in base is a
+## delivery, not a raid — five teams played four minutes without a single
+## flag falling, and five survivors share nothing under the table above.
+func test_never_fewer_than_a_pair_go_out() -> void:
+	for size in range(3, 30):
+		check(size - HoldoutRules.keepers(size) >= 2,
+			"a team of %d sends at least two out" % size)
 
 func test_somebody_always_goes_out() -> void:
 	# Four forts nobody ever leaves is a draw by boredom.
@@ -52,6 +60,6 @@ func test_a_pair_splits_one_and_one() -> void:
 	equal(HoldoutRules.keepers(2), 1, "one minds the flag, one goes out")
 
 func test_defending_is_the_majority_once_there_is_a_team() -> void:
-	for size in range(3, 25):
+	for size in range(5, 25):
 		check(HoldoutRules.keepers(size) * 2 > size,
 			"a team of %d keeps more than half at home" % size)
