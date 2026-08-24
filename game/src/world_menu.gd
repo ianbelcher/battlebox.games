@@ -66,6 +66,7 @@ var _battle_only: Array = []
 var _fight_only: Array = []
 var _ctf_only: Array = []
 var _capture_only: Array = []
+var _norevive_btns: Dictionary = {}
 var _holdout_only: Array = []
 var _drop_btns: Dictionary = {}
 var _target_btns: Dictionary = {}
@@ -455,7 +456,7 @@ func _build_map_tab() -> void:
 	var size_card := _section(box, "Size of the world",
 		"How far out you can roam, in blocks. Applies in both modes.")
 	var size_row := _row(size_card)
-	for arena in [200, 400, 800]:
+	for arena in [50, 100, 200, 400, 800]:
 		var blocks: int = arena
 		var btn := _choice(size_row, str(arena), func() -> void:
 			if Game.world != null:
@@ -530,6 +531,7 @@ func _map_button(key: String, label: String) -> Button:
 
 func _build_game_tab() -> void:
 	var box := _tab("Game")
+	_build_live_score(box)
 	var mode_card := _section(box, "How are we playing?",
 		"Just building is the calm one: no storm, no hearts, nothing can hurt you.")
 	var mode_row := _row(mode_card)
@@ -579,6 +581,23 @@ func _build_game_tab() -> void:
 				Game.world.sv_ctf_config.rpc_id(1, -1, -1, drop_val))
 		_min(btn2, 150, 44)
 		_drop_btns[drop_val] = btn2
+
+	# CAN ANYBODY BE PICKED UP AT ALL — and this is not a flag-mode
+	# question, which is why it sits up here with the knockout setting
+	# rather than inside the capture-the-flag group. Battle royale wants it
+	# as much as anything else does.
+	var back_card := _section(ko_group, "Can you be picked up?",
+		"Being stood back up is what keeps somebody in a round they would "
+		+ "otherwise spend watching. Turning it off is a harder game.")
+	var back_row := _row(back_card)
+	for spec4 in [[0, "Yes — you can be revived"],
+			[1, "No — one knockout and you're out"]]:
+		var none_val: int = spec4[0]
+		var btn5 := _choice(back_row, str(spec4[1]), func() -> void:
+			if Game.world != null:
+				Game.world.sv_ctf_config.rpc_id(1, -1, -1, -1, none_val))
+		_min(btn5, 210, 44)
+		_norevive_btns[none_val] = btn5
 
 	# CAPTURING IS NOT IN EVERY FLAG MODE. This card went in `_ctf_only`,
 	# which is shown for `flag_mode()` — and that covers last flag
@@ -662,6 +681,97 @@ func _build_game_tab() -> void:
 				Game.world.sv_match_config.rpc_id(1, minutes, -1))
 		_min(btn, 120, 46)
 		_length_btns[minutes] = btn
+
+## HOW THE ROUND IS ACTUALLY GOING, in the menu, while it is going.
+##
+## The scores existed in exactly two places: along the side of the screen
+## during play, and on the end card afterwards. Open the menu mid-round —
+## which is the obvious thing to do if you want to check the score — and
+## there was nothing, and if the round then ended or was restarted the
+## only way back to that number was to play another one. In last flag
+## standing that is ten minutes to answer "how are we doing".
+##
+## Same table as the end card so the two cannot disagree, and it is built
+## fresh on a signature the way the players list is, because a scoreboard
+## that lags the round it describes is worse than none.
+var _score_card: VBoxContainer
+var _score_rows: VBoxContainer
+var _score_sig := ""
+
+func _build_live_score(box: Control) -> void:
+	_score_card = VBoxContainer.new()
+	_score_card.add_theme_constant_override("separation", _s(8))
+	_score_card.visible = false
+	box.add_child(_score_card)
+	var card := _section(_score_card, "How it is going")
+	_score_rows = VBoxContainer.new()
+	_score_rows.add_theme_constant_override("separation", _s(2))
+	card.add_child(_score_rows)
+
+func _refresh_live_score() -> void:
+	if _score_card == null or world == null:
+		return
+	var running: bool = world.match_phase != "IDLE" and world.client_mode != "creative"
+	_score_card.visible = running
+	if not running:
+		_score_sig = ""
+		return
+	var flags: bool = world.flag_mode()
+	var sig := "%s|%s|%s|%s|%d" % [world.match_phase, str(world.ctf_scores),
+		str(world.ctf_caps), str(world.alive_ids.size()), int(world.team_count)]
+	if sig == _score_sig:
+		return
+	_score_sig = sig
+	for stale in _score_rows.get_children():
+		stale.queue_free()
+	var order: Array = []
+	for team_i in int(world.team_count):
+		order.append(team_i)
+	if flags:
+		order.sort_custom(func(a: int, b: int) -> bool:
+			return int(world.ctf_scores.get(a, 0)) > int(world.ctf_scores.get(b, 0)))
+	for t_v: Variant in order:
+		var t := int(t_v)
+		var standing := 0
+		var total := 0
+		for rid: String in Game.roster.keys():
+			if int(Game.roster[rid].get("team", -1)) != t:
+				continue
+			total += 1
+			if world.alive_ids.has(rid) and not world.client_downed.has(rid):
+				standing += 1
+		if total == 0:
+			continue
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", _s(10))
+		_score_rows.add_child(row)
+		var tint: Color = WorldNode.TEAM_COLORS[t % WorldNode.TEAM_COLORS.size()]
+		# In last flag standing the score is only settled at the whistle,
+		# so what matters mid-round is whether your pole is still up.
+		var cells: Array = [[_team_name(t), 130]]
+		if flags:
+			cells.append(["out" if _flag_gone(t) else "holding", 80])
+			cells.append(["%d took" % int(world.ctf_caps.get(t, 0)), 80])
+			if world.client_mode != "holdout":
+				cells.append(["%d" % int(world.ctf_scores.get(t, 0)), 50])
+		cells.append(["%d/%d up" % [standing, total], 80])
+		for cell: Array in cells:
+			var lbl := Label.new()
+			lbl.text = str(cell[0])
+			lbl.custom_minimum_size = Vector2(_s(int(cell[1])), 0)
+			lbl.add_theme_color_override("font_color",
+				tint if standing > 0 else Color(0.55, 0.55, 0.6))
+			_font(lbl, UiTheme.T_LABEL)
+			row.add_child(lbl)
+
+## Has this team's flag been taken for good? Client-side, off the flag
+## list the server broadcasts.
+func _flag_gone(team: int) -> bool:
+	for entry: Variant in world.flags:
+		var f: Array = entry
+		if int(f[0]) == team:
+			return f.size() > 3 and bool(f[3])
+	return false
 
 # ------------------------------------------------------------------
 # Players
@@ -1237,6 +1347,7 @@ func _refresh(force := false) -> void:
 		_roster_sig = ""
 	_refresh_maps()
 	_refresh_players()
+	_refresh_live_score()
 	if world == null:
 		return
 	for key: String in _mode_btns:
@@ -1271,6 +1382,14 @@ func _refresh(force := false) -> void:
 		_mark(_drop_btns[val], (val == 1) == world.client_drop)
 	for val: int in _revive_btns:
 		_mark(_revive_btns[val], (val == 1) == world.client_ctf_revive)
+	for val: int in _norevive_btns:
+		_mark(_norevive_btns[val], (val == 1) == world.client_no_revive)
+	# With nobody coming back, HOW they would have come back is not a
+	# question worth asking, so that card goes.
+	if world.client_no_revive:
+		for gone_node in _ctf_only:
+			if is_instance_valid(gone_node):
+				(gone_node as Control).visible = false
 	for val: int in _target_btns:
 		_mark(_target_btns[val], val == world.client_ctf_target)
 

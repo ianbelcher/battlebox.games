@@ -45,6 +45,12 @@ func _ready() -> void:
 	# FLYING OFF, if asked. The question being tested is whether being
 	# picked up takes the wings back off you, and it can only be asked in
 	# a game that does not hand them out in the first place.
+	# NOBODY COMES BACK, if asked. The question is whether a knockout puts
+	# you straight OUT instead of down-and-revivable, and whether the
+	# routes back — a team-mate, or your own flag — really are shut.
+	if OS.get_environment("WORLD_KNOCKOUT_NOREVIVE") == "1":
+		world.no_revive = true
+		print("KNOCKOUT_PROBE: reviving switched OFF")
 	if OS.get_environment("WORLD_KNOCKOUT_NOFLY") == "1":
 		world.battle_fly = false
 		world.cl_battle_config.rpc(int(world.storm_minutes), int(world.battle_size),
@@ -73,3 +79,7 @@ func _ready() -> void:
 	print("KNOCKOUT_PROBE: reviving %s (battle_fly=%s)"
 		% [victim, str(world.battle_fly)])
 	world.ctf.respawn(victim)
+	await get_tree().create_timer(1.0).timeout
+	print("KNOCKOUT_PROBE: after respawn — down=%s out=%s alive=%s"
+		% [str(world.downed_ids.has(victim)), str(world.out_ids.has(victim)),
+			str(world.match_alive.has(victim))])

@@ -16,6 +16,9 @@ extends Node
 ##   WORLD_BOTWATCH=1           report computer players that stopped moving
 ##   WORLD_SWITCH_TEST=<theme>  pick a different world MID-ROUND and check
 ##                              the ground actually changed under everyone
+##   WORLD_CAPTURE_TEST=1       stand the person on an enemy flag and see
+##                              whether touching it actually takes it
+##   WORLD_ROUNDCLOCK_TEST=1    check the round clock runs at real speed
 
 ## The world being probed.
 var world: WorldNode = null
@@ -267,7 +270,111 @@ func _ground_line() -> String:
 		heights.append(str(world.store.surface_y(x, 0)))
 	return "ground=[%s]" % ",".join(heights)
 
+## WORLD_CAPTURE_TEST=1: put the person on an enemy flag and report.
+##
+## "I touched another team's flag a number of times and it didn't take it"
+## is not something a headless run reaches by luck — it needs somebody to
+## walk across a map and stand in the right square. So this puts them
+## there: it writes the position the flag test actually reads, holds it
+## for a second so it cannot be missed between frames, and says what the
+## test saw.
+##
+## The position is re-written EVERY frame on purpose. A person's machine
+## reports where they are twelve times a second and overwrites it, so
+## setting it once and waiting is a race this loses about half the time.
+var _cap_t := 0.0
+var _cap_hold := 0.0
+var _cap_done := false
+var _cap_target := -1
+var _cap_who := ""
+
+func tick_capture(delta: float) -> void:
+	if OS.get_environment("WORLD_CAPTURE_TEST") != "1" or _cap_done or world == null:
+		return
+	if world.match_phase != "BATTLE":
+		return
+	_cap_t += delta
+	if _cap_t < 12.0:
+		return
+	if _cap_who.is_empty():
+		for id: String in Game.roster.keys():
+			if not world.bots.roster.has(id) and world.player_state.has(id):
+				_cap_who = id
+				break
+		if _cap_who.is_empty():
+			print("CAPTURE: nobody at a keyboard to walk in"); _cap_done = true
+			return
+		var mine := int(Game.roster.get(_cap_who, {}).get("team", -1))
+		for team_i: int in world.ctf._flags.keys():
+			var f: Dictionary = world.ctf._flags[team_i]
+			if team_i != mine and not bool(f.get("out", false)) \
+					and int(f.get("back_at", 0)) == 0:
+				_cap_target = team_i
+				break
+		if _cap_target < 0:
+			print("CAPTURE: no enemy flag standing"); _cap_done = true
+			return
+		var flag: Dictionary = world.ctf._flags[_cap_target]
+		print("CAPTURE: standing %s (team %d) on team %d's flag at %v"
+			% [_cap_who, mine, _cap_target, flag.pos])
+		print("CAPTURE: took=%d lost=%d before"
+			% [int(world.ctf_caps.get(mine, 0)), int(world.ctf_lost.get(_cap_target, 0))])
+	var at: Vector3 = world.ctf._flags[_cap_target].get("pos", Vector3.INF)
+	if at == Vector3.INF:
+		print("CAPTURE: the flag went while we walked in"); _cap_done = true
+		return
+	world.player_state[_cap_who].pos = at
+	_cap_hold += delta
+	if _cap_hold < 1.0:
+		return
+	_cap_done = true
+	var mine2 := int(Game.roster.get(_cap_who, {}).get("team", -1))
+	print("CAPTURE: took=%d lost=%d after | team %d out=%s"
+		% [int(world.ctf_caps.get(mine2, 0)), int(world.ctf_lost.get(_cap_target, 0)),
+			_cap_target, str(world.ctf.team_is_out(_cap_target))])
+
+## WORLD_ROUNDCLOCK_TEST=1: does the round clock run at ONE second per
+## second?
+##
+## It did not. `_timer -= delta` runs at the top of MatchDirector.tick for
+## every phase, and the last-flag branch took it off a SECOND time — so
+## ten minutes of clock elapsed in five minutes of playing and the round
+## ended with the display still reading half the time left. Nothing else
+## here would have noticed: the round starts, the round ends, a winner is
+## printed, and every test passes.
+##
+## Measured against real elapsed time, so a second subtraction anywhere
+## shows up as a rate near 2 instead of near 1.
+var _clock_t := 0.0
+var _clock_from := -1.0
+var _clock_said := 0.0
+
+func tick_roundclock(delta: float) -> void:
+	if OS.get_environment("WORLD_ROUNDCLOCK_TEST") != "1" or world == null:
+		return
+	if world.match_phase != "BATTLE":
+		return
+	# WINDOWED, not cumulative from the first frame of BATTLE. The clock is
+	# still the SETUP countdown for a frame or two after the phase flips,
+	# so a baseline taken there is a few seconds while the real one is six
+	# hundred, and every rate after it is nonsense.
+	_clock_t += delta
+	if _clock_t - _clock_said < 5.0:
+		return
+	var window := _clock_t - _clock_said
+	_clock_said = _clock_t
+	var now_left := float(world.match_seconds)
+	if _clock_from < 0.0 or now_left > _clock_from:
+		_clock_from = now_left        # first window, or the clock was just set
+		return
+	var spent := _clock_from - now_left
+	_clock_from = now_left
+	print("ROUNDCLOCK: %.1fs real → %.1fs off the clock, rate=%.2f (want 1.00)"
+		% [window, spent, spent / maxf(0.001, window)])
+
 func tick(delta: float) -> void:
+	tick_roundclock(delta)
+	tick_capture(delta)
 	tick_switch(delta)
 	tick_revive(delta)
 	tick_resize(delta)

@@ -128,7 +128,13 @@ func tick(delta: float) -> void:
 				# that stalemate is a real result here rather than a
 				# failure, so it has to be allowed to end and score.
 				world.storm_radius = -1.0
-				_timer -= delta
+				# NO SECOND SUBTRACTION. `_timer -= delta` already ran at
+				# the top of this function, for every phase — so taking it
+				# off again here ran the round clock at DOUBLE SPEED. Ten
+				# minutes on the display elapsed in five of playing, and
+				# the round ended while the clock still read half of what
+				# was left. Reported as "counts down from 10 minutes but
+				# ends at 4 minutes — a really bad problem".
 				_tick_regen()
 				_tick_fire()
 				world.bots.tick_orbs(delta)
@@ -468,7 +474,13 @@ func eliminate(id: String, attacker := "") -> void:
 	# Reviving is a mode setting in capture the flag: with it off, a
 	# knockout puts you straight OUT and the only way back is
 	# your own flag.
+	# NOBODY COMES BACK, if the table asked for that. It overrides the
+	# capture-the-flag setting rather than sitting beside it: there is no
+	# sensible reading of "no reviving" that still lets a team-mate stand
+	# you up.
 	var can_revive: bool = world.ctf_revive if world.ctf.active() else true
+	if world.no_revive:
+		can_revive = false
 	if has_standing_mate and can_revive:
 		world.downed_ids[id] = Time.get_ticks_msec()
 		world.cl_downed_state.rpc(id, true)

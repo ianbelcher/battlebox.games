@@ -500,8 +500,21 @@ func ctf_goal(id: String, pos: Vector3) -> Vector3:
 	if _bot_ctf_defends(id, team) and home != Vector3.INF:
 		# The keeper. Anyone closing on our flag is the job; otherwise
 		# patrol around it.
-		var raider := ""
-		var raid_d := 30.0
+		#
+		# ANYONE IT CAN SEE. This was a plain distance test, and it is the
+		# last place in this file that read an enemy's position through
+		# solid rock: shooting had line of sight, hunting had it, and the
+		# keeper did not — so digging a tunnel towards a base turned every
+		# defender to face you through thirty blocks of ground and they
+		# were standing on the spot when you came up. Reported exactly
+		# that way, and it is the fair complaint: sneaking has to be worth
+		# doing or there is no point digging.
+		#
+		# The same eye and the same test the SHOT uses, so "I can see you"
+		# and "I can hit you" cannot disagree — and the same cap on how
+		# many are worth asking about, because a ray is not free. If the
+		# six nearest are all behind something, nobody has seen you.
+		var near: Array = []
 		for other: String in world.match_alive.keys():
 			if not world.teams_differ(id, other) or world.downed_ids.has(other):
 				continue
@@ -509,11 +522,18 @@ func ctf_goal(id: String, pos: Vector3) -> Vector3:
 			if st.is_empty():
 				continue
 			var d: float = home.distance_to(st.pos)
-			if d < raid_d:
-				raid_d = d
-				raider = other
-		if raider != "":
-			return world.player_state[raider].pos
+			if d < 30.0:
+				near.append([d, other])
+		near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+		var eye := pos + Vector3(0, 1.4, 0)
+		var looked := 0
+		for entry: Array in near:
+			if looked >= SIGHT_TRIES:
+				break
+			looked += 1
+			var at: Vector3 = world.player_state[entry[1]].pos
+			if world.clear_shot(eye, at + Vector3(0, 1.0, 0)):
+				return at
 		# ON PATROL, not on sentry duty. A fixed post meant a keeper
 		# reached its spot and then stood perfectly still for the rest of
 		# the round, which is indistinguishable from a broken bot — and
@@ -1266,22 +1286,60 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> 
 	var angle := TAU * float(pick) / float(slots)
 	var wx := floori(home.x + cos(angle) * float(CTF_COVER_RADIUS))
 	var wz := floori(home.z + sin(angle) * float(CTF_COVER_RADIUS))
-	if not world.store.inside_world(wx, wz, 2):
-		return
-	var ground := walk_y(wx, wz, home.y + 2.0)
-	if ground < 0:
-		return
-	# One block per go, lowest gap first, so the ring rises evenly rather
-	# than one tall pillar appearing before anything else exists.
-	for up in _cover_height():
-		var cell := Vector3i(wx, ground + 1 + up, wz)
-		if world.store.get_block(cell) != Blocks.AIR:
+	if world.store.inside_world(wx, wz, 2):
+		var ground := walk_y(wx, wz, home.y + 2.0)
+		# One block per go, lowest gap first, so the ring rises evenly
+		# rather than one tall pillar appearing before anything else.
+		if ground >= 0:
+			for up in _cover_height():
+				if _lay(team, Vector3i(wx, ground + 1 + up, wz)):
+					return
+	# WALLS FIRST, THEN A ROOF. A ring with open sky over it is a wall
+	# with a door in the ceiling: everyone here can fly, and the way a
+	# base actually falls is somebody coming in over the top of it. So
+	# once the wall has no gaps left to fill, the same builder starts
+	# putting a lid on.
+	if world.ctf.elimination():
+		_roof_over(team, home)
+
+## One block, if that cell is empty. True when something went down.
+func _lay(team: int, cell: Vector3i) -> bool:
+	if world.store.get_block(cell) != Blocks.AIR:
+		return false
+	var pairs: Array = []
+	world.ctf.put(cell, world.TEAM_WOOL[team % world.TEAM_WOOL.size()], pairs)
+	if pairs.is_empty():
+		return false
+	world.cl_edits.rpc(pairs)
+	return true
+
+## How far across the lid goes. Smaller than the mound on purpose: the
+## outer ring of the base stays open to the sky, so the way in is to walk
+## up under the edge of it rather than to be sealed out.
+const CTF_ROOF_RADIUS := 5
+
+## A LID OVER THE FLAG, two blocks clear of the top of the pole.
+##
+## Clear of it because the beacon is how you find a base from across the
+## map, and a roof sitting on the pole hides the one thing that is
+## supposed to be visible. Two blocks up leaves it glowing over the top.
+##
+## Team wool, like the walls, and wool digs out — so this is a delay and a
+## nuisance, never a seal. That matters: a base nobody can get into is a
+## nil-all draw for the whole round.
+func _roof_over(team: int, home: Vector3) -> void:
+	var y := int(home.y) + world.CTF_POLE_HEIGHT + 1
+	for _try in 6:
+		var dx := randi() % (CTF_ROOF_RADIUS * 2 + 1) - CTF_ROOF_RADIUS
+		var dz := randi() % (CTF_ROOF_RADIUS * 2 + 1) - CTF_ROOF_RADIUS
+		if Vector2(dx, dz).length() > float(CTF_ROOF_RADIUS):
 			continue
-		var pairs: Array = []
-		world.ctf.put(cell, world.TEAM_WOOL[team % world.TEAM_WOOL.size()], pairs)
-		if not pairs.is_empty():
-			world.cl_edits.rpc(pairs)
-		return
+		var rx := floori(home.x) + dx
+		var rz := floori(home.z) + dz
+		if not world.store.inside_world(rx, rz, 2):
+			continue
+		if _lay(team, Vector3i(rx, y, rz)):
+			return
 
 ## What height a flying computer player should be at, or INF for "it is
 ## not flying — use the ground rules".

@@ -23,8 +23,8 @@ func _initialize() -> void:
 	# could not choose from.
 	var sizes: Array = menu.get("_size_btns").keys()
 	sizes.sort()
-	if sizes != [200, 400, 800]:
-		bad.append("sizes are %s, expected [200, 400, 800]" % str(sizes))
+	if sizes != [50, 100, 200, 400, 800]:
+		bad.append("sizes are %s, expected [50, 100, 200, 400, 800]" % str(sizes))
 
 	# Four answers for who can fly, and NO world-level on/off switch —
 	# flying is a property of a player, and having it in both places is
@@ -45,12 +45,20 @@ func _initialize() -> void:
 		if nodes == null or (nodes as Array).is_empty():
 			bad.append("%s is empty — the mode-specific card was not built" % group)
 
+	# Can you be picked up at all — a question for every fight mode, not
+	# just the flag ones.
+	var back: Array = menu.get("_norevive_btns").keys()
+	back.sort()
+	if back != [0, 1]:
+		bad.append("revive on/off buttons are %s, expected [0, 1]" % str(back))
+
 	for line: String in bad:
 		print("  FAIL  %s" % line)
 	if bad.is_empty():
 		print("menu_controls: PASS — %d sizes, %d fly answers, "
 			% [sizes.size(), answers.size()]
-			+ "capture and last-flag cards built separately")
+			+ "capture and last-flag cards built separately, "
+			+ "reviving can be switched off")
 		quit(0)
 	else:
 		print("menu_controls: FAILED")

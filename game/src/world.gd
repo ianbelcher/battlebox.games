@@ -423,7 +423,7 @@ func sv_hello() -> void:
 	cl_overview.rpc_id(peer, overview)
 	cl_battle_config.rpc_id(peer, int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
-		battle_fly_bots)
+		battle_fly_bots, no_revive)
 	cl_teams.rpc_id(peer, team_names)
 	cl_mode.rpc_id(peer, game_mode)
 	cl_world_sel.rpc_id(peer, selected_map if not selected_map.is_empty() \
@@ -1543,6 +1543,17 @@ var loot_only := false
 var battle_fly := true
 var battle_fly_bots := true
 
+## ONE KNOCKOUT AND YOU ARE OUT, in every mode. Off by default.
+##
+## Being picked up is what keeps a young player in a round they would
+## otherwise spend watching, so this is not the default — but "when you're
+## done, you're done" is a different and harder game, and some tables want
+## it. It overrides everything: no team-mate pick-ups, and no tagging back
+## in at your own flag either, because "you cannot be revived" has to mean
+## all of it or it means nothing.
+var no_revive := false
+var client_no_revive := false
+
 ## WHERE PEOPLE HAVE ACTUALLY BEEN KNOCKED OUT, most recent last.
 ##
 ## Read by the computer players when they choose which way to come at a
@@ -1627,7 +1638,7 @@ func sv_set_bot_team(target_id: String, team: int) -> void:
 		Game.cl_roster.rpc(Game.roster)
 
 @rpc("any_peer", "reliable")
-func sv_ctf_config(revive: int, target: int, drop: int) -> void:
+func sv_ctf_config(revive: int, target: int, drop: int, none_back := -1) -> void:
 	## Settings that belong to a MODE rather than to the arena. `drop` is
 	## deliberately cross-mode — losing your weapons on a knockout is a
 	## fair question in battle royale too — while revive and the target
@@ -1641,9 +1652,11 @@ func sv_ctf_config(revive: int, target: int, drop: int) -> void:
 		ctf_target = clampi(target, 1, 25)
 	if drop >= 0:
 		drop_on_knockout = drop == 1
+	if none_back >= 0:
+		no_revive = none_back == 1
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
-		battle_fly_bots)
+		battle_fly_bots, no_revive)
 
 ## Hand flight out, or take it away, from a group at a time.
 ##
@@ -1767,7 +1780,7 @@ func sv_match_config(minutes: int, loot: int, size: int = -1) -> void:
 		resize_to = int(battle_size)
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, ctf_revive, ctf_target,
-		battle_fly_bots)
+		battle_fly_bots, no_revive)
 	_save_battle_setup()
 	if resize_to > 0:
 		_do_world_reset(selected_map, resize_to)
@@ -2139,8 +2152,10 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				Sfx.play("pop", -4.0)
 				# ...and the floor goes with it. Somebody going out is the
 				# biggest thing that happens in a round and it sounded
-				# like a bubble popping. See Sfx._rumble.
-				Sfx.play("rumble", -3.0)
+				# like a bubble popping. The same explosion everything
+				# else uses, a little louder — the separate deep rumble
+				# that used to be here is gone with the rest of them.
+				Sfx.play("boom", -5.0)
 			if child.is_local and is_down:
 				# UP AND OUT OF IT. Ten blocks over three seconds — the
 				# same rise elimination used to give, moved to the moment
@@ -2469,10 +2484,11 @@ func cl_overview(bytes: PackedByteArray) -> void:
 @rpc("authority", "reliable")
 func cl_battle_config(minutes: int, size: int, loot: bool, fly := false,
 		teams := -1, drop := false, revive := true, target := 3,
-		fly_bots := false) -> void:
+		fly_bots := false, none_back := false) -> void:
 	client_minutes = minutes
 	client_size = size
 	client_fly_bots = fly_bots
+	client_no_revive = none_back
 	client_loot = loot
 	client_fly = fly
 	client_drop = drop
@@ -2995,7 +3011,20 @@ const CTF_MOUND_HEIGHT := 3
 ## summit. Tall enough to read from a distance, short enough that it is a
 ## marker and not a tower.
 const CTF_POLE_HEIGHT := 4
-const CTF_FLAG_TOUCH := 3.2
+## HOW CLOSE COUNTS AS TOUCHING THE FLAG.
+##
+## The mound is seven blocks across with a summit only two wide, and this
+## used to be 3.2 — wider than the summit, so reaching the top was always
+## enough. It was still reported as "I touched their flag a number of
+## times and it didn't take it", and standing a player exactly on the
+## point shows the capture firing immediately, so the miss is in the
+## approach rather than the test.
+##
+## 4.5 covers the summit AND the terrace one step below it, which is what
+## a person means when they say they were at the flag: on their base,
+## next to the pole. It is still well inside the mound, so a defender who
+## holds the top still holds the flag.
+const CTF_FLAG_TOUCH := 4.5
 ## How far above or below the flag's foot still counts. The pole is four
 ## blocks and the mound three, so this has to clear somebody standing on
 ## the rim below it as well as somebody on top of the pole.

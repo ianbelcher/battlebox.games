@@ -1334,7 +1334,7 @@ func _build_game_tab() -> void:
 	size_label.text = "Arena size:"
 	size_label.add_theme_font_size_override("font_size", _us(20))
 	size_row.add_child(size_label)
-	for arena in [200, 400, 800]:
+	for arena in [50, 100, 200, 400, 800]:
 		var size_btn := Button.new()
 		size_btn.focus_mode = Control.FOCUS_NONE
 		size_btn.text = str(arena)
@@ -2149,33 +2149,55 @@ func _refresh_team_panel() -> void:
 		return
 	for child in _team_panel.get_children():
 		child.queue_free()
+	# STANDING / TEAM SIZE. The second number is how many are ON the team
+	# and does not move all match, so a wiped team reads 0/6 and STAYS
+	# LISTED — counting only the survivors made whole teams vanish from
+	# the panel, which read as players being dropped from the game. The
+	# first number is who can still shoot back: not downed, not out.
 	var names: Array = world.client_team_names
-	for t in names.size():
-		# STANDING / TEAM SIZE. The second number is how many are ON the
-		# team and does not move all match, so a wiped team reads 0/6 and
-		# STAYS LISTED — counting only the survivors made whole teams
-		# vanish from the panel, which read as players being dropped from
-		# the game. The first number is who can still shoot back: not
-		# downed, not eliminated.
-		var alive := 0
-		var total := 0
-		for rid: String in Game.roster.keys():
-			if int(Game.roster[rid].get("team", -1)) != t:
-				continue
-			total += 1
-			if world.alive_ids.has(rid) and not world.client_downed.has(rid):
-				alive += 1
-		if total == 0:
+	var standing: Dictionary = {}
+	var sizes: Dictionary = {}
+	for rid: String in Game.roster.keys():
+		var rt := int(Game.roster[rid].get("team", -1))
+		if rt < 0 or rt >= names.size():
 			continue
+		sizes[rt] = int(sizes.get(rt, 0)) + 1
+		if world.alive_ids.has(rid) and not world.client_downed.has(rid):
+			standing[rt] = int(standing.get(rt, 0)) + 1
+	var ranked: Array = sizes.keys()
+	ranked.sort_custom(func(a: int, b: int) -> bool:
+		return int(standing.get(a, 0)) > int(standing.get(b, 0)))
+	# TWENTY TEAMS DOES NOT FIT and used to be drawn anyway, straight off
+	# the bottom of the screen. See TeamBoard.
+	var px := TeamBoard.font_px(ranked.size(), 14)
+	var room := size.y - _team_panel.position.y - _us(30)
+	var cap := TeamBoard.row_cap(room, _us(px + 3))
+	var mine := int(Game.roster.get(Game.player_id(
+		multiplayer.get_unique_id(), slot), {}).get("team", -1))
+	var show: Array = TeamBoard.visible_rows(ranked, mine, cap)
+	for t_v: Variant in show:
+		var t := int(t_v)
+		var alive := int(standing.get(t, 0))
 		var row_label := Label.new()
-		row_label.text = "%s  %d/%d" % [str(names[t]), alive, total]
-		row_label.add_theme_font_size_override("font_size", _us(14))
+		row_label.text = "%s  %d/%d" % [str(names[t]), alive, int(sizes[t])]
+		row_label.add_theme_font_size_override("font_size", _us(px))
 		row_label.add_theme_color_override("font_color",
-			WorldNode.TEAM_COLORS[t] if alive > 0 else Color(0.5, 0.5, 0.55, 0.7))
+			WorldNode.TEAM_COLORS[t % WorldNode.TEAM_COLORS.size()] if alive > 0 \
+			else Color(0.5, 0.5, 0.55, 0.7))
 		row_label.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
 		row_label.add_theme_constant_override("outline_size", 4)
 		row_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		_team_panel.add_child(row_label)
+	var missing := TeamBoard.hidden(ranked.size(), show.size())
+	if missing > 0:
+		var more := Label.new()
+		more.text = "+%d more" % missing
+		more.add_theme_font_size_override("font_size", _us(px))
+		more.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+		more.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
+		more.add_theme_constant_override("outline_size", 4)
+		more.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		_team_panel.add_child(more)
 
 ## THE ROUND'S SCORELINE, over the knockout feed on the left.
 ##
@@ -2203,7 +2225,11 @@ func _refresh_ctf_panel() -> void:
 	for stale in _ctf_panel.get_children():
 		stale.queue_free()
 	var head := Label.new()
-	head.text = "⚑  first to %d   (took/lost)" % int(world.ctf_target)
+	# THE HEADING SAYS WHAT THE MODE IS PLAYED ON, and last flag standing
+	# is not played on a target — it was reading "first to 3" in a mode
+	# where reaching three of anything means nothing at all.
+	head.text = "🛡  last flag standing   (took/lost)" if world.client_mode == "holdout" \
+		else "⚑  first to %d   (took/lost)" % int(world.ctf_target)
 	head.add_theme_font_size_override("font_size", _us(12))
 	head.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
 	head.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
@@ -2214,7 +2240,20 @@ func _refresh_ctf_panel() -> void:
 		order.append(t)
 	order.sort_custom(func(a: int, b: int) -> bool:
 		return int(world.ctf_scores.get(a, 0)) > int(world.ctf_scores.get(b, 0)))
-	for t: int in order:
+	# TWENTY TEAMS OF FIVE. Every row carried a 30px score, so twenty of
+	# them was six hundred pixels of scoreboard down the side of the
+	# screen and you could not see the game behind it. The score is still
+	# the big number — it is what you glance at mid-fight — it is just
+	# sized for how many of them there are now. See TeamBoard.
+	var px := TeamBoard.font_px(order.size(), 30)
+	var name_px := TeamBoard.font_px(order.size(), 15)
+	var note_px := TeamBoard.font_px(order.size(), 16)
+	var cap := TeamBoard.row_cap(size.y * 0.45, _us(px + 4))
+	var mine := int(Game.roster.get(Game.player_id(
+		multiplayer.get_unique_id(), slot), {}).get("team", -1))
+	var show: Array = TeamBoard.visible_rows(order, mine, cap)
+	for t_v: Variant in show:
+		var t := int(t_v)
 		# NAME, SCORE, then took/lost small and in brackets. It used to
 		# read "Red 1 took · 0 lost · 1", which is three numbers and two
 		# words for one line of a scoreboard you glance at mid-fight. The
@@ -2227,10 +2266,6 @@ func _refresh_ctf_panel() -> void:
 		line.autowrap_mode = TextServer.AUTOWRAP_OFF
 		line.custom_minimum_size = Vector2(_us(200), 0)
 		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		# THE SCORE IS THE BIG NUMBER. This was the wrong way round: the
-		# whole row sat at hint size while the took/lost bracket beside it
-		# was nearly as large, so the one thing you glance at mid-fight was
-		# the smallest thing on the line.
 		# BOTH sizes, and the bold one is why this kept coming out wrong.
 		# `[b]` does not draw with the normal font — it draws with the BOLD
 		# font, which has its own `bold_font_size`. Overriding only
@@ -2238,25 +2273,32 @@ func _refresh_ctf_panel() -> void:
 		# bracket beside it, which carries an explicit tag, rendered
 		# larger: a tiny score and a big (2/0), which is precisely
 		# backwards, and has now been reported twice.
-		line.add_theme_font_size_override("normal_font_size", _us(15))
-		line.add_theme_font_size_override("bold_font_size", _us(30))
+		line.add_theme_font_size_override("normal_font_size", _us(name_px))
+		line.add_theme_font_size_override("bold_font_size", _us(px))
 		line.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
 		line.add_theme_constant_override("outline_size", 4)
 		var tint: Color = WorldNode.TEAM_COLORS[t] \
 			if t < WorldNode.TEAM_COLORS.size() else Color.WHITE
-		# Name and bracket step DOWN from the score rather than the score
-		# being squeezed up to meet them.
 		# Every size stated outright rather than inherited, so nothing can
 		# fall back to a theme default again.
 		line.text = ("[color=#%s][font_size=%d]%s[/font_size]  "
 			+ "[font_size=%d][b]%d[/b][/font_size][/color]  "
 			+ "[color=#8d97ab][font_size=%d](%d/%d)[/font_size][/color]") % [
-			tint.to_html(false), _us(15),
+			tint.to_html(false), _us(name_px),
 			str(world.client_team_names[t]) \
 				if t < world.client_team_names.size() else "Team %d" % (t + 1),
-			_us(30), int(world.ctf_scores.get(t, 0)), _us(16),
+			_us(px), int(world.ctf_scores.get(t, 0)), _us(note_px),
 			int(world.ctf_caps.get(t, 0)), int(world.ctf_lost.get(t, 0))]
 		_ctf_panel.add_child(line)
+	var missing := TeamBoard.hidden(order.size(), show.size())
+	if missing > 0:
+		var more := Label.new()
+		more.text = "+%d more — open the menu for the full table" % missing
+		more.add_theme_font_size_override("font_size", _us(name_px))
+		more.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
+		more.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
+		more.add_theme_constant_override("outline_size", 4)
+		_ctf_panel.add_child(more)
 
 ## Swap a team header button for a LineEdit; commit renames server-side.
 func _rename_team(head: Button, index: int) -> void:

@@ -199,12 +199,29 @@ func refresh_no_carve() -> void:
 			zones.append([home.x, home.z, float(world.CTF_MOUND_RADIUS) + 0.5])
 	world.store.no_carve = zones
 
+## What every client is told about the flags: team, where its base is,
+## whether the flag is standing, and whether it has gone for good.
+##
+## THE LAST TWO ARE DIFFERENT QUESTIONS and only the first was being
+## answered. "Standing" was computed from `back_at` alone — the six-second
+## timer a flag spends away after a capture in capture the flag — and a
+## flag taken for good in last flag standing never gets a `back_at`, it
+## gets `out`. So an eliminated team's flag reported as STANDING for the
+## rest of the round: the pole was gone from the world, but the radar
+## still drew a flag on their base, and running over there to take it did
+## nothing at all, because the flag's position is INF and there is nothing
+## left to touch.
+##
+## That is very probably "I touched another team's flag a number of times
+## and it didn't get their flag" — the flag being touched had already been
+## taken by somebody else, and only the map still said otherwise.
 func _flag_payload() -> Array:
 	var payload: Array = []
 	for team_i: int in _flags.keys():
 		var flag: Dictionary = _flags[team_i]
-		var taken: bool = int(flag.back_at) > 0
-		payload.append([team_i, flag.home, not taken])
+		var gone: bool = bool(flag.get("out", false))
+		var away: bool = int(flag.back_at) > 0
+		payload.append([team_i, flag.home, not (away or gone), gone])
 	return payload
 
 func broadcast_flags() -> void:
@@ -592,6 +609,12 @@ func teams_surviving() -> Array:
 ## Guarding the junction rather than each of the three routes is the point:
 ## a fourth route added later cannot forget.
 func respawn(id: String) -> void:
+	# NOBODY COMES BACK. Guarding the junction rather than each route is
+	# the point — touching your own flag, the channel a computer player
+	# stands through, and the backstop that recovers a bot walled into a
+	# pit all end up here, and a fourth route added later cannot forget.
+	if world.no_revive:
+		return
 	if elimination() and team_is_out(int(Game.roster.get(id, {}).get("team", -1))):
 		return
 	world.out_ids.erase(id)
