@@ -742,7 +742,7 @@ func _build_players_tab() -> void:
 			["−  Remove a team", "remove_team", 0],
 			["+  Add a computer player", "add_bot", 1],
 			["−  Remove a computer player", "remove_bot", 1],
-			["⧉  Fill up to %d" % Game.MAX_PLAYERS, "fill_bots", 2]]:
+			["🤖  Fill up to %d" % Game.MAX_PLAYERS, "fill_bots", 2]]:
 		var manage: HBoxContainer = team_row
 		if int(spec[2]) == 1:
 			manage = bot_row

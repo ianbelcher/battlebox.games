@@ -72,9 +72,26 @@ func _me() -> Player:
 ##
 ## HeldForward pushes (0, -1), which with camera_yaw 0 is -z, so the wall
 ## goes that way.
+## The top of the ground in a column, searched from a bit above the player
+## down to a bit below. Returns the y of the first solid block found.
+func _ground_at(world: WorldNode, wx: int, wz: int, from_y: int) -> int:
+	for y in range(from_y + 3, from_y - 6, -1):
+		if Blocks.is_solid(world.chunks.get_block(Vector3i(wx, y, wz))):
+			return y
+	return from_y - 1
+
 func _build(world: WorldNode, me: Player) -> void:
-	var y := floori(me.position.y)
 	var at_z := floori(me.position.z) - WALL_AT
+	# FROM THE GROUND UNDER THE WALL, not from the player's own feet. The
+	# two are only the same on flat ground: three blocks ahead the terrain
+	# is usually a little higher or lower, and where it was higher the
+	# first course landed INSIDE the hillside — placing into solid rock is
+	# refused, so every course above it was unsupported and refused too,
+	# and the probe reported "the wall was never built" on ground that was
+	# perfectly fine to climb. It is a test that only ran on flat ground
+	# and did not say so.
+	var y := _ground_at(world, floori(me.position.x), at_z,
+		floori(me.position.y)) + 1
 	# Ascending, so each course rests on the one below and every block is
 	# supported when it is placed.
 	# Narrow and one deep, so even the top course of a ten-block wall is
@@ -110,7 +127,9 @@ func _physics_process(delta: float) -> void:
 			me.input = _held
 			if _t < 0.8:
 				return          # let the server hear where we are standing
-			_origin = Vector3i(floori(me.position.x), floori(me.position.y),
+			_origin = Vector3i(floori(me.position.x),
+				_ground_at(world, floori(me.position.x),
+					floori(me.position.z) - WALL_AT, floori(me.position.y)) + 1,
 				floori(me.position.z) - WALL_AT)
 			_build(world, me)
 			_phase = 2
