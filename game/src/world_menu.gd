@@ -722,11 +722,19 @@ func _sig_of_roster() -> String:
 	var teams: int = world.team_count if world != null else 4
 	var ids: Array = Game.roster.keys()
 	ids.sort()
-	# The world's flying setting is in here too, because it is the DEFAULT
-	# every player follows until they are singled out — flip it and every
-	# row in the Fly column changes without a single roster entry moving.
-	var out := "t%d|f%s|" % [teams,
-		world.client_fly if world != null else false]
+	# The world's flying settings are in here too, because they are the
+	# DEFAULT every player follows until they are singled out — change one
+	# and every row in the Fly column changes without a single roster
+	# entry moving.
+	#
+	# BOTH of them, and that is not fussiness. There are two defaults now,
+	# one for people and one for computers, and pressing "Computers only"
+	# from "Nobody" moves only the second — so a signature watching just
+	# the first does not change, the list is not rebuilt, and every ✈ in
+	# the column goes on showing the old answer.
+	var out := "t%d|f%s%s|" % [teams,
+		world.client_fly if world != null else false,
+		world.client_fly_bots if world != null else false]
 	for id: String in ids:
 		var e: Dictionary = Game.roster[id]
 		out += "%s:%s:%s:%s:%s;" % [id, e.get("name", ""), e.get("team", -1),
