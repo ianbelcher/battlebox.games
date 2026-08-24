@@ -142,3 +142,31 @@ func test_she_travels_the_way_she_is_pointing() -> void:
 	var moved: Vector3 = out[0]
 	check(moved.x > 0.5, "pointing east, going east")
 	near(moved.z, 0.0, 0.001, "and not sideways")
+
+# ---- reversing --------------------------------------------------------
+
+## Backing up steers the OTHER way, which is what everybody who has ever
+## reversed anything expects. Getting it the wrong way round is why
+## backing off a sandbank drove you further onto it.
+func test_reversing_steers_the_opposite_way() -> void:
+	var ahead := VehicleGeom.drive(VehicleGeom.KIND_BOAT, Vector3.ZERO, 0.0,
+		VehicleGeom.BOAT_SPEED, 1.0, 1.0, 1.0 / 60.0)
+	var astern := VehicleGeom.drive(VehicleGeom.KIND_BOAT, Vector3.ZERO, 0.0,
+		-VehicleGeom.BOAT_SPEED * 0.5, -1.0, 1.0, 1.0 / 60.0)
+	check(signf(ahead[1]) != signf(astern[1]),
+		"same helm, opposite way round: forward %.4f, astern %.4f"
+		% [ahead[1], astern[1]])
+
+func test_reversing_still_answers_the_helm_at_all() -> void:
+	# The other failure: flipping the sign by zeroing it.
+	var astern := VehicleGeom.drive(VehicleGeom.KIND_CAR, Vector3.ZERO, 0.0,
+		-4.0, -1.0, 1.0, 1.0 / 60.0)
+	check(absf(astern[1]) > 0.0001, "it still turns while going backwards")
+
+func test_going_forwards_is_unchanged() -> void:
+	# The sign only matters below zero. Forward steering must be exactly
+	# what it was, or every boat on the map now handles differently.
+	var out := VehicleGeom.drive(VehicleGeom.KIND_BOAT, Vector3.ZERO, 0.0,
+		VehicleGeom.BOAT_SPEED, 1.0, 1.0, 1.0)
+	near(out[1], -VehicleGeom.BOAT_TURN, 0.0001,
+		"full speed ahead, full helm: a full turn rate's worth")

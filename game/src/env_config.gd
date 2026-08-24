@@ -27,6 +27,7 @@ const KNOWN := {
 	"WORLD_MCA_DIR": "a Minecraft world directory, or its region/ directory",
 	"WORLD_MCA_Y0": "the Minecraft y that becomes world floor + 1 (default 40)",
 	"WORLD_MCA_CENTER": "the Minecraft x,z that becomes our origin, chunk-aligned",
+	"WORLD_CLIMB_TEST": "walk into a wall this many blocks high and see if you get over",
 	"WORLD_CLOCK": "pin the day fraction, 0..1, so a given hour can be looked at",
 	"WORLD_FAST": "1 shrinks the day to 90s and sapling growth to 8s",
 

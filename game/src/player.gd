@@ -661,6 +661,61 @@ func _solid_at(pos: Vector3) -> bool:
 	return Blocks.is_solid(_chunks().get_block(Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))))
 
 ## Any solid block overlapping the AABB at a candidate position?
+## GETTING OVER THE TOP, which climbing alone cannot do. Returns the spot
+## to stand on, or INF when there is not one.
+##
+## The climb deadlocks one block short of every wall, and it is worth
+## being precise about why, because it looks like the impulse being too
+## weak and is not.
+##
+## Pressed against a wall your box overlaps the wall's column. Moving UP
+## is refused while any part of that box is level with a solid cell — and
+## the last such cell is exactly the block you are trying to get on top
+## of. Moving FORWARD is refused until you are above it. Neither sweep can
+## finish, every frame ends where it started, and what a player sees is a
+## buzz an inch below the lip. Measured: 4.97 blocks up a six-block wall,
+## for as long as you care to hold the stick.
+##
+## The way out is the move neither sweep makes on its own — up AND forward
+## together, onto the ledge. So when there is somewhere to stand just
+## above and just ahead, that is where you go.
+##
+## A clear space alone is not enough: it would also match a HOLE in the
+## wall and post you through it. There has to be something under your feet
+## when you land — clear where you are going, solid immediately below.
+## That is a ledge, and nothing else is.
+const MANTLE_REACH := 0.85
+
+func _mantle_spot(from: Vector3, dir: Vector3) -> Vector3:
+	var ahead := Vector3(dir.x, 0.0, dir.z)
+	if ahead.length_squared() < 0.0001:
+		return Vector3.INF
+	ahead = ahead.normalized() * MANTLE_REACH
+	# One block up, then two. A climb arrives just under the lip, but a
+	# frame can carry you past it, and being half a block high should not
+	# mean starting the wall again.
+	for lift: float in [1.05, 2.05]:
+		var ledge := from + ahead + Vector3(0, lift, 0)
+		# ON the block, not hovering somewhere above it. Snapping to the
+		# cell boundary is also what makes the test below mean anything.
+		ledge.y = floorf(ledge.y)
+		if _collides(ledge):
+			continue
+		# SOMETHING UNDER YOUR FEET — the single cell below them.
+		#
+		# This started out as `_collides(ledge - 0.15)`, which reads like
+		# the same idea and is not: a player box is 1.8 tall, so dropping
+		# it by a sixth of a block still samples the cells it was already
+		# in and never reaches the ground. It answered "nothing there" on
+		# top of a perfectly solid wall, so the mantle never fired and the
+		# climb went on buzzing under the lip exactly as before.
+		var under := Vector3i(floori(ledge.x), floori(ledge.y) - 1,
+			floori(ledge.z))
+		if not Blocks.is_solid(_chunks().get_block(under)):
+			continue          # a gap, not a top
+		return ledge
+	return Vector3.INF
+
 ## The deck we are standing on or about to land on, or INF for none.
 func _deck_floor(from: Vector3, to: Vector3) -> float:
 	if world == null or world.vehicle_view == null:
@@ -969,6 +1024,9 @@ func _local_move(delta: float) -> void:
 	# Axis-separated sweep against the voxel grid.
 	var next := position
 	var blocked_h := false
+	## Set for the one frame a climb finishes by stepping onto the top.
+	## The sweeps below must not undo the spot it chose — see _mantle_spot.
+	var mantled := false
 	if dropping:
 		# Everyone glides down at the SAME gentle -3 until touching down —
 		# enforced after every glide/wings branch so nothing overrides it.
@@ -1045,6 +1103,13 @@ func _local_move(delta: float) -> void:
 			on_floor = false
 			anim = Anim.FLY
 			_climbing = true
+			var ledge := _mantle_spot(next, dir)
+			if ledge != Vector3.INF:
+				next = ledge
+				velocity = Vector3.ZERO
+				on_floor = true
+				_climbing = false
+				mantled = true
 	elif _climbing:
 		# THE TOP. Nothing is in the way any more and you are still walking
 		# forward, so the wall has been climbed — take the last step onto
@@ -1064,7 +1129,9 @@ func _local_move(delta: float) -> void:
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
 	var deck_y := _deck_floor(next, v_attempt)
-	if _knockout_rise > 0.0 or _lift_to < INF:
+	if mantled:
+		pass          # already standing on the ledge; nothing left to sweep
+	elif _knockout_rise > 0.0 or _lift_to < INF:
 		# Straight through the roof. Somebody knocked out inside their own
 		# fort would otherwise be pinned against its ceiling for the whole
 		# three seconds, which is the opposite of a graceful exit — and

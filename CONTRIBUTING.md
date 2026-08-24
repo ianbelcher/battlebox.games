@@ -112,6 +112,27 @@ It is not in CI because the build image has no browser and putting one
 there would add hundreds of megabytes to every deploy.
 `tools/webtest_play.js` needs one for the same reason.
 
+One check is a TOOL rather than a gate, because it cannot be trusted to
+give the same answer twice:
+
+```sh
+# Walk into a wall of this height and see whether you get over it.
+WORLD_CLIMB_TEST=6 WORLD_AUTOTEST=1 \
+  WORLD_AUTOCONNECT=ws://127.0.0.1:9081 godot --headless --path game
+```
+
+It prints a height-over-time graph, which is the only way to see the
+failure it exists for: the climb reaching a point just under the lip of a
+wall and buzzing there instead of finishing. No error, no crash, the
+player is simply an inch short forever.
+
+It is not in CI because it builds its wall in the world where the player
+happens to be standing, and that is different every run — on a slope, in
+water, or somewhere the server refuses the blocks because they are past
+`WorldNode.EDIT_RANGE`. When it says "the wall was never built", that is
+what happened; run it again. Compare a run against a run, not against a
+remembered number.
+
 Two more checks need a real window and so are not in CI. Run them if you are
 changing menus or controls — synthetic input goes through the display
 server, and headless has none, so both report failure on good code:

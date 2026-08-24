@@ -134,6 +134,8 @@ func _ready() -> void:
 	# WORLD_MENU_PROBE=1: drive the world menu with synthetic input.
 	if OS.get_environment("WORLD_MENU_PROBE") == "1":
 		add_child(load("res://tests/menu_probe.gd").new())
+	if not OS.get_environment("WORLD_CLIMB_TEST").is_empty():
+		add_child(load("res://tests/climb_probe.gd").new())
 	# WORLD_BOAT_TEST=1: stand a player on a boat and move it under them.
 	if OS.get_environment("WORLD_BOAT_TEST") == "1":
 		add_child(load("res://tests/boat_probe.gd").new())

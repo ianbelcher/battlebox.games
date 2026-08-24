@@ -106,7 +106,19 @@ static func drive(kind: int, origin: Vector3, yaw: float, speed: float,
 	var next_speed := move_toward(speed, want, top_speed(kind) * delta * 2.0)
 	if is_zero_approx(throttle):
 		next_speed = move_toward(next_speed, 0.0, DRAG * delta)
-	var bite := clampf(absf(next_speed) / top_speed(kind), 0.0, 1.0)
+	# SIGNED, not absolute — which is the whole of reversing.
+	#
+	# It used to take the size of the speed and throw the direction away,
+	# so the helm did the same thing going backwards as going forwards.
+	# That is wrong in the way everybody already knows is wrong: reverse a
+	# car with the wheel left and the back goes left, so the nose swings
+	# right. Anybody who has reversed anything expects that, and getting
+	# it the other way round is why backing off a sandbank sent you
+	# further onto it.
+	#
+	# A negative bite flips the turn, and it happens to fall out of the
+	# arithmetic rather than needing a special case.
+	var bite := clampf(next_speed / top_speed(kind), -1.0, 1.0)
 	var next_yaw := yaw - clampf(steer, -1.0, 1.0) * turn_rate(kind) * bite * delta
 	var heading := Vector3(sin(next_yaw), 0.0, cos(next_yaw))
 	return [origin + heading * next_speed * delta, next_yaw, next_speed]
