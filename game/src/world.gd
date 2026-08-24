@@ -2105,6 +2105,10 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				if fx != null:
 					fx.knockout(child.position + Vector3(0, 0.9, 0))
 				Sfx.play("pop", -4.0)
+				# ...and the floor goes with it. Somebody going out is the
+				# biggest thing that happens in a round and it sounded
+				# like a bubble popping. See Sfx._rumble.
+				Sfx.play("rumble", -3.0)
 			if child.is_local and is_down:
 				# UP AND OUT OF IT. Ten blocks over three seconds — the
 				# same rise elimination used to give, moved to the moment

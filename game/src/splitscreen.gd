@@ -130,6 +130,9 @@ func _add_cell(slot: int, frac: Rect2) -> void:
 		hud = PlayerHud.new()
 		hud.slot = slot
 		hud.world = world
+		# The HUD needs to be able to ask where a point in the world lands
+		# on this cell's screen — see PlayerHud._keep_home_in_colour.
+		hud.cam = cam
 		container.add_child(hud)
 	else:
 		container.add_child(_spectator_prompt())

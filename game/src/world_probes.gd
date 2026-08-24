@@ -163,7 +163,63 @@ func tick_bot_watch(delta: float) -> void:
 
 ## Every probe, once per frame. They are all inert without their
 ## environment variable, so this is five integer checks on a real server.
+## WORLD_REVIVE_TEST=1: knock a computer player down, stand a team-mate on
+## top of it, and report every three seconds whether the pick-up is
+## progressing. Answers "they come to me to be revived and nothing
+## happens" with a number instead of a guess.
+var _rev_t := 0.0
+var _rev_started := false
+var _rev_who := ""
+
+func tick_revive(delta: float) -> void:
+	if OS.get_environment("WORLD_REVIVE_TEST") != "1":
+		return
+	_rev_t += delta
+	if _rev_t < 3.0:
+		return
+	_rev_t = 0.0
+	if not _rev_started:
+		if world.match_phase != "BATTLE":
+			print("REVIVE: waiting, phase=%s" % world.match_phase)
+			return
+		for id: String in world.match_alive.keys():
+			var team := int(Game.roster.get(id, {}).get("team", -1))
+			for mate: String in world.match_alive.keys():
+				if mate == id or int(Game.roster.get(mate, {}).get("team", -2)) != team:
+					continue
+				_rev_who = id
+				world.battle.eliminate(id, mate)
+				var at: Vector3 = world.player_state[id].pos
+				world.player_state[mate].pos = at + Vector3(1.0, 0, 0)
+				if world.bots.roster.has(mate):
+					world.bots.roster[mate].pos = at + Vector3(1.0, 0, 0)
+				print("REVIVE: downed %s, stood %s beside it at %v" % [id, mate, at])
+				_rev_started = true
+				return
+		print("REVIVE: nobody had a team-mate")
+		return
+	var body: Vector3 = world.player_state.get(_rev_who, {}).get("pos", Vector3.INF)
+	var team := int(Game.roster.get(_rev_who, {}).get("team", -1))
+	var near := 0
+	var nearest := 999.0
+	for other: String in world.match_alive.keys():
+		if other == _rev_who or world.downed_ids.has(other):
+			continue
+		if int(Game.roster.get(other, {}).get("team", -2)) != team:
+			continue
+		var d: float = Vector3(world.player_state.get(other, {}).get(
+			"pos", Vector3.INF)).distance_to(body)
+		nearest = minf(nearest, d)
+		if ReviveReach.in_reach(body, Vector3(
+				world.player_state.get(other, {}).get("pos", Vector3.INF))):
+			near += 1
+	print("REVIVE: downed=%s progress=%.2f body=%v mates_in_range=%d nearest=%.2f out=%s"
+		% [world.downed_ids.has(_rev_who),
+			float(world.battle.revive_progress.get(_rev_who, -1.0)), body, near,
+			nearest, world.out_ids.has(_rev_who)])
+
 func tick(delta: float) -> void:
+	tick_revive(delta)
 	tick_resize(delta)
 	tick_kick(delta)
 	tick_win(delta)

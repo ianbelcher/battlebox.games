@@ -20,7 +20,11 @@ extends Node
 ## drawn locally, and the player walked through where the wall had been.
 
 const WALL_AT := 3             ## blocks ahead of the start
-const SETTLE_SECONDS := 8.0
+## Generous, because a headless run is time-dilated: physics steps are
+## capped per frame, so a climb at one block a second takes far longer
+## than a wall-clock second per block. An eight-second window failed
+## climbs that were working perfectly and still going up.
+const SETTLE_SECONDS := 45.0
 const START_AFTER := 6.0
 
 var _t := 0.0

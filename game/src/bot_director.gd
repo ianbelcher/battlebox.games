@@ -934,6 +934,10 @@ const BOT_FLY_HEIGHT := 7.0        ## cruise, in blocks above local ground
 const BOT_FLY_SPEED := 5.0         ## how fast it climbs and descends
 const BOT_FLY_CLIMB := 5.0         ## goal this far above ground: fly to it
 const BOT_FLY_LAND_RANGE := 3.5    ## this close, flat: come down and finish on foot
+## The highest a flying computer player will ever be above the ground it
+## is over. Nothing worth reaching is further up than this, and without a
+## ceiling two of them chasing each other climb forever.
+const BOT_FLY_CEILING := 20.0
 
 ## Squad bookkeeping, by "team:squad". `_squad_since` is when a squad
 ## started waiting at its rally; `_squad_push_until` is how long it stays
@@ -1209,7 +1213,14 @@ func _bot_cruise_y(id: String, bot: Dictionary, flat: Vector2,
 	# High enough to clear what stopped it, and high enough to be ABOVE
 	# the goal rather than level with it — coming down onto a mound works,
 	# flying into its side does not.
+	# CEILINGED, and it has to be. `goal.y + 2` is there so a bot comes
+	# down ONTO a mound rather than flying into its side — but when the
+	# goal is another airborne player it becomes a ladder: A climbs to two
+	# above B, B climbs to two above A, and the pair of them ratchet into
+	# the sky for the rest of the round. Watched it happen: 50, then 62,
+	# then 75 blocks up, in three-second samples.
 	var cruise := maxf(floor_y + BOT_FLY_HEIGHT, goal.y + 2.0)
+	cruise = minf(cruise, floor_y + BOT_FLY_CEILING)
 	return move_toward(pos.y, cruise, BOT_FLY_SPEED * delta)
 
 ## Drive the tunnel forward one bite, on its own cooldown.
@@ -1321,7 +1332,7 @@ func _bot_holding_a_revive(id: String, pos: Vector3) -> bool:
 		var st: Dictionary = world.player_state.get(rid, {})
 		if st.is_empty():
 			continue
-		if pos.distance_to(st.pos) < world.REVIVE_RADIUS + 0.5:
+		if ReviveReach.in_reach(Vector3(st.pos), pos):
 			return true
 	return false
 

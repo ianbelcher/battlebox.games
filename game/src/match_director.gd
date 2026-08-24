@@ -648,7 +648,8 @@ func tick_revives(delta: float) -> void:
 			if other == id or world.downed_ids.has(other):
 				continue
 			if int(Game.roster.get(other, {}).get("team", -2)) == team \
-					and Vector3(world.player_state.get(other, {}).get("pos", Vector3.INF)).distance_to(pos) < world.REVIVE_RADIUS:
+					and ReviveReach.in_reach(pos, Vector3(
+						world.player_state.get(other, {}).get("pos", Vector3.INF))):
 				mate_close = true
 		if mate_close:
 			# REVIVE_SECONDS of standing there, measured in real time. This

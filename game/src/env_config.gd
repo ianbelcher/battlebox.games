@@ -66,6 +66,7 @@ const KNOWN := {
 	"WORLD_SELFCHECK_REPEAT": "1 keeps reporting and does not quit (servers)",
 	"WORLD_SHOTS": "directory; save a screenshot every 1.5s",
 	"WORLD_SHOWCASE": "1 plants a strip of every foliage block near spawn",
+	"WORLD_REVIVE_TEST": "1 downs a computer player, stands a team-mate on it and reports the pick-up",
 	"WORLD_RESIZE_TEST": "resize the world to this mid-session, then check nobody fell off",
 	"WORLD_WIN_TEST": "hand out knockouts and end the round for this team",
 	"WORLD_KICK_TEST": "1 kicks a player and checks they are forgotten",

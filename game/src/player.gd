@@ -150,8 +150,7 @@ func revive_locked() -> bool:
 			continue
 		for child in world.players.get_children():
 			if child is Player and child.player_id == rid \
-					and child.position.distance_to(position) \
-						< WorldNode.REVIVE_RADIUS + 0.5:
+					and ReviveReach.in_reach(child.position, position):
 				return true
 	return false
 
@@ -412,22 +411,46 @@ func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 ## material leaves somebody's shirt showing through.
 static var _knocked_out_skin: StandardMaterial3D = null
 
-static func knocked_out_skin() -> StandardMaterial3D:
-	if _knocked_out_skin == null:
-		_knocked_out_skin = StandardMaterial3D.new()
-		_knocked_out_skin.albedo_color = Color(0.66, 0.68, 0.74, 0.42)
-		_knocked_out_skin.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_knocked_out_skin.roughness = 1.0
-		# Barely lit: a ghost should not pick up the sunset like everyone
-		# else, or it goes orange and stops reading as grey at all.
-		_knocked_out_skin.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-		_knocked_out_skin.emission_enabled = true
-		_knocked_out_skin.emission = Color(0.30, 0.32, 0.36)
-		_knocked_out_skin.emission_energy_multiplier = 0.5
-	return _knocked_out_skin
+## STILL FAINTLY THEIRS. A ghost with no colour at all says "somebody is
+## out" and not "one of OURS is out", and on a five-team map that is the
+## next thing you want to know — whether the grey shape floating over the
+## fight is a team-mate to go and pick up or an enemy to ignore.
+##
+## A whisper of it, not a shirt. The point of the grey is still that they
+## read as out at a glance; if the team colour were strong enough to
+## compete with a living player's, that would be undone.
+const KNOCKED_OUT_TINT := 0.30
+
+## Cached per team, because every part of every downed player shares one
+## material and there are only ever a couple of dozen teams.
+static var _knocked_out_skins: Dictionary = {}
+
+static func knocked_out_skin(team := -1) -> StandardMaterial3D:
+	if _knocked_out_skins.has(team):
+		return _knocked_out_skins[team]
+	var grey := Color(0.66, 0.68, 0.74)
+	var tinted := grey
+	if team >= 0:
+		var theirs: Color = WorldNode.TEAM_COLORS[team % WorldNode.TEAM_COLORS.size()]
+		tinted = grey.lerp(theirs, KNOCKED_OUT_TINT)
+	var skin := StandardMaterial3D.new()
+	skin.albedo_color = Color(tinted.r, tinted.g, tinted.b, 0.42)
+	skin.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	skin.roughness = 1.0
+	# Barely lit: a ghost should not pick up the sunset like everyone
+	# else, or it goes orange and stops reading as grey at all.
+	skin.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	skin.emission_enabled = true
+	# The glow carries the tint too, so it still reads at night, when the
+	# albedo is doing almost nothing.
+	skin.emission = Color(tinted.r, tinted.g, tinted.b) * 0.46
+	skin.emission_energy_multiplier = 0.5
+	_knocked_out_skins[team] = skin
+	return skin
 
 func set_knocked_out_look(out_of_it: bool) -> void:
-	var skin := knocked_out_skin() if out_of_it else null
+	var team := int(Game.roster.get(player_id, {}).get("team", -1))
+	var skin := knocked_out_skin(team) if out_of_it else null
 	for node in _avatar.find_children("*", "MeshInstance3D", true, false):
 		var mesh := node as MeshInstance3D
 		mesh.material_override = skin
@@ -661,61 +684,6 @@ func _solid_at(pos: Vector3) -> bool:
 	return Blocks.is_solid(_chunks().get_block(Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))))
 
 ## Any solid block overlapping the AABB at a candidate position?
-## GETTING OVER THE TOP, which climbing alone cannot do. Returns the spot
-## to stand on, or INF when there is not one.
-##
-## The climb deadlocks one block short of every wall, and it is worth
-## being precise about why, because it looks like the impulse being too
-## weak and is not.
-##
-## Pressed against a wall your box overlaps the wall's column. Moving UP
-## is refused while any part of that box is level with a solid cell — and
-## the last such cell is exactly the block you are trying to get on top
-## of. Moving FORWARD is refused until you are above it. Neither sweep can
-## finish, every frame ends where it started, and what a player sees is a
-## buzz an inch below the lip. Measured: 4.97 blocks up a six-block wall,
-## for as long as you care to hold the stick.
-##
-## The way out is the move neither sweep makes on its own — up AND forward
-## together, onto the ledge. So when there is somewhere to stand just
-## above and just ahead, that is where you go.
-##
-## A clear space alone is not enough: it would also match a HOLE in the
-## wall and post you through it. There has to be something under your feet
-## when you land — clear where you are going, solid immediately below.
-## That is a ledge, and nothing else is.
-const MANTLE_REACH := 0.85
-
-func _mantle_spot(from: Vector3, dir: Vector3) -> Vector3:
-	var ahead := Vector3(dir.x, 0.0, dir.z)
-	if ahead.length_squared() < 0.0001:
-		return Vector3.INF
-	ahead = ahead.normalized() * MANTLE_REACH
-	# One block up, then two. A climb arrives just under the lip, but a
-	# frame can carry you past it, and being half a block high should not
-	# mean starting the wall again.
-	for lift: float in [1.05, 2.05]:
-		var ledge := from + ahead + Vector3(0, lift, 0)
-		# ON the block, not hovering somewhere above it. Snapping to the
-		# cell boundary is also what makes the test below mean anything.
-		ledge.y = floorf(ledge.y)
-		if _collides(ledge):
-			continue
-		# SOMETHING UNDER YOUR FEET — the single cell below them.
-		#
-		# This started out as `_collides(ledge - 0.15)`, which reads like
-		# the same idea and is not: a player box is 1.8 tall, so dropping
-		# it by a sixth of a block still samples the cells it was already
-		# in and never reaches the ground. It answered "nothing there" on
-		# top of a perfectly solid wall, so the mantle never fired and the
-		# climb went on buzzing under the lip exactly as before.
-		var under := Vector3i(floori(ledge.x), floori(ledge.y) - 1,
-			floori(ledge.z))
-		if not Blocks.is_solid(_chunks().get_block(under)):
-			continue          # a gap, not a top
-		return ledge
-	return Vector3.INF
-
 ## The deck we are standing on or about to land on, or INF for none.
 func _deck_floor(from: Vector3, to: Vector3) -> float:
 	if world == null or world.vehicle_view == null:
@@ -1024,9 +992,6 @@ func _local_move(delta: float) -> void:
 	# Axis-separated sweep against the voxel grid.
 	var next := position
 	var blocked_h := false
-	## Set for the one frame a climb finishes by stepping onto the top.
-	## The sweeps below must not undo the spot it chose — see _mantle_spot.
-	var mantled := false
 	if dropping:
 		# Everyone glides down at the SAME gentle -3 until touching down —
 		# enforced after every glide/wings branch so nothing overrides it.
@@ -1086,52 +1051,34 @@ func _local_move(delta: float) -> void:
 	next.z = clampf(next.z, -half, half)
 	# Kid-friendly auto-hop: walking into a single block steps you up it —
 	# and swimming into a bank hops you out of the water.
-	if blocked_h and dir.length_squared() > 0.01:
+	var pushing := dir.length_squared() > 0.01
+	var room_up := false
+	if blocked_h and pushing:
 		var up_attempt := next + Vector3(velocity.x * delta, 1.05, velocity.z * delta)
-		var can_step := not _collides(up_attempt) \
+		room_up = not _collides(up_attempt) \
 			and not _collides(next + Vector3(0, 1.05, 0))
-		if can_step and (on_floor or in_water):
-			# One block up: hop it, the way you always could.
+	match ClimbRule.decide(blocked_h, pushing, room_up, on_floor, in_water,
+			_climbing, downed, fly_mode):
+		ClimbRule.STEP_UP:
 			velocity.y = 7.2
 			_climbing = false
-		elif not can_step and not downed and not fly_mode and not in_water:
-			# Taller than a step, and you are still pushing into it: climb.
-			# Deliberately not gated on on_floor — the second block of a
-			# climb is not on the floor, and stopping there is the hole a
-			# child could not get out of.
+		ClimbRule.CLIMB:
 			velocity.y = maxf(velocity.y, WALL_CLIMB_SPEED)
 			on_floor = false
 			anim = Anim.FLY
 			_climbing = true
-			var ledge := _mantle_spot(next, dir)
-			if ledge != Vector3.INF:
-				next = ledge
-				velocity = Vector3.ZERO
-				on_floor = true
-				_climbing = false
-				mantled = true
-	elif _climbing:
-		# THE TOP. Nothing is in the way any more and you are still walking
-		# forward, so the wall has been climbed — take the last step onto
-		# it rather than letting go one block short.
-		#
-		# Everything needed is already true here: the horizontal sweep has
-		# been allowed through this frame, so you are moving over the edge
-		# already, and this only stops you sagging back off it. Setting the
-		# velocity here rather than next frame matters — the vertical sweep
-		# is a few lines below, so the hop lands on the frame that earned
-		# it, with nothing in between for gravity to undo.
-		_climbing = false
-		if dir.length_squared() > 0.01 and not downed and not fly_mode:
+		ClimbRule.TOP_OUT:
+			_climbing = false
 			velocity.y = maxf(velocity.y, WALL_TOP_HOP)
 			on_floor = false
 			anim = Anim.FLY
+		_:
+			if not blocked_h:
+				_climbing = false
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
 	var deck_y := _deck_floor(next, v_attempt)
-	if mantled:
-		pass          # already standing on the ledge; nothing left to sweep
-	elif _knockout_rise > 0.0 or _lift_to < INF:
+	if _knockout_rise > 0.0 or _lift_to < INF:
 		# Straight through the roof. Somebody knocked out inside their own
 		# fort would otherwise be pinned against its ceiling for the whole
 		# three seconds, which is the opposite of a graceful exit — and

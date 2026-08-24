@@ -28,6 +28,9 @@ var _death_flash: ColorRect
 ## The colour draining out of the screen while you are out of the fight.
 var _grey: ColorRect
 var _grey_amount := 0.0
+## This cell's camera, so a point in the world can be turned into a point
+## on this screen. Handed over by SplitScreen.
+var cam: Camera3D = null
 var _death_t := 0.0
 var _was_down := false
 var _was_out := false
@@ -1807,7 +1810,7 @@ func _update_revive_ring(player: Player) -> void:
 					mate = child
 					break
 			if mate == null \
-					or mate.position.distance_to(player.position) > WorldNode.REVIVE_RADIUS + 1.0:
+					or not ReviveReach.in_reach(mate.position, player.position):
 				continue
 			var frac := float(world.revive_progress[rid])
 			if frac > best:
@@ -2611,7 +2614,8 @@ func _refresh_battle_prompts(player: Player) -> void:
 						if gap < 9.0 and gap < mate_near:
 							mate_near = gap
 							mate_down = str(Game.roster.get(down_id, {}).get("name", "?"))
-							mate_reach = gap < WorldNode.REVIVE_RADIUS
+							mate_reach = ReviveReach.in_reach(
+								child.position, player.position)
 		if not mate_down.is_empty():
 			_revive_hint.visible = true
 			_revive_hint.text = ("⛑  Hold still — picking %s up!" % mate_down) \
@@ -2726,6 +2730,49 @@ func _drain_colour(out_of_it: bool, delta: float) -> void:
 	_grey_amount = move_toward(_grey_amount, want, delta * 1.6)
 	_grey.visible = _grey_amount > 0.001
 	(_grey.material as ShaderMaterial).set_shader_parameter("amount", _grey_amount)
+	_keep_home_in_colour()
+
+## YOUR OWN BASE KEEPS ITS COLOUR while the rest of the world loses it.
+##
+## Being knocked out in capture the flag takes away the one thing you then
+## most need: which of five identical grey mounds is yours to get back to.
+## The team colours were the only way to tell them apart and the drain
+## removes exactly those. So the patch of screen your own base is standing
+## in stays in colour, and the drain becomes a signpost rather than only a
+## mood.
+##
+## Off screen, behind you, or not playing capture the flag: no patch. A
+## circle of colour in the corner pointing at nothing is worse than none.
+func _keep_home_in_colour() -> void:
+	var mat := _grey.material as ShaderMaterial
+	var radius := 0.0
+	var at := Vector2(-1.0, -1.0)
+	if cam != null and world != null and str(world.client_mode) == "ctf" \
+			and _grey_amount > 0.001:
+		var me := Game.player_id(multiplayer.get_unique_id(), slot)
+		var mine := int(Game.roster.get(me, {}).get("team", -1))
+		for entry: Array in world.flags:
+			if int(entry[0]) != mine:
+				continue
+			var home: Vector3 = entry[1]
+			# is_position_behind covers the case that matters: standing
+			# with your back to your own base, where unproject_position
+			# happily returns a point on screen and it is the wrong one.
+			if cam.is_position_behind(home):
+				break
+			var screen := cam.unproject_position(home + Vector3(0, 2.0, 0))
+			var view := cam.get_viewport().get_visible_rect().size
+			if view.x <= 0.0 or view.y <= 0.0:
+				break
+			at = Vector2(screen.x / view.x, screen.y / view.y)
+			if at.x < -0.2 or at.x > 1.2 or at.y < -0.2 or at.y > 1.2:
+				at = Vector2(-1.0, -1.0)
+				break
+			radius = 0.16
+			mat.set_shader_parameter("aspect", view.x / view.y)
+			break
+	mat.set_shader_parameter("home_at", at)
+	mat.set_shader_parameter("home_radius", radius)
 
 ## The team panel, the scoreline, the low-health vignette and the
 ## damage flash.

@@ -55,6 +55,7 @@ func _ready() -> void:
 		"ribbit": _ribbit(),
 		"whoosh": _notes([[320, 0.05], [480, 0.05], [720, 0.06], [1080, 0.1]], 0.4, "soft"),
 		"boom": _boom(),
+		"rumble": _rumble(),
 		"note": _notes([[523, 0.12]], 0.55),
 		"warp": _notes([[880, 0.06], [660, 0.06], [440, 0.07], [880, 0.0], [1320, 0.12]], 0.5, "soft"),
 		"cheer": _cheer(),
@@ -135,19 +136,78 @@ func _thoomp() -> AudioStreamWAV:
 		buf[i] = (sin(phase) * 0.9 + smooth * 0.35) * env
 	return _to_wav(buf, 0.7)
 
+## AN EXPLOSION WITH SOME WEIGHT UNDER IT.
+##
+## This was a 60 Hz thump and a noise crack, both gone in under a second,
+## and it sounded thin — which it was: there was nothing below 60 Hz in
+## it at all, so it had no bottom on any speaker capable of one.
+##
+## Three layers now, and the SUB is the new part: a slow sine falling from
+## 46 Hz to 26 Hz over more than a second, with a much longer decay than
+## the crack above it. That is the difference between a bang and a bang
+## you feel — the crack tells you what happened, the tail tells you how
+## big it was.
+##
+## The mix matters more than the levels do, because _to_wav normalises to
+## the peak: making the sub louder does not make the sound louder, it
+## makes the crack quieter. These weights are the balance, not the volume.
 func _boom() -> AudioStreamWAV:
-	var seconds := 0.9
+	var seconds := 1.7
 	var count := int(seconds * RATE)
 	var buf := PackedFloat32Array()
 	buf.resize(count)
 	var smooth := 0.0
+	var sub_phase := 0.0
 	for i in count:
 		var t := float(i) / RATE
-		var env := exp(-t * 4.5) * minf(1.0, i / (0.002 * RATE))
+		var attack := minf(1.0, i / (0.002 * RATE))
+		# The crack, as it always was: quick and bright.
+		var crack := exp(-t * 4.5) * attack
 		smooth = smooth * 0.72 + (randf() * 2.0 - 1.0) * 0.28
-		var rumble := sin(TAU * 60.0 * t * (1.0 + 0.8 * exp(-t * 8.0)))
-		buf[i] = (rumble * 0.8 + smooth * 0.5) * env
-	return _to_wav(buf, 0.75)
+		var body := sin(TAU * 60.0 * t * (1.0 + 0.8 * exp(-t * 8.0)))
+		# The sub, falling and slow to go.
+		var sub_hz := lerpf(46.0, 26.0, clampf(t / 1.2, 0.0, 1.0))
+		sub_phase += TAU * sub_hz / RATE
+		var sub_env := exp(-t * 1.5) * minf(1.0, t / 0.02)
+		buf[i] = (body * 0.55 + smooth * 0.45) * crack \
+			+ sin(sub_phase) * 1.15 * sub_env
+	return _to_wav(buf, 0.8)
+
+## THE KNOCKOUT: a long, deep rumble under everything else.
+##
+## Somebody going out is the biggest thing that happens in a round and it
+## sounded like a bubble popping. This is the floor shaking: a sine
+## sliding from 30 Hz down to 19 Hz over two seconds, slow to arrive and
+## slower to leave.
+##
+## A second harmonic rides along with it because a laptop speaker cannot
+## reproduce 24 Hz at all — without it the sound would simply not exist
+## for half the people playing, while shaking the house for the other
+## half. The harmonic is what they hear; the fundamental is what a proper
+## speaker feels.
+func _rumble() -> AudioStreamWAV:
+	var seconds := 2.2
+	var count := int(seconds * RATE)
+	var buf := PackedFloat32Array()
+	buf.resize(count)
+	var phase := 0.0
+	var harm := 0.0
+	for i in count:
+		var t := float(i) / RATE
+		var hz := lerpf(30.0, 19.0, clampf(t / 1.8, 0.0, 1.0))
+		phase += TAU * hz / RATE
+		harm += TAU * hz * 2.0 / RATE
+		# Slow in, so it swells rather than clicks; slow out, so it hangs
+		# over the fight for a moment afterwards.
+		var env := minf(1.0, t / 0.09) * exp(-maxf(0.0, t - 0.25) * 1.35)
+		# Harmonics, and they are not decoration. Measured, the sub alone
+		# put 100% of its energy below 120 Hz — which a laptop speaker
+		# cannot reproduce at all, so half the people playing would have
+		# heard literally nothing. The upper partials are what THEY hear;
+		# the fundamental is what a proper speaker lets you feel.
+		buf[i] = (sin(phase) * 1.0 + sin(harm) * 0.35
+			+ sin(phase * 4.0) * 0.16 + sin(phase * 6.0) * 0.07) * env
+	return _to_wav(buf, 0.85)
 
 ## Crowd cheer: a noise swell plus a few descending whoops and claps.
 func _cheer() -> AudioStreamWAV:
