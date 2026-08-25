@@ -32,9 +32,16 @@ func test_sharing_never_pays_more_for_more_survivors() -> void:
 
 # ---- how many defend -------------------------------------------------
 
-func test_most_of_a_team_stays_home() -> void:
-	equal(HoldoutRules.keepers(9), 6, "nine players, six of them defending")
-	equal(HoldoutRules.keepers(12), 8, "twelve players, eight defending")
+## HALF STAYS HOME. It used to be two thirds, which is what was asked for
+## — and on the field two thirds is not a defensive game, it is no game.
+## A team of five put three on the wall and sent two, and two attackers
+## against three defenders behind a wall never take anything, so nothing
+## ever happened and every side sat on its own flag for the whole round.
+## Measured: seventeen of twenty-six players within fourteen blocks of
+## their own base, four out in the field, no flags taken.
+func test_half_a_team_stays_home() -> void:
+	equal(HoldoutRules.keepers(9), 4, "nine players, four of them defending")
+	equal(HoldoutRules.keepers(12), 6, "twelve players, half defending")
 
 ## THE RULE THAT KEEPS IT A GAME. One attacker against a dug-in base is a
 ## delivery, not a raid — five teams played four minutes without a single
@@ -65,10 +72,14 @@ func test_a_pair_splits_one_and_one() -> void:
 	# players, one defending and one attacking IS the defensive split.
 	equal(HoldoutRules.keepers(2), 1, "one minds the flag, one goes out")
 
-func test_defending_is_the_majority_once_there_is_a_team() -> void:
-	for size in range(5, 25):
-		check(HoldoutRules.keepers(size) * 2 > size,
-			"a team of %d keeps more than half at home" % size)
+## Neither side of the split may be squeezed out. A guard that is nearly
+## everybody is a stalemate; a guard that is nearly nobody is capture the
+## flag with extra steps.
+func test_both_jobs_get_a_real_share() -> void:
+	for size in range(4, 25):
+		var home := HoldoutRules.keepers(size)
+		check(home * 3 >= size, "a team of %d keeps a real guard" % size)
+		check((size - home) * 3 >= size, "a team of %d sends a real raid" % size)
 
 ## A LONE PLAYER GOES OUT. Keeping one back is keeping the whole team
 ## back: five one-player teams all minding their own base is five bases
@@ -125,8 +136,8 @@ func test_the_push_is_on_at_the_whistle() -> void:
 func test_a_long_round_does_not_start_by_pushing() -> void:
 	# Five minutes into an hour: neither nearly over nor yet a stalemate.
 	var hour := 3600.0
-	check(not HoldoutRules.pushing(hour - 300.0, hour),
-		"five minutes into an hour, the guard is still up")
+	check(not HoldoutRules.pushing(hour - 120.0, hour),
+		"two minutes into an hour, the guard is still up")
 
 func test_a_short_round_pushes_late_not_immediately() -> void:
 	var two := 120.0

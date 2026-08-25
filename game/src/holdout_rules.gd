@@ -78,12 +78,22 @@ static func share(survivors: int) -> int:
 ## walks towards: a measured round of it took not one flag, ended with all
 ## five holding, and paid every one of them nothing. Guarding a base that
 ## is not under threat is not a strategy, it is a way of not playing.
+## HALF, NOT TWO THIRDS. Two thirds was asked for — this mode is about
+## holding a base — and measured on the field it is not a defensive game,
+## it is no game: a team of five put three on the wall and sent two, and
+## two attackers against three defenders behind a wall with a roof on it
+## never take anything. Nothing then happens for ten minutes, every side
+## sits on its own flag, and it reads exactly as "all of the bots just
+## huddle around the flag and don't do anything" — which is what it is.
+##
+## Half still leaves a real guard, and it is still far more defensive than
+## capture the flag, which posts at most two keepers however big the team.
 static func keepers(team_size: int) -> int:
 	if team_size <= 1:
 		return 0
 	if team_size == 2:
 		return 1          # one minds the flag, one goes out
-	return team_size - maxi(2, team_size / 3)
+	return clampi(team_size / 2, 1, team_size - 2)
 
 ## The last stretch of a round, when the guard thins out — a fifth of it,
 ## but never more than two minutes.
@@ -100,7 +110,10 @@ const PUSH_SECONDS := 120.0
 ## long opens up anyway. Two dug-in sides will not finish each other off,
 ## and on an unlimited round there is no whistle to make them: without
 ## this, "unlimited" means "forever" rather than "as long as it takes".
-const STALE_SECONDS := 600.0
+## Four minutes, not ten. Ten was a whole round of the default length, so
+## on any round of ten minutes or less the stalemate rule never fired at
+## all and it only ever did anything on an unlimited one.
+const STALE_SECONDS := 240.0
 
 ## Is it time for the guard to go out?
 static func pushing(seconds_left: float, seconds_total: float) -> bool:

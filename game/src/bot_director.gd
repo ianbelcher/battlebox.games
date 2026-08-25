@@ -403,16 +403,13 @@ func _bot_cover_goal(id: String, pos: Vector3) -> Vector3:
 ## One keeper per three players, capped at two — below three nobody stays
 ## home, because a pair with one of them sat at the flag is one attacker,
 ## and watching your own side not attack was the original complaint.
+## All of this is arithmetic on seat numbers and it lives in SiegeRoles,
+## where it can be asked "does a real attack ever leave the base" without
+## running a round and watching. That question is not rhetorical: it went
+## wrong, and no test here could see it.
 func _bot_ctf_keepers(team: int) -> int:
-	var size := world.ctf.seats_of(team).size()
-	# LAST FLAG STANDING IS A SIEGE. Losing your flag ends your round, so
-	# a team that empties out to go raiding has already lost — nearly all
-	# of it stays home and builds. See HoldoutRules.keepers.
-	# …until the clock is nearly gone, when half the guard goes looking for
-	# a flag instead. See HoldoutRules.keepers_left.
-	if world.ctf.elimination():
-		return HoldoutRules.keepers_left(size, world.battle.holdout_pushing())
-	return clampi(size / 3, 0, 2)
+	return SiegeRoles.keepers(world.ctf.seats_of(team).size(),
+		world.ctf.elimination(), world.battle.holdout_pushing())
 
 ## How far from its own flag a keeper will go to pick somebody up.
 const KEEPER_RESCUE_RANGE := 14.0
@@ -428,8 +425,8 @@ func _may_leave_post(id: String, body: Vector3) -> bool:
 	return home != Vector3.INF and home.distance_to(body) <= KEEPER_RESCUE_RANGE
 
 func _bot_ctf_defends(id: String, team: int) -> bool:
-	var seat := world.ctf.seats_of(team).find(id)
-	return seat >= 0 and seat < _bot_ctf_keepers(team)
+	return SiegeRoles.job(world.ctf.seats_of(team).find(id),
+		_bot_ctf_keepers(team)) == SiegeRoles.DEFEND
 
 ## WHICH ENEMY FLAG THIS ONE IS GOING FOR.
 ##
@@ -462,13 +459,9 @@ func _bot_ctf_target_team(id: String, team: int) -> int:
 		if bool(world.ctf._flags[other_team].get("out", false)):
 			continue
 		standing.append(other_team)
-	if standing.is_empty():
-		return -1
 	standing.sort()
-	# Which raider am I? Seats below the keeper count are minding the shop.
-	var seat := world.ctf.seats_of(team).find(id)
-	var raider := maxi(seat - _bot_ctf_keepers(team), 0)
-	return int(standing[raider % standing.size()])
+	return SiegeRoles.target(world.ctf.seats_of(team).find(id),
+		_bot_ctf_keepers(team), standing)
 
 ## WHAT A COMPUTER PLAYER IS ACTUALLY TRYING TO DO IN CAPTURE THE FLAG.
 ##
@@ -572,7 +565,7 @@ func _bot_assault_goal(id: String, team: int, target: Vector3) -> Vector3:
 	var seat := seats.find(id)
 	var keepers := _bot_ctf_keepers(team)
 	# Which attacker am I, counting past the ones minding the shop.
-	var index := maxi(0, seat - keepers)
+	var index := SiegeRoles.raider_index(seat, keepers)
 	var attackers := maxi(1, seats.size() - keepers)
 	var squad := BotSquads.squad_of(index)
 	var squads := BotSquads.squad_count(attackers)
@@ -611,7 +604,7 @@ func _bot_assault_goal(id: String, team: int, target: Vector3) -> Vector3:
 	for other_v: Variant in seats:
 		var other := str(other_v)
 		var other_seat := seats.find(other)
-		if BotSquads.squad_of(maxi(0, other_seat - keepers)) != squad:
+		if BotSquads.squad_of(SiegeRoles.raider_index(other_seat, keepers)) != squad:
 			continue
 		size += 1
 		var st: Dictionary = world.player_state.get(other, {})
@@ -1333,6 +1326,15 @@ func _roof_over(team: int, home: Vector3) -> void:
 		var dx := randi() % (CTF_ROOF_RADIUS * 2 + 1) - CTF_ROOF_RADIUS
 		var dz := randi() % (CTF_ROOF_RADIUS * 2 + 1) - CTF_ROOF_RADIUS
 		if Vector2(dx, dz).length() > float(CTF_ROOF_RADIUS):
+			continue
+		# A LATTICE, NOT A LID. Every cell of the disc got filled, which is
+		# a sealed roof over the objective — and a base that cannot be
+		# broken into is not a hard game, it is no game: nothing was ever
+		# taken, so no side ever had a reason to leave its own flag, and
+		# every team sat on it for ten minutes. Half the cells, in a fixed
+		# checker, so there are always holes to drop through and it still
+		# reads as a roof from underneath.
+		if (posmod(dx, 2) == 0) != (posmod(dz, 2) == 0):
 			continue
 		var rx := floori(home.x) + dx
 		var rz := floori(home.z) + dz

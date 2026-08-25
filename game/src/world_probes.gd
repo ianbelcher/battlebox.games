@@ -22,6 +22,8 @@ extends Node
 ##   WORLD_ROOF_TEST=1          count what the defenders actually built
 ##   WORLD_HOLDOUT_SET=<mins>   change the round length through the real
 ##                              setter, and check the clock follows
+##   WORLD_HUDDLE_TEST=1        count who is at home and who is out in the
+##                              field, which is "the bots just huddle"
 
 ## The world being probed.
 var world: WorldNode = null
@@ -290,6 +292,7 @@ var _cap_hold := 0.0
 var _cap_done := false
 var _cap_target := -1
 var _cap_who := ""
+var _cap_took := 0
 
 func tick_capture(delta: float) -> void:
 	if OS.get_environment("WORLD_CAPTURE_TEST") != "1" or _cap_done or world == null:
@@ -320,11 +323,25 @@ func tick_capture(delta: float) -> void:
 		var flag: Dictionary = world.ctf._flags[_cap_target]
 		print("CAPTURE: standing %s (team %d) on team %d's flag at %v"
 			% [_cap_who, mine, _cap_target, flag.pos])
+		_cap_took = int(world.ctf_caps.get(mine, 0))
 		print("CAPTURE: took=%d lost=%d before"
-			% [int(world.ctf_caps.get(mine, 0)), int(world.ctf_lost.get(_cap_target, 0))])
+			% [_cap_took, int(world.ctf_lost.get(_cap_target, 0))])
+	# TOOK IT, or somebody else did? A flag whose position has gone to
+	# infinity has been captured — and in last flag standing that is what a
+	# SUCCESSFUL touch looks like, so the old "the flag went while we
+	# walked in" was reporting the pass as though it were a miss. Ask the
+	# scoreline, which knows whose it was.
+	var mine_now := int(Game.roster.get(_cap_who, {}).get("team", -1))
+	if int(world.ctf_caps.get(mine_now, 0)) > _cap_took:
+		print("CAPTURE: ok — touching it took it (took=%d, team %d out=%s)"
+			% [int(world.ctf_caps.get(mine_now, 0)), _cap_target,
+				str(world.ctf.team_is_out(_cap_target))])
+		_cap_done = true
+		return
 	var at: Vector3 = world.ctf._flags[_cap_target].get("pos", Vector3.INF)
 	if at == Vector3.INF:
-		print("CAPTURE: the flag went while we walked in"); _cap_done = true
+		print("CAPTURE: somebody else took it first — inconclusive")
+		_cap_done = true
 		return
 	world.player_state[_cap_who].pos = at
 	_cap_hold += delta
@@ -332,8 +349,10 @@ func tick_capture(delta: float) -> void:
 		return
 	_cap_done = true
 	var mine2 := int(Game.roster.get(_cap_who, {}).get("team", -1))
-	print("CAPTURE: took=%d lost=%d after | team %d out=%s"
-		% [int(world.ctf_caps.get(mine2, 0)), int(world.ctf_lost.get(_cap_target, 0)),
+	var got := int(world.ctf_caps.get(mine2, 0))
+	print("CAPTURE: %s — took=%d (was %d) lost=%d | team %d out=%s"
+		% ["ok" if got > _cap_took else "FAIL standing on it did nothing",
+			got, _cap_took, int(world.ctf_lost.get(_cap_target, 0)),
 			_cap_target, str(world.ctf.team_is_out(_cap_target))])
 
 ## WORLD_ROUNDCLOCK_TEST=1: does the round clock run at ONE second per
@@ -438,7 +457,46 @@ func tick_length(delta: float) -> void:
 	print("HOLDOUT: length set to %d min (world says %.0f)"
 		% [want.to_int(), world.holdout_minutes])
 
+## WORLD_HUDDLE_TEST=1: are they playing, or standing on their own flag?
+##
+## "All of the bots now just huddle around the flag and don't do anything"
+## is a shape nothing here can see: the round runs, the clock ticks, no
+## error appears, and every test passes while nobody attacks anything. So
+## count it — per team, how many are near their own base and how many are
+## out in the field where an attacker would be.
+var _hud_t := 0.0
+var _hud_said := 0.0
+
+func tick_huddle(delta: float) -> void:
+	if OS.get_environment("WORLD_HUDDLE_TEST") != "1" or world == null:
+		return
+	if world.match_phase != "BATTLE" or world.ctf._flags.is_empty():
+		return
+	_hud_t += delta
+	if _hud_t - _hud_said < 20.0:
+		return
+	_hud_said = _hud_t
+	var home_n := 0
+	var out_n := 0
+	var away_n := 0
+	for id: String in world.match_alive.keys():
+		var team := int(Game.roster.get(id, {}).get("team", -1))
+		var mine: Vector3 = world.ctf._flags.get(team, {}).get("home", Vector3.INF)
+		var at: Vector3 = world.player_state.get(id, {}).get("pos", Vector3.INF)
+		if mine == Vector3.INF or at == Vector3.INF:
+			continue
+		var d := Vector2(at.x - mine.x, at.z - mine.z).length()
+		if d < 14.0:
+			home_n += 1
+		elif d > 40.0:
+			away_n += 1
+		else:
+			out_n += 1
+	print("HUDDLE: t=%.0fs at their own base=%d, in between=%d, out in the field=%d"
+		% [_hud_t, home_n, out_n, away_n])
+
 func tick(delta: float) -> void:
+	tick_huddle(delta)
 	tick_length(delta)
 	tick_roof(delta)
 	tick_roundclock(delta)
