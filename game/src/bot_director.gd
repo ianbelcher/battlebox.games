@@ -411,7 +411,7 @@ func _bot_ctf_keepers(team: int) -> int:
 	# …until the clock is nearly gone, when half the guard goes looking for
 	# a flag instead. See HoldoutRules.keepers_left.
 	if world.ctf.elimination():
-		return HoldoutRules.keepers_left(size, world.battle.holdout_fraction())
+		return HoldoutRules.keepers_left(size, world.battle.holdout_pushing())
 	return clampi(size / 3, 0, 2)
 
 ## How far from its own flag a keeper will go to pick somebody up.
@@ -1328,7 +1328,7 @@ const CTF_ROOF_RADIUS := 5
 ## nuisance, never a seal. That matters: a base nobody can get into is a
 ## nil-all draw for the whole round.
 func _roof_over(team: int, home: Vector3) -> void:
-	var y := int(home.y) + world.CTF_POLE_HEIGHT + 1
+	var y := int(home.y) + CtfDirector.CTF_POLE_HEIGHT + 1
 	for _try in 6:
 		var dx := randi() % (CTF_ROOF_RADIUS * 2 + 1) - CTF_ROOF_RADIUS
 		var dz := randi() % (CTF_ROOF_RADIUS * 2 + 1) - CTF_ROOF_RADIUS

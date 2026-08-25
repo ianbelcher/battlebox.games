@@ -66,6 +66,7 @@ var _fight_only: Array = []
 var _ctf_only: Array = []
 var _capture_only: Array = []
 var _holdout_only: Array = []
+var _hold_len_btns: Dictionary = {}
 var _drop_btns: Dictionary = {}
 var _target_btns: Dictionary = {}
 var _revive_btns: Dictionary = {}
@@ -581,9 +582,21 @@ func _build_game_tab() -> void:
 	hold_group.add_theme_constant_override("separation", _s(8))
 	box.add_child(hold_group)
 	_holdout_only.append(hold_group)
+	# ITS OWN CLOCK, the same way battle royale has one. This was a
+	# constant: ten minutes, every round, with no way to say otherwise.
+	var hold_len := _section(hold_group, "How long a round lasts")
+	var hold_len_row := _row(hold_len)
+	for mins_v: int in HoldoutRules.LENGTHS:
+		var hold_mins: int = mins_v
+		var btn6 := _choice(hold_len_row, HoldoutRules.length_label(hold_mins),
+			func() -> void:
+				if Game.world != null:
+					Game.world.sv_ctf_config.rpc_id(1, -1, -1, -1, hold_mins))
+		_min(btn6, 120, 46)
+		_hold_len_btns[hold_mins] = btn6
+
 	var hold_card := _section(hold_group, "Last flag")
-	for line in ["Lose your flag and your team is out. %d minutes."
-				% int(HoldoutRules.ROUND_MINUTES),
+	for line in ["Lose your flag and your team is out.",
 			"Last team holding: %d points." % HoldoutRules.ROUND_POINTS,
 			"Two left: %d each. Three: %d each. Four or more: none."
 				% [HoldoutRules.share(2), HoldoutRules.share(3)]]:
@@ -1342,6 +1355,8 @@ func _refresh(force := false) -> void:
 		_mark(_drop_btns[val], (val == 1) == world.client_drop)
 	for val: int in _revive_btns:
 		_mark(_revive_btns[val], val == world.client_revive_mode)
+	for mins: int in _hold_len_btns:
+		_mark(_hold_len_btns[mins], mins == int(world.client_holdout_minutes))
 	for val: int in _target_btns:
 		_mark(_target_btns[val], val == world.client_ctf_target)
 

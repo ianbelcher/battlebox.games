@@ -15,6 +15,83 @@ extends Node
 
 ## The world these flags are planted in.
 
+## THE SHAPE AND THE TUNING OF A BASE.
+##
+## These lived in world.gd and are CTF's business: nineteen of the
+## twenty-four places that read them are in this file. They moved when
+## world.gd crossed the line limit — which is what that limit is for,
+## and the answer to it is to put things where they belong rather than
+## to write shorter comments.
+
+## THE FLAG IS A MOUND WITH A GLOWING POLE ON IT, not a building.
+##
+## It used to be a walled box: thirteen blocks square, six high, roofed,
+## with doorways cut in it. Everything about that fought the game. You
+## could not see the flag from outside it, so the one thing you are meant
+## to be navigating towards was hidden inside the thing marking it. The
+## roof was walkable and nothing on it was ever one step up, so anybody —
+## computer players especially — who climbed on top was stranded there.
+## And the only ways in were doorways whose sills sat above the ground
+## outside, which needed ramps, which needed the ground levelling, which
+## is a great deal of machinery to arrive at "you may enter the room".
+##
+## A mound has none of those problems by construction. It slopes one block
+## per ring, so it is walkable from every direction with nothing to route
+## around; the pole on top is visible across the map and glows after dark;
+## and there is no inside to be locked out of.
+const CTF_MOUND_RADIUS := 7
+const CTF_MOUND_HEIGHT := 3
+## The pole: how many blocks of glowing team-coloured beacon stand on the
+## summit. Tall enough to read from a distance, short enough that it is a
+## marker and not a tower.
+const CTF_POLE_HEIGHT := 4
+## HOW CLOSE COUNTS AS TOUCHING THE FLAG.
+##
+## The mound is seven blocks across with a summit only two wide, and this
+## used to be 3.2 — wider than the summit, so reaching the top was always
+## enough. It was still reported as "I touched their flag a number of
+## times and it didn't take it", and standing a player exactly on the
+## point shows the capture firing immediately, so the miss is in the
+## approach rather than the test.
+##
+## 4.5 covers the summit AND the terrace one step below it, which is what
+## a person means when they say they were at the flag: on their base,
+## next to the pole. It is still well inside the mound, so a defender who
+## holds the top still holds the flag.
+const CTF_FLAG_TOUCH := 4.5
+## How far above or below the flag's foot still counts. The pole is four
+## blocks and the mound three, so this has to clear somebody standing on
+## the rim below it as well as somebody on top of the pole.
+const CTF_FLAG_REACH_Y := 7.0
+## How long a captured flag stays gone before it reappears at home.
+const CTF_FLAG_RETURN_MS := 6000
+
+## HOW LONG YOU HAVE TO STAND AT YOUR OWN FLAG TO COME BACK.
+##
+## Not instant, which is what it was and what made a defended mound
+## pointless: with two players stood on it you could knock one down and
+## watch them pop straight back up beside you, over and over, while the
+## other one shot you. There was no moment where the knockdown had
+## achieved anything.
+##
+## Three seconds is the same channel a team-mate pick-up takes, and it
+## uses the same ring and the same alarm, so it reads as the same act —
+## and it is long enough that clearing the mound and holding it is worth
+## doing. That, in turn, is what makes building defences around your flag
+## a real idea rather than decoration.
+const CTF_FLAG_REVIVE_SECONDS := 3.0
+
+## TAKING A FLAG IS A MOMENT, not a teleport. You used to touch the pole
+## and be somewhere else in the same frame, mid-fight, with no idea what
+## had happened — the most exciting thing in the mode read as a glitch.
+##
+## Now: you stop, nothing can hurt you, the screen fades down, you arrive
+## home, and it fades back up. Half a second each way with a beat in the
+## middle, which is long enough to notice and short enough that nobody
+## waits for it.
+const CTF_CAPTURE_FADE := 0.5
+const CTF_CAPTURE_MSEC := 1500
+
 var world: WorldNode = null
 
 
@@ -80,11 +157,11 @@ func put(pos: Vector3i, block: int, pairs: Array) -> void:
 ## How tall the mound stands at a given distance from its centre. One block
 ## per ring, so every approach is a staircase you can simply walk up.
 func _ctf_mound_step(dist: float) -> int:
-	if dist > float(world.CTF_MOUND_RADIUS):
+	if dist > float(CTF_MOUND_RADIUS):
 		return -1
-	var drop := int(floor(dist * float(world.CTF_MOUND_HEIGHT + 1)
-		/ float(world.CTF_MOUND_RADIUS + 1)))
-	return maxi(world.CTF_MOUND_HEIGHT - drop, 0)
+	var drop := int(floor(dist * float(CTF_MOUND_HEIGHT + 1)
+		/ float(CTF_MOUND_RADIUS + 1)))
+	return maxi(CTF_MOUND_HEIGHT - drop, 0)
 
 ## Build one team's mound and pole, and return where its flag stands.
 ##
@@ -98,8 +175,8 @@ func _ctf_build_base(team_i: int, centre: Vector3, pairs: Array) -> Vector3:
 		_ctf_base_y[team_i] = world.store.surface_y(cx, cz)
 	var base_y := int(_ctf_base_y[team_i])
 	var skin: int = world.TEAM_WOOL[team_i % world.TEAM_WOOL.size()]
-	for dz in range(-world.CTF_MOUND_RADIUS, world.CTF_MOUND_RADIUS + 1):
-		for dx in range(-world.CTF_MOUND_RADIUS, world.CTF_MOUND_RADIUS + 1):
+	for dz in range(-CTF_MOUND_RADIUS, CTF_MOUND_RADIUS + 1):
+		for dx in range(-CTF_MOUND_RADIUS, CTF_MOUND_RADIUS + 1):
 			var step := _ctf_mound_step(Vector2(dx, dz).length())
 			if step < 0:
 				continue
@@ -112,21 +189,21 @@ func _ctf_build_base(team_i: int, centre: Vector3, pairs: Array) -> Vector3:
 				put(Vector3i(wx, y, wz), Blocks.DIRT, pairs)
 			# ...cut away anything standing above it, so the slope is
 			# walkable and last round's pole cannot survive as a spike...
-			for y in range(top + 1, maxi(ground, top) + world.CTF_POLE_HEIGHT + 2):
+			for y in range(top + 1, maxi(ground, top) + CTF_POLE_HEIGHT + 2):
 				put(Vector3i(wx, y, wz), Blocks.AIR, pairs)
 			# ...and skin the surface in the team's colour.
 			put(Vector3i(wx, top, wz), skin, pairs)
 	_ctf_raise_pole(team_i, cx, cz, base_y, pairs)
 	# The flag itself is the standing room on the summit, beside the pole.
-	return Vector3(cx, base_y + world.CTF_MOUND_HEIGHT + 1, cz)
+	return Vector3(cx, base_y + CTF_MOUND_HEIGHT + 1, cz)
 
 ## The glowing team-coloured pole on the summit — or the empty air where it
 ## stands while the flag is away.
 func _ctf_raise_pole(team_i: int, cx: int, cz: int, base_y: int,
 		pairs: Array, present := true) -> void:
 	var beacon: int = Blocks.BEACON_TEAM + (team_i % 8)
-	var summit := base_y + world.CTF_MOUND_HEIGHT
-	for i in world.CTF_POLE_HEIGHT:
+	var summit := base_y + CTF_MOUND_HEIGHT
+	for i in CTF_POLE_HEIGHT:
 		put(Vector3i(cx, summit + 1 + i, cz),
 			beacon if present else Blocks.AIR, pairs)
 
@@ -196,7 +273,7 @@ func refresh_no_carve() -> void:
 	for team_i: int in _flags.keys():
 		var home: Vector3 = _flags[team_i].get("home", Vector3.INF)
 		if home != Vector3.INF:
-			zones.append([home.x, home.z, float(world.CTF_MOUND_RADIUS) + 0.5])
+			zones.append([home.x, home.z, float(CTF_MOUND_RADIUS) + 0.5])
 	world.store.no_carve = zones
 
 ## What every client is told about the flags: team, where its base is,
@@ -238,7 +315,7 @@ func show_flag(team_i: int, present: bool) -> void:
 	var home: Vector3 = flag.home
 	var pairs: Array = []
 	_ctf_raise_pole(team_i, int(home.x), int(home.z),
-		int(_ctf_base_y.get(team_i, int(home.y) - world.CTF_MOUND_HEIGHT - 1)),
+		int(_ctf_base_y.get(team_i, int(home.y) - CTF_MOUND_HEIGHT - 1)),
 		pairs, present)
 	if not pairs.is_empty():
 		world.cl_edits.rpc(pairs)
@@ -307,9 +384,9 @@ func _ctf_flag_channel(id: String, pos: Vector3, flag: Dictionary,
 		return
 	var done := float(_flag_progress.get(id, 0.0)) + delta
 	_flag_progress[id] = done
-	revive_pulse(id, pos, clampf(done / world.CTF_FLAG_REVIVE_SECONDS, 0.0, 1.0),
+	revive_pulse(id, pos, clampf(done / CTF_FLAG_REVIVE_SECONDS, 0.0, 1.0),
 		delta, true)
-	if done >= world.CTF_FLAG_REVIVE_SECONDS:
+	if done >= CTF_FLAG_REVIVE_SECONDS:
 		_flag_progress.erase(id)
 		_revive_pulse_t.erase(id)
 		world.cl_revive_progress.rpc(id, 0.0)
@@ -432,7 +509,7 @@ func home_spot(team_i: int, seat: int) -> Vector3:
 		return world.battle.team_start_spot(team_i, seat)
 	var home: Vector3 = flag.home
 	# Ring out from the pole, skipping its own column, staying on the mound.
-	var reach := world.CTF_MOUND_RADIUS - 1
+	var reach := CTF_MOUND_RADIUS - 1
 	var spots: Array = []
 	for dz in range(-reach, reach + 1):
 		for dx in range(-reach, reach + 1):
@@ -465,7 +542,7 @@ func _at_flag(pos: Vector3, flag_at: Vector3) -> bool:
 	if flag_at == Vector3.INF:
 		return false
 	var flat := Vector2(pos.x - flag_at.x, pos.z - flag_at.z).length()
-	return flat < world.CTF_FLAG_TOUCH and absf(pos.y - flag_at.y) < world.CTF_FLAG_REACH_Y
+	return flat < CTF_FLAG_TOUCH and absf(pos.y - flag_at.y) < CTF_FLAG_REACH_Y
 
 func capture(id: String, team: int, from_team: int) -> void:
 	world.ctf_caps[team] = int(world.ctf_caps.get(team, 0)) + 1
@@ -485,7 +562,7 @@ func capture(id: String, team: int, from_team: int) -> void:
 	world.ctf_scores[from_team] = int(world.ctf_scores.get(from_team, 0)) - 1
 	var flag: Dictionary = _flags[from_team]
 	flag.pos = Vector3.INF
-	flag.back_at = Time.get_ticks_msec() + world.CTF_FLAG_RETURN_MS
+	flag.back_at = Time.get_ticks_msec() + CTF_FLAG_RETURN_MS
 	show_flag(from_team, false)
 	broadcast_flags()
 	# A capture used to bring the SCORER'S WHOLE TEAM back at once, as a
@@ -510,10 +587,10 @@ func capture(id: String, team: int, from_team: int) -> void:
 	#
 	# reset_kit FALSE: you keep everything you were carrying. Being sent
 	# home for scoring must never cost you the loot you scored with.
-	_capture_guard[id] = Time.get_ticks_msec() + world.CTF_CAPTURE_MSEC
+	_capture_guard[id] = Time.get_ticks_msec() + CTF_CAPTURE_MSEC
 	world.cl_flag_taken.rpc(id, team, from_team)
 	var landing := home_spot
-	get_tree().create_timer(world.CTF_CAPTURE_FADE).timeout.connect(func() -> void:
+	get_tree().create_timer(CTF_CAPTURE_FADE).timeout.connect(func() -> void:
 		var late: Dictionary = world.player_state.get(id, {})
 		if not late.is_empty():
 			late.pos = landing

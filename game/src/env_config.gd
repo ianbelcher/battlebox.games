@@ -91,6 +91,7 @@ const KNOWN := {
 	"WORLD_CAPTURE_TEST": "1 stands the person on an enemy flag to see if touching it takes it",
 	"WORLD_ROUNDCLOCK_TEST": "1 checks the round clock runs at one second per second",
 	"WORLD_ROOF_TEST": "1 counts the wall and roof blocks defenders put up around each flag",
+	"WORLD_HOLDOUT_SET": "minutes to set the last-flag round length to, through the real setter",
 	"WORLD_BOT_DEBUG": "1 logs what the computer players are deciding",
 	"WORLD_ORB_DEBUG": "1 logs every bot shot's flight",
 	"WORLD_FLIER_DEBUG": "1 logs flying critters' altitude decisions",

@@ -39,6 +39,7 @@ var client_fly_bots := false
 ## Client mirrors of the mode settings the menu draws. See cl_battle_config.
 var client_drop := false
 var client_revive_mode := ReviveRule.MATES_AND_FLAG
+var client_holdout_minutes := HoldoutRules.ROUND_MINUTES
 var client_ctf_target := 3
 var client_team_names: Array = TEAM_NAMES.slice(0, DEFAULT_TEAMS)
 var client_world := ""
@@ -423,7 +424,7 @@ func sv_hello() -> void:
 	cl_overview.rpc_id(peer, overview)
 	cl_battle_config.rpc_id(peer, int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
-		battle_fly_bots)
+		battle_fly_bots, int(holdout_minutes))
 	cl_teams.rpc_id(peer, team_names)
 	cl_mode.rpc_id(peer, game_mode)
 	cl_world_sel.rpc_id(peer, selected_map if not selected_map.is_empty() \
@@ -1149,7 +1150,7 @@ func can_carve(pos: Vector3i, block: int) -> bool:
 			continue
 		var gx := absf(float(pos.x) - home.x)
 		var gz := absf(float(pos.z) - home.z)
-		var reach := float(CTF_MOUND_RADIUS) + 0.5
+		var reach := float(CtfDirector.CTF_MOUND_RADIUS) + 0.5
 		if gx > reach or gz > reach:
 			continue                       # cheap box test first
 		if Vector2(gx, gz).length() <= reach:
@@ -1582,6 +1583,10 @@ var battle_fly_bots := false
 ## unrelated one between them, and they could be set to contradict.
 var revive_mode := ReviveRule.MATES_AND_FLAG
 
+## HOW LONG A ROUND OF LAST FLAG STANDING RUNS, in minutes. Battle royale
+## has had its own length setting all along; this mode had a constant.
+var holdout_minutes := HoldoutRules.ROUND_MINUTES
+
 ## WHERE PEOPLE HAVE ACTUALLY BEEN KNOCKED OUT, most recent last.
 ##
 ## Read by the computer players when they choose which way to come at a
@@ -1666,7 +1671,7 @@ func sv_set_bot_team(target_id: String, team: int) -> void:
 		Game.cl_roster.rpc(Game.roster)
 
 @rpc("any_peer", "reliable")
-func sv_ctf_config(revive: int, target: int, drop: int) -> void:
+func sv_ctf_config(revive: int, target: int, drop: int, hold_mins := -1) -> void:
 	## Settings that belong to a MODE rather than to the arena. `drop` is
 	## deliberately cross-mode — losing your weapons on a knockout is a
 	## fair question in battle royale too — while revive and the target
@@ -1680,9 +1685,14 @@ func sv_ctf_config(revive: int, target: int, drop: int) -> void:
 		ctf_target = clampi(target, 1, 25)
 	if drop >= 0:
 		drop_on_knockout = drop == 1
+	if hold_mins > 0:
+		holdout_minutes = clampf(float(hold_mins), 1.0, 99.0)
+		# The clock is read once and remembered, so a length changed
+		# mid-round has to say so or the round runs on the old one.
+		battle.forget_holdout_length()
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
-		battle_fly_bots)
+		battle_fly_bots, int(holdout_minutes))
 
 ## Hand flight out, or take it away, from a group at a time.
 ##
@@ -1718,7 +1728,7 @@ func sv_set_fly(scope: String, team: int, on: bool, who := "") -> void:
 		Game.cl_roster.rpc(Game.roster)
 		cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 			battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
-			battle_fly_bots)
+			battle_fly_bots, int(holdout_minutes))
 		_save_battle_setup()
 		return
 	# ...and one person at a time, from the ✈ against their name.
@@ -1840,7 +1850,7 @@ func sv_match_config(minutes: int, loot: int, size: int = -1) -> void:
 		resize_to = int(battle_size)
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
-		battle_fly_bots)
+		battle_fly_bots, int(holdout_minutes))
 	_save_battle_setup()
 	if resize_to > 0:
 		_do_world_reset(selected_map, resize_to)
@@ -2544,7 +2554,7 @@ func cl_overview(bytes: PackedByteArray) -> void:
 @rpc("authority", "reliable")
 func cl_battle_config(minutes: int, size: int, loot: bool, fly := false,
 		teams := -1, drop := false, revive := ReviveRule.MATES_AND_FLAG,
-		target := 3, fly_bots := false) -> void:
+		target := 3, fly_bots := false, hold_mins := 10) -> void:
 	client_minutes = minutes
 	client_size = size
 	client_fly_bots = fly_bots
@@ -2552,6 +2562,7 @@ func cl_battle_config(minutes: int, size: int, loot: bool, fly := false,
 	client_fly = fly
 	client_drop = drop
 	client_revive_mode = int(revive)
+	client_holdout_minutes = float(hold_mins)
 	client_ctf_target = target
 	# team_count used to live only on the server, so "Remove a team" left
 	# the client drawing a column that no longer existed.
@@ -3048,74 +3059,6 @@ func cl_pet(critter_id: int) -> void:
 ## Knockouts do NOT score here, which is the point of the mode: shooting
 ## someone only buys you the seconds it takes them to get back.
 
-## THE FLAG IS A MOUND WITH A GLOWING POLE ON IT, not a building.
-##
-## It used to be a walled box: thirteen blocks square, six high, roofed,
-## with doorways cut in it. Everything about that fought the game. You
-## could not see the flag from outside it, so the one thing you are meant
-## to be navigating towards was hidden inside the thing marking it. The
-## roof was walkable and nothing on it was ever one step up, so anybody —
-## computer players especially — who climbed on top was stranded there.
-## And the only ways in were doorways whose sills sat above the ground
-## outside, which needed ramps, which needed the ground levelling, which
-## is a great deal of machinery to arrive at "you may enter the room".
-##
-## A mound has none of those problems by construction. It slopes one block
-## per ring, so it is walkable from every direction with nothing to route
-## around; the pole on top is visible across the map and glows after dark;
-## and there is no inside to be locked out of.
-const CTF_MOUND_RADIUS := 7
-const CTF_MOUND_HEIGHT := 3
-## The pole: how many blocks of glowing team-coloured beacon stand on the
-## summit. Tall enough to read from a distance, short enough that it is a
-## marker and not a tower.
-const CTF_POLE_HEIGHT := 4
-## HOW CLOSE COUNTS AS TOUCHING THE FLAG.
-##
-## The mound is seven blocks across with a summit only two wide, and this
-## used to be 3.2 — wider than the summit, so reaching the top was always
-## enough. It was still reported as "I touched their flag a number of
-## times and it didn't take it", and standing a player exactly on the
-## point shows the capture firing immediately, so the miss is in the
-## approach rather than the test.
-##
-## 4.5 covers the summit AND the terrace one step below it, which is what
-## a person means when they say they were at the flag: on their base,
-## next to the pole. It is still well inside the mound, so a defender who
-## holds the top still holds the flag.
-const CTF_FLAG_TOUCH := 4.5
-## How far above or below the flag's foot still counts. The pole is four
-## blocks and the mound three, so this has to clear somebody standing on
-## the rim below it as well as somebody on top of the pole.
-const CTF_FLAG_REACH_Y := 7.0
-## How long a captured flag stays gone before it reappears at home.
-const CTF_FLAG_RETURN_MS := 6000
-
-## HOW LONG YOU HAVE TO STAND AT YOUR OWN FLAG TO COME BACK.
-##
-## Not instant, which is what it was and what made a defended mound
-## pointless: with two players stood on it you could knock one down and
-## watch them pop straight back up beside you, over and over, while the
-## other one shot you. There was no moment where the knockdown had
-## achieved anything.
-##
-## Three seconds is the same channel a team-mate pick-up takes, and it
-## uses the same ring and the same alarm, so it reads as the same act —
-## and it is long enough that clearing the mound and holding it is worth
-## doing. That, in turn, is what makes building defences around your flag
-## a real idea rather than decoration.
-const CTF_FLAG_REVIVE_SECONDS := 3.0
-
-## TAKING A FLAG IS A MOMENT, not a teleport. You used to touch the pole
-## and be somewhere else in the same frame, mid-fight, with no idea what
-## had happened — the most exciting thing in the mode read as a glitch.
-##
-## Now: you stop, nothing can hurt you, the screen fades down, you arrive
-## home, and it fades back up. Half a second each way with a beat in the
-## middle, which is long enough to notice and short enough that nobody
-## waits for it.
-const CTF_CAPTURE_FADE := 0.5
-const CTF_CAPTURE_MSEC := 1500
 
 
 

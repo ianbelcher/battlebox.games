@@ -53,6 +53,13 @@ func _initialize() -> void:
 		bad.append("revive rungs are %s, expected %s"
 			% [str(rungs), str(ReviveRule.choices(true))])
 
+	# Last flag standing has its own clock, the way battle royale does.
+	var lens: Array = menu.get("_hold_len_btns").keys()
+	lens.sort()
+	if lens != HoldoutRules.LENGTHS:
+		bad.append("round lengths are %s, expected %s"
+			% [str(lens), str(HoldoutRules.LENGTHS)])
+
 	# The score is its own tab now, not a card wedged above the mode
 	# buttons on the settings page.
 	if menu.get("_score_rows") == null:
@@ -64,7 +71,8 @@ func _initialize() -> void:
 		print("menu_controls: PASS — %d sizes, %d fly answers, "
 			% [sizes.size(), answers.size()]
 			+ "capture and last-flag cards separate, "
-			+ "%d revive rungs, score tab present" % rungs.size())
+			+ "%d revive rungs, %d round lengths, score tab present"
+			% [rungs.size(), lens.size()])
 		quit(0)
 	else:
 		print("menu_controls: FAILED")

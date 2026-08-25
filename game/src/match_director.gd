@@ -120,6 +120,8 @@ func tick(delta: float) -> void:
 				# what you built.
 				_timer = holdout_seconds() \
 					if world.ctf.elimination() else world.storm_minutes * 60.0
+				if world.ctf.elimination():
+					print("HOLDOUT: round is %.0f seconds" % _timer)
 				world.cl_match.rpc("BATTLE", _timer)
 		"BATTLE":
 			if world.ctf.elimination():
@@ -771,20 +773,27 @@ func finish(winner: int) -> void:
 ## asks how much of the round is left for every computer player deciding
 ## whether it is still minding the flag — and an environment lookup is a
 ## syscall, not a variable.
-var _holdout_seconds := -1.0
+var _holdout_env := -1.0
+
+## Forget a remembered length — the setting changed under us.
+func forget_holdout_length() -> void:
+	_holdout_env = -1.0
 
 func holdout_seconds() -> float:
-	if _holdout_seconds < 0.0:
+	# The environment knob is for headless runs and wins when it is set;
+	# read once, because this is reached from the bot goal path and an
+	# environment lookup is a syscall rather than a variable.
+	if _holdout_env < 0.0:
 		var knob := OS.get_environment("WORLD_HOLDOUT_MINUTES")
-		_holdout_seconds = knob.to_float() * 60.0 \
-			if knob.is_valid_float() and knob.to_float() > 0.0 \
-			else HoldoutRules.ROUND_MINUTES * 60.0
-	return _holdout_seconds
+		_holdout_env = knob.to_float() * 60.0 \
+			if knob.is_valid_float() and knob.to_float() > 0.0 else 0.0
+	if _holdout_env > 0.0:
+		return _holdout_env
+	return maxf(60.0, world.holdout_minutes * 60.0)
 
-## How much of the round is left, 1 at the bell and 0 at the whistle.
-func holdout_fraction() -> float:
-	var whole := holdout_seconds()
-	return clampf(_timer / whole, 0.0, 1.0) if whole > 0.0 else 1.0
+## Is the guard going out? See HoldoutRules.pushing.
+func holdout_pushing() -> bool:
+	return HoldoutRules.pushing(_timer, holdout_seconds())
 
 ## Is last flag standing over because only one team still has a flag?
 func check_holdout_over() -> void:

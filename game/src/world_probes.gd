@@ -20,6 +20,8 @@ extends Node
 ##                              whether touching it actually takes it
 ##   WORLD_ROUNDCLOCK_TEST=1    check the round clock runs at real speed
 ##   WORLD_ROOF_TEST=1          count what the defenders actually built
+##   WORLD_HOLDOUT_SET=<mins>   change the round length through the real
+##                              setter, and check the clock follows
 
 ## The world being probed.
 var world: WorldNode = null
@@ -397,7 +399,7 @@ func tick_roof(delta: float) -> void:
 		if home == Vector3.INF:
 			continue
 		var roof := 0
-		var ry := int(home.y) + world.CTF_POLE_HEIGHT + 1
+		var ry := int(home.y) + CtfDirector.CTF_POLE_HEIGHT + 1
 		for dz in range(-6, 7):
 			for dx in range(-6, 7):
 				if world.store.get_block(Vector3i(floori(home.x) + dx, ry,
@@ -415,7 +417,29 @@ func tick_roof(delta: float) -> void:
 						wall += 1
 		print("ROOF: t=%.0fs team %d wall=%d roof=%d" % [_roof_t, team_i, wall, roof])
 
+## WORLD_HOLDOUT_SET=<minutes>: set the round length the way the menu
+## does — through sv_ctf_config — and let the round start on it.
+##
+## Proving the DEFAULT works proves very little: ten minutes is what the
+## old hard-coded constant gave too, so the clock reading 600 says nothing
+## about whether the setting is what it read.
+var _len_done := false
+var _len_t := 0.0
+
+func tick_length(delta: float) -> void:
+	var want := OS.get_environment("WORLD_HOLDOUT_SET")
+	if want.is_empty() or _len_done or world == null:
+		return
+	_len_t += delta
+	if _len_t < 4.0:
+		return
+	_len_done = true
+	world.sv_ctf_config(-1, -1, -1, want.to_int())
+	print("HOLDOUT: length set to %d min (world says %.0f)"
+		% [want.to_int(), world.holdout_minutes])
+
 func tick(delta: float) -> void:
+	tick_length(delta)
 	tick_roof(delta)
 	tick_roundclock(delta)
 	tick_capture(delta)

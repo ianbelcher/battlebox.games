@@ -808,13 +808,13 @@ func _on_flag_taken(id: String, _team: int, _from_team: int) -> void:
 		return
 	var me := _player()
 	if me != null:
-		me.begin_capture_hold(WorldNode.CTF_CAPTURE_FADE * 2.0)
+		me.begin_capture_hold(CtfDirector.CTF_CAPTURE_FADE * 2.0)
 	Sfx.play("collect", 0.0, 1.2)
 	_fade.visible = true
 	var fade := _fade.create_tween()
-	fade.tween_property(_fade, "modulate:a", 1.0, WorldNode.CTF_CAPTURE_FADE)
+	fade.tween_property(_fade, "modulate:a", 1.0, CtfDirector.CTF_CAPTURE_FADE)
 	fade.tween_interval(0.12)
-	fade.tween_property(_fade, "modulate:a", 0.0, WorldNode.CTF_CAPTURE_FADE)
+	fade.tween_property(_fade, "modulate:a", 0.0, CtfDirector.CTF_CAPTURE_FADE)
 	fade.tween_callback(func() -> void:
 		if is_instance_valid(_fade):
 			_fade.visible = false)

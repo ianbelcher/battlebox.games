@@ -89,21 +89,60 @@ func test_every_team_of_two_or_more_keeps_somebody_home() -> void:
 
 ## The last push: with the clock nearly gone, holding is worth nothing.
 func test_the_guard_thins_out_at_the_end() -> void:
-	check(HoldoutRules.keepers_left(6, 0.05) < HoldoutRules.keepers(6),
+	check(HoldoutRules.keepers_left(6, true) < HoldoutRules.keepers(6),
 		"more of them go out when time is short")
 
 func test_and_stands_full_strength_before_that() -> void:
-	for left in [1.0, 0.8, 0.5, 0.25]:
-		equal(HoldoutRules.keepers_left(6, left), HoldoutRules.keepers(6),
-			"no early push at %.2f left" % left)
+	equal(HoldoutRules.keepers_left(6, false), HoldoutRules.keepers(6),
+		"no early push")
 
 func test_the_push_never_leaves_a_flag_unwatched() -> void:
 	for size in range(2, 13):
-		check(HoldoutRules.keepers_left(size, 0.0) >= 1,
+		check(HoldoutRules.keepers_left(size, true) >= 1,
 			"a team of %d still has somebody home at the whistle" % size)
 
 func test_the_push_never_adds_defenders() -> void:
 	for size in range(1, 13):
-		for left in [0.0, 0.1, 0.2, 0.5, 1.0]:
-			check(HoldoutRules.keepers_left(size, left) <= HoldoutRules.keepers(size),
-				"the clock never sends MORE of them home (%d at %.2f)" % [size, left])
+		check(HoldoutRules.keepers_left(size, true) <= HoldoutRules.keepers(size),
+			"the clock never sends MORE of them home (%d)" % size)
+
+## WHEN the push starts, across every round length that can be chosen.
+## A fraction alone was wrong at both ends: a fifth of an hour is twelve
+## minutes of "last push", and a fifth of two minutes is twenty-four
+## seconds. Seconds, capped by a fraction, works for both.
+func test_the_push_is_off_at_the_bell() -> void:
+	for mins: int in HoldoutRules.LENGTHS:
+		var whole := float(mins) * 60.0
+		check(not HoldoutRules.pushing(whole, whole),
+			"a %d minute round starts with the guard up" % mins)
+
+func test_the_push_is_on_at_the_whistle() -> void:
+	for mins: int in HoldoutRules.LENGTHS:
+		var whole := float(mins) * 60.0
+		check(HoldoutRules.pushing(0.0, whole),
+			"a %d minute round ends with them out" % mins)
+
+func test_a_long_round_does_not_start_by_pushing() -> void:
+	# Five minutes into an hour: neither nearly over nor yet a stalemate.
+	var hour := 3600.0
+	check(not HoldoutRules.pushing(hour - 300.0, hour),
+		"five minutes into an hour, the guard is still up")
+
+func test_a_short_round_pushes_late_not_immediately() -> void:
+	var two := 120.0
+	check(not HoldoutRules.pushing(two * 0.9, two),
+		"ten seconds into a two-minute round is not the last push")
+
+## An unlimited round has no whistle to force a result, so a siege that
+## has gone on long enough opens up on its own.
+func test_a_stalemate_opens_up_however_long_the_round_is() -> void:
+	var hour := 3600.0
+	check(HoldoutRules.pushing(hour - HoldoutRules.STALE_SECONDS, hour),
+		"ten minutes of siege is enough, whatever the clock says")
+
+func test_every_offered_length_is_sane() -> void:
+	for mins: int in HoldoutRules.LENGTHS:
+		check(mins >= 1, "%d minutes is a real length" % mins)
+		check(not HoldoutRules.length_label(mins).is_empty(), "and it is named")
+	equal(HoldoutRules.length_label(HoldoutRules.UNLIMITED), "Unlimited",
+		"the long one says so rather than showing an hour")

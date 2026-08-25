@@ -30,7 +30,19 @@ const ROUND_POINTS := 6
 
 ## How long a round runs before the clock decides it, in minutes. Long
 ## enough to build something worth holding.
+## The default round length. It is a SETTING now — see
+## WorldNode.holdout_minutes — and this is what a fresh world starts on.
 const ROUND_MINUTES := 10.0
+
+## What the grown-up can choose, in minutes. "Unlimited" is an hour: long
+## enough that no round of this reaches it, and a real number so the clock
+## on screen, the scoring at the whistle and the last push all keep
+## working rather than needing a special case each.
+const LENGTHS := [2, 5, 10, 60]
+const UNLIMITED := 60
+
+static func length_label(minutes: int) -> String:
+	return "Unlimited" if minutes >= UNLIMITED else "%d min" % minutes
 
 ## What each surviving team scores. Zero when too many survived for it to
 ## have been much of a siege.
@@ -73,8 +85,30 @@ static func keepers(team_size: int) -> int:
 		return 1          # one minds the flag, one goes out
 	return team_size - maxi(2, team_size / 3)
 
-## The last fifth of the round, when the guard thins out.
+## The last stretch of a round, when the guard thins out — a fifth of it,
+## but never more than two minutes.
+##
+## IN SECONDS AS WELL AS A FRACTION, because the round length is a setting
+## now and a fraction alone breaks at both ends of it. A fifth of an hour
+## is twelve minutes of "last push", which is most of the round; a fifth
+## of two minutes is twenty-four seconds, which is right. So: a fifth,
+## capped.
 const PUSH_FRACTION := 0.2
+const PUSH_SECONDS := 120.0
+
+## …and however long the round is set to, a siege that has gone on this
+## long opens up anyway. Two dug-in sides will not finish each other off,
+## and on an unlimited round there is no whistle to make them: without
+## this, "unlimited" means "forever" rather than "as long as it takes".
+const STALE_SECONDS := 600.0
+
+## Is it time for the guard to go out?
+static func pushing(seconds_left: float, seconds_total: float) -> bool:
+	if seconds_total <= 0.0:
+		return false
+	if seconds_left <= minf(PUSH_SECONDS, seconds_total * PUSH_FRACTION):
+		return true
+	return (seconds_total - seconds_left) >= STALE_SECONDS
 
 ## HOW MUCH OF A TEAM STAYS HOME WITH THE CLOCK NEARLY GONE.
 ##
@@ -89,8 +123,8 @@ const PUSH_FRACTION := 0.2
 ## guard goes out and looks for a flag, because at that point holding one
 ## is worth nothing and taking one is worth everything. A side is never
 ## left completely open — somebody always stays on the pole.
-static func keepers_left(team_size: int, time_fraction: float) -> int:
+static func keepers_left(team_size: int, push: bool) -> int:
 	var home := keepers(team_size)
-	if time_fraction > PUSH_FRACTION or home <= 1:
+	if not push or home <= 1:
 		return home
 	return maxi(1, home / 2)
