@@ -210,6 +210,11 @@ func drop_everyone() -> void:
 	world.ctf._flag_progress.clear()
 	world.ctf._revive_pulse_t.clear()
 	world.bots.orbs.clear()
+	# Last round's contact reports, attack commitments and minefield count
+	# belong to last round. Without this a fresh round opens with every
+	# side facing the way it was attacked from in the previous one and
+	# their allowance of mines already spent.
+	world.bots.round_reset()
 	# team_site is deliberately NOT cleared. A team's ground is a fixed
 	# feature of the world, like a hill: you fortify it in one round and
 	# come back to it in the next. Re-rolling it every battle was why a
@@ -879,6 +884,15 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	state.hp = int(state.get("hp", world.MATCH_HP)) - amount
 	world.cl_hearts.rpc(id, state.hp)
 	world.cl_bonk.rpc(id, from_pos)
+	# AND IF THAT WAS A COMPUTER PLAYER, IT NOTICES.
+	#
+	# This line is the whole of "when they're being shot at they don't
+	# seem to care". Taking hearts off a bot set no state anywhere, so
+	# there was no fact for any of its own code to act on: it walked on
+	# towards wherever it was going, facing the wrong way, until it fell
+	# over. It was not indifference — there was nothing to be indifferent
+	# about. See BotDirector.alerted for what it does with this.
+	world.bots.alerted(id, from_pos, attacker)
 	if state.hp <= 0:
 		eliminate(id, attacker)
 

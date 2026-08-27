@@ -91,3 +91,44 @@ func test_the_table_is_total() -> void:
 			bits & 16 != 0, bits & 32 != 0, bits & 64 != 0, bits & 128 != 0)
 		check(out >= ClimbRule.NOTHING and out <= ClimbRule.CLIMB,
 			"case %d returned %d" % [bits, out])
+
+# ---- and the arithmetic behind it -------------------------------------
+#
+# The truth table above was RIGHT and the climb still vibrated at the top,
+# which is worth stating plainly: the second time this was reported, the
+# missing case had already been fixed. What was wrong was the size of the
+# move the correct answer made.
+#
+# `room_up` is measured Player.STEP_UP_PROBE above the feet, so by
+# construction reaching the top means the lip is that far up — and a
+# top-out that lifts you less than that cannot finish, however right the
+# decision was. It lifted a third of it.
+
+func test_a_top_out_actually_clears_the_lip() -> void:
+	var lift := Player.CLIMB_TOP_LIFT * Player.CLIMB_TOP_SECONDS
+	check(lift >= Player.STEP_UP_PROBE,
+		"a mantle of %.2f blocks cannot clear a lip %.2f up"
+			% [lift, Player.STEP_UP_PROBE])
+
+func test_and_clears_it_with_something_to_spare() -> void:
+	# Exactly enough is not enough: the lift ends and gravity takes over,
+	# and the body still has to travel forward over the edge before it
+	# sinks back below it.
+	var lift := Player.CLIMB_TOP_LIFT * Player.CLIMB_TOP_SECONDS
+	check(lift >= Player.STEP_UP_PROBE * 1.25,
+		"only %.2f blocks of margin over the %.2f lip"
+			% [lift - Player.STEP_UP_PROBE, Player.STEP_UP_PROBE])
+
+func test_why_it_is_a_held_lift_and_not_a_hop() -> void:
+	# THE SHAPE OF THE BUG, written down. A ballistic shove of 3.8 — what
+	# this used to be — rises v²/2g, and against this file's own gravity
+	# that is a third of a block. The player rose an inch, fell back,
+	# `room_up` went false on the way down, the climb re-engaged, and the
+	# two traded places forever. If anybody replaces the held lift with a
+	# hop again, it has to be big enough, and this says how big.
+	var old_hop := 3.8
+	check((old_hop * old_hop) / (2.0 * Player.GRAVITY) < Player.STEP_UP_PROBE,
+		"the hop this replaced should NOT have been able to clear the lip")
+	var enough := sqrt(2.0 * Player.GRAVITY * Player.STEP_UP_PROBE)
+	check(enough > old_hop,
+		"a hop would need at least %.2f, not %.2f" % [enough, old_hop])

@@ -38,11 +38,52 @@ var _ride_was_yaw := 0.0
 ## Sent to the server about as often as a position is.
 var _ride_send := 0.0
 const RIDE_SEND_HZ := 15.0
-## The nudge that finishes a climb. Just enough to put your feet over the
-## lip, and no more — you are already travelling upwards when this fires,
-## so anything bigger reads as being flung into the air by touching a
-## wall. About a third of a block of rise.
-const CLIMB_TOP_HOP := 3.8
+## HOW FAR ABOVE THE FEET "room above" IS TESTED, and therefore how far a
+## top-out has to lift you. Named because it is load-bearing in two places
+## that have to agree: the probe below decides when a climb has reached
+## the top, and the mantle has to actually clear what the probe measured.
+## A lift shorter than this cannot finish a climb by construction,
+## whatever else is right.
+const STEP_UP_PROBE := 1.05
+
+## FINISHING A CLIMB IS A MANTLE, NOT A HOP — and getting that wrong is
+## the whole of "you get to the top of the wall and just bounce".
+##
+## `room_up` — the space one block up being clear — is what "I have
+## reached the top" MEANS, and by construction the lip is then
+## STEP_UP_PROBE above the feet. So a top-out has to lift you at least
+## that far or you have not topped out at all.
+##
+## It was a single ballistic shove of 3.8, which under this file's own
+## GRAVITY of 22 buys 3.8² / (2 × 22) = 0.33 BLOCKS of rise. A third of
+## the way. So the player rose an inch, fell back, `room_up` went false
+## again on the way down, the climb re-engaged, and the two of them traded
+## places forever. Measured with tests/climb_probe.gd: the height trace
+## climbs cleanly to just under the lip and then flattens into a permanent
+## 0.4-block oscillation for the rest of the run. That is the bounce — and
+## the reason it survived a fix to ClimbRule is that the truth table was
+## never the problem. The ARITHMETIC was.
+##
+## A shove big enough would work — 7.0 clears 1.11 blocks, and that is
+## what the kerb hop does — but at the top of a wall it reads as being
+## flung into the air by touching one. So this is a held lift instead:
+## velocity is pinned for a third of a second, which carries you 1.43
+## blocks, over the lip with margin, at a steady climbing pace rather than
+## a jump. Once the feet clear the lip the horizontal sweep stops being
+## blocked and you simply walk on over the top, which is what the move is
+## supposed to look like.
+##
+## tests/unit/climb_rule_test.gd checks the two numbers against
+## STEP_UP_PROBE, so a future edit that makes the lift too small again
+## fails a test rather than shipping.
+const CLIMB_TOP_LIFT := 4.2       ## blocks per second, held
+const CLIMB_TOP_SECONDS := 0.34   ## 4.2 x 0.34 = 1.43 blocks, against 1.05 needed
+
+## Seconds of mantle left. Deliberately NOT re-armed while it runs: one
+## window is more than the geometry can ever need, and a lift that can
+## renew itself is a lift that walks you up a chimney you are merely
+## leaning on.
+var _top_out := 0.0
 ## True while pressed against a wall and rising up it. Read on the frame
 ## the wall STOPS blocking, which is the moment worth acting on.
 var _climbing := false
@@ -168,6 +209,7 @@ func begin_knockout_rise() -> void:
 	carry_time = 0.0
 	_grapple_path.clear()
 	_climbing = false
+	_top_out = 0.0
 	_lift_to = INF
 const HALF_WIDTH := 0.4
 const HEIGHT := 1.8   # Minecraft's exact player height
@@ -1073,28 +1115,43 @@ func _local_move(delta: float) -> void:
 	var pushing := dir.length_squared() > 0.01
 	var room_up := false
 	if blocked_h and pushing:
-		var up_attempt := next + Vector3(velocity.x * delta, 1.05, velocity.z * delta)
+		var up_attempt := next + Vector3(velocity.x * delta, STEP_UP_PROBE,
+			velocity.z * delta)
 		room_up = not _collides(up_attempt) \
-			and not _collides(next + Vector3(0, 1.05, 0))
+			and not _collides(next + Vector3(0, STEP_UP_PROBE, 0))
 	match ClimbRule.decide(blocked_h, pushing, room_up, on_floor, in_water,
 			_climbing, downed, fly_mode):
 		ClimbRule.STEP_UP:
-			# GENTLER OFF A CLIMB than off the ground. Stepping up a kerb
-			# wants a proper hop; finishing a climb wants the smallest
-			# nudge that clears the lip, because you are already moving
-			# up. Sharing the kerb's 7.2 threw you a block and a bit into
-			# the air the instant you touched the top of a wall, which is
-			# not "getting over it", it is being launched.
-			velocity.y = CLIMB_TOP_HOP if _climbing else 7.2
+			# A KERB IS A HOP; THE TOP OF A CLIMB IS A MANTLE. Stepping up
+			# off the ground wants a proper little jump, and 7.2 against
+			# gravity 22 is 1.18 blocks, which clears a one-block step.
+			# Finishing a climb wants to be carried over the lip instead
+			# of thrown at it — see CLIMB_TOP_LIFT.
+			if _climbing:
+				_top_out = CLIMB_TOP_SECONDS
+			else:
+				velocity.y = 7.2
 			_climbing = false
 		ClimbRule.CLIMB:
 			velocity.y = maxf(velocity.y, WALL_CLIMB_SPEED)
 			on_floor = false
 			anim = Anim.FLY
 			_climbing = true
+			_top_out = 0.0
 		_:
 			if not blocked_h:
 				_climbing = false
+	# THE MANTLE, held against gravity for its whole window. Setting the
+	# velocity once and letting gravity eat it is precisely the bug this
+	# replaces, so it is re-applied every frame until the window closes.
+	if _top_out > 0.0:
+		if downed or fly_mode or in_water:
+			_top_out = 0.0
+		else:
+			_top_out = maxf(0.0, _top_out - delta)
+			velocity.y = maxf(velocity.y, CLIMB_TOP_LIFT)
+			on_floor = false
+			anim = Anim.FLY
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
 	var deck_y := _deck_floor(next, v_attempt)

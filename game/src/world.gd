@@ -813,6 +813,16 @@ func sv_shot(slot: int, cell: Vector3i, kind: int) -> void:
 	var state: Dictionary = player_state.get(id, {})
 	if state.is_empty() or Vector3(cell).distance_to(state.pos) > 300.0:
 		return
+	# A SHOT LANDED, AND ANY COMPUTER PLAYER NEAR IT HEARD IT.
+	#
+	# The other half of "you can zoom in and shoot at them and they won't
+	# do anything", and the half that matters when you are good at it: a
+	# HIT alerts through `match_hurt`, but a MISS used to be completely
+	# silent, so walking your fire onto a bot from sixty blocks warned it
+	# of nothing at all until the moment it lost a heart. This is the only
+	# place every weapon's impact passes through.
+	if match_phase == "BATTLE":
+		bots.shot_landed(id, Vector3(cell), state.pos)
 	match kind:
 		14:  # Flare: a sky light in the shooter's team colour, nothing
 			# to break. The colour is what makes it a signal and not just

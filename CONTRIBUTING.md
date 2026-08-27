@@ -112,26 +112,43 @@ It is not in CI because the build image has no browser and putting one
 there would add hundreds of megabytes to every deploy.
 `tools/webtest_play.js` needs one for the same reason.
 
-One check is a TOOL rather than a gate, because it cannot be trusted to
-give the same answer twice:
+One check needs a server of its own to run against:
 
 ```sh
 # Walk into a wall of this height and see whether you get over it.
-WORLD_CLIMB_TEST=6 WORLD_AUTOTEST=1 \
+# WORLD_ROLE=client is load-bearing: headless implies SERVER, so without
+# it this starts a second server and connects to nothing.
+WORLD_ROLE=client WORLD_CLIMB_TEST=6 WORLD_AUTOTEST=1 \
   WORLD_AUTOCONNECT=ws://127.0.0.1:9081 godot --headless --path game
 ```
 
 It prints a height-over-time graph, which is the only way to see the
 failure it exists for: the climb reaching a point just under the lip of a
 wall and buzzing there instead of finishing. No error, no crash, the
-player is simply an inch short forever.
+player is simply an inch short forever. A failing run looks like this —
+a clean ramp, and then a hundred and fifty samples of nothing:
 
-It is not in CI because it builds its wall in the world where the player
-happens to be standing, and that is different every run — on a slope, in
-water, or somewhere the server refuses the blocks because they are past
-`WorldNode.EDIT_RANGE`. When it says "the wall was never built", that is
-what happened; run it again. Compare a run against a run, not against a
-remembered number.
+```
+[... 4.52, 4.77, 5.17, 5.11, 5.32, 5.08, 5.21, 5.31, 5.02, 5.24, ...]
+```
+
+**It used to be untrustworthy and it no longer is**, which matters
+because it was documented as a tool you re-ran until it agreed with you.
+Every wrong answer it gave was really the SCENERY being wrong, reported
+as a climb verdict: the wall built in a tree canopy, or in mid-air over
+water, or five blocks below a player standing on the phantom stone that
+an unstreamed chunk reads as; the player driving away on a car it was
+standing on, because standing on one makes you its driver and this probe
+holds the stick forward forever; or the whole climb happening inside a
+six-second blackout at the start of the measuring phase.
+
+So it now lays its own footing rather than trusting the landscape, waits
+for real ground under a settled body, steps off anything it is riding,
+and — the important part — **refuses to give a climb verdict when the
+scenery is not what it built**. "the wall was never built", "the ground
+was not levelled", "the player never settled on real ground" and "the
+player left the wall" are each their own answer, and none of them is
+"the climb failed".
 
 Two more checks need a real window and so are not in CI. Run them if you are
 changing menus or controls — synthetic input goes through the display

@@ -93,6 +93,8 @@ const KNOWN := {
 	"WORLD_ROOF_TEST": "1 counts the wall and roof blocks defenders put up around each flag",
 	"WORLD_HOLDOUT_SET": "minutes to set the last-flag round length to, through the real setter",
 	"WORLD_HUDDLE_TEST": "1 counts who is sat on their own flag and who is out attacking",
+	"WORLD_SNIPE_TEST": "1 shoots a computer player from out of its sight and reports its reaction",
+	"WORLD_SPREAD_TEST": "1 reports how far apart a team's defenders stand and which sides they cover",
 	"WORLD_BOT_DEBUG": "1 logs what the computer players are deciding",
 	"WORLD_ORB_DEBUG": "1 logs every bot shot's flight",
 	"WORLD_FLIER_DEBUG": "1 logs flying critters' altitude decisions",

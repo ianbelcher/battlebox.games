@@ -42,6 +42,233 @@ var _opening_done := false
 
 var orbs: Array = []
 
+## THE TEAM BLACKBOARD: what one side collectively knows and is doing.
+##
+## Everything here is a fix for the same thing — a computer player that can
+## only see out of its own eyes and only reason about its own seat number.
+## That is what makes a hundred of them read as a hundred separate
+## accidents rather than as four teams: nobody is told anything, so nobody
+## can join in with anything.
+##
+##   `_contacts[team]` is where enemies have actually been seen or felt,
+##   with a timestamp — one shared list per side. A bot spotting somebody
+##   posts it; a bot being SHOT posts it. Every defender then knows which
+##   way the trouble came from without having a line of sight to it, which
+##   is the difference between a base that faces the right way and eight
+##   bots orbiting a pole.
+##
+##   `_intel[team]` is what falls out of that, worked out ONCE for the
+##   whole side rather than once per bot: how many enemies are on our
+##   doorstep and from what bearing, how many of us should therefore stay
+##   home, and how many are already committed to each enemy flag. That
+##   last one is what "go with them" reads.
+##
+## REFRESHED ON A TIMER, NOT PER BOT. This is the part that has to survive
+## a hundred players: the whole thing is one pass over the roster a couple
+## of times a second, and every bot then reads a dictionary instead of
+## walking the roster itself. Doing it the obvious way — each bot counting
+## its own team-mates when it picks a goal — is a hundred bots times a
+## hundred players times twice a second, and that is how a server stops
+## being able to hold a hundred players.
+##
+## NOTHING HERE IS PSYCHIC. A contact only exists because somebody on that
+## team saw it or was hit by it, so digging a tunnel towards a base still
+## works, and a sniper who has not fired yet has not been reported by
+## anybody. That is deliberate: it is the same rule the shooting obeys, and
+## sneaking has to keep being worth doing.
+var _contacts: Dictionary = {}
+
+var _intel: Dictionary = {}
+
+var _intel_t := 0.0
+
+## How often the blackboard is rebuilt. Twice a second is far quicker than
+## anything on it changes and cheap enough not to notice.
+const INTEL_EVERY := 0.5
+
+## How long a contact report is worth anything. Longer than an individual
+## bot's four-second memory of somebody it saw: a report is what the TEAM
+## knows, and a base does not forget which side it was attacked from the
+## moment the attacker steps behind a rock.
+const CONTACT_MS := 14_000
+
+## The most reports one side keeps. Small on purpose — this is a picture of
+## where the fighting is, not a log — and it keeps every read of it cheap.
+const CONTACTS_KEPT := 12
+
+## Reports closer together than this are the same report. Without it a
+## firefight that lasts four seconds fills the whole list with one place
+## and the side goes blind everywhere else.
+const CONTACT_MERGE := 7.0
+
+## SOMEBODY ON THIS TEAM HAS SEEN OR FELT AN ENEMY HERE.
+##
+## Merged onto any recent report nearby rather than appended, so a running
+## fight is one contact that keeps its position rather than twelve.
+func report(team: int, at: Vector3) -> void:
+	if team < 0:
+		return
+	var now := Time.get_ticks_msec()
+	var list: Array = _contacts.get(team, [])
+	for entry: Array in list:
+		if Vector3(entry[0]).distance_to(at) < CONTACT_MERGE:
+			entry[0] = at
+			entry[1] = now
+			return
+	list.append([at, now])
+	if list.size() > CONTACTS_KEPT:
+		list.remove_at(0)
+	_contacts[team] = list
+
+## Rebuild every side's picture of the round. One pass, on a timer.
+func _refresh_intel(delta: float) -> void:
+	_intel_t -= delta
+	if _intel_t > 0.0:
+		return
+	_intel_t = INTEL_EVERY
+	var now := Time.get_ticks_msec()
+	for team: int in _contacts.keys():
+		var kept: Array = []
+		for entry: Array in _contacts[team]:
+			if now - int(entry[1]) < CONTACT_MS:
+				kept.append(entry)
+		_contacts[team] = kept
+	# Who is standing, and where — one walk of the roster for every side.
+	var sizes: Dictionary = {}
+	var mates: Dictionary = {}
+	for id: String in world.match_alive.keys():
+		if world.out_ids.has(id):
+			continue
+		var team := int(Game.roster.get(id, {}).get("team", -1))
+		if team < 0:
+			continue
+		sizes[team] = int(sizes.get(team, 0)) + 1
+		if not world.downed_ids.has(id):
+			var st: Dictionary = world.player_state.get(id, {})
+			if not st.is_empty():
+				var here: Array = mates.get(team, [])
+				here.append(Vector3(st.pos))
+				mates[team] = here
+	# What each side is committed to attacking, from the bots' own
+	# choices rather than from where they happen to be standing. Where
+	# they are standing wobbles; what they have decided does not.
+	var commit: Dictionary = {}
+	for id: String in roster.keys():
+		var chosen := int(roster[id].get("target_team", -1))
+		if chosen < 0:
+			continue
+		var team := int(Game.roster.get(id, {}).get("team", -1))
+		if team < 0:
+			continue
+		var by_team: Dictionary = commit.get(team, {})
+		by_team[chosen] = int(by_team.get(chosen, 0)) + 1
+		commit[team] = by_team
+	var standing := _standing_flags()
+	for team: int in sizes.keys():
+		var home: Vector3 = world.ctf._flags.get(team, {}).get("home", Vector3.INF)
+		var threat := 0
+		var toward := Vector3.ZERO
+		if home != Vector3.INF:
+			for entry: Array in _contacts.get(team, []):
+				var at: Vector3 = entry[0]
+				if Vector2(at.x - home.x, at.z - home.z).length() > BotOrders.HOME_WATCH:
+					continue
+				threat += 1
+				toward += Vector3(at.x - home.x, 0.0, at.z - home.z)
+		var size := int(sizes[team])
+		var mine := standing.duplicate()
+		mine.erase(team)
+		var base := SiegeRoles.keepers(size, world.ctf.elimination(),
+			world.battle.holdout_pushing())
+		var old: Dictionary = _intel.get(team, {})
+		_intel[team] = {
+			"threat": threat,
+			# HOLD THE LAST BEARING when nothing is in sight. A harbour
+			# that snaps back to due east the moment an attacker steps
+			# behind a wall is a harbour that turns its back on them.
+			"bearing": BotHarbour.bearing(Vector3.ZERO, toward,
+				float(old.get("bearing", 0.0))),
+			"keepers": BotOrders.keepers(size, base, threat, mine.size()),
+			"attackers": BotOrders.attackers(size, base, threat, mine.size()),
+			"standing": mine,
+			"commit": commit.get(team, {}),
+			"mates": mates.get(team, []),
+		}
+
+## Every enemy flag still on its pole, in team order. Team-agnostic: each
+## side drops its own out of the list.
+func _standing_flags() -> Array:
+	var out: Array = []
+	for team: int in world.ctf._flags.keys():
+		var flag: Dictionary = world.ctf._flags[team]
+		if int(flag.back_at) > 0 or bool(flag.get("out", false)):
+			continue
+		out.append(team)
+	out.sort()
+	return out
+
+## SOMEBODY JUST SHOT THIS COMPUTER PLAYER.
+##
+## The one fact the bots never had. `MatchDirector.hurt` took hearts off
+## and told nobody, so "they don't seem to care when you shoot them" was
+## not indifference — there was nothing to be indifferent about.
+##
+## Four things happen, and the first is the one you see: it TURNS ROUND.
+## Then it re-decides immediately rather than finishing the walk it was
+## on, its eyes open past their natural range for a few seconds (see
+## BotThreat.sight), and the whole team is told where the shot came from.
+func alerted(id: String, from_pos: Vector3, attacker := "") -> void:
+	if not roster.has(id):
+		return
+	var bot: Dictionary = roster[id]
+	bot.threat_at = from_pos
+	bot.threat_ms = Time.get_ticks_msec()
+	bot.threat_id = attacker
+	var to_them := Vector2(from_pos.x - float(Vector3(bot.pos).x),
+		from_pos.z - float(Vector3(bot.pos).z))
+	if to_them.length() > 0.01:
+		to_them = to_them.normalized()
+		bot.yaw = atan2(to_them.x, to_them.y)
+	bot.think = 0.0
+	report(int(Game.roster.get(id, {}).get("team", -1)), from_pos)
+
+## A SHOT LANDED HERE AND MISSED. Everybody near enough to have heard it
+## take the paint off is now aware of it.
+##
+## This is the other half of the sniping fix, and the half that matters
+## when you are good at it: a hit alerts through `alerted`, but a MISS
+## used to be silent, so walking your fire onto a bot from sixty blocks
+## warned it of nothing until the moment it lost a heart.
+##
+## Only player shots come through here — bot fire is simulated in
+## `tick_orbs` and there are hundreds of those in the air at once, so
+## alerting on every one of them would be a per-orb walk of the whole
+## roster. Bots hitting bots still report through `alerted`, which is the
+## part that matters.
+func shot_landed(shooter: String, at: Vector3, from_pos: Vector3) -> void:
+	if shooter.is_empty():
+		return
+	for id: String in roster.keys():
+		if id == shooter or not world.teams_differ(shooter, id):
+			continue
+		if world.downed_ids.has(id) or world.out_ids.has(id):
+			continue
+		if Vector3(roster[id].pos).distance_to(at) > BotThreat.NEAR_MISS:
+			continue
+		alerted(id, from_pos, shooter)
+
+## A fresh round: forget last round's contacts, commitments and minefield.
+func round_reset() -> void:
+	_contacts.clear()
+	_intel.clear()
+	_mines.clear()
+	for id: String in roster.keys():
+		var bot: Dictionary = roster[id]
+		bot.threat_ms = 0
+		bot.target_team = -1
+		bot.target_ms = 0
+		bot.shield_left = SHIELD_BUDGET
+
 func ensure_opening() -> void:
 	if not multiplayer.is_server() or _opening_done:
 		return
@@ -191,6 +418,11 @@ func _bot_nearest_enemy(id: String, pos: Vector3, radius: float) -> String:
 		tried += 1
 		var at: Vector3 = world.player_state[entry[1]].pos
 		if world.clear_shot(eye, at + Vector3(0, 1.0, 0)):
+			# TELL THE REST OF THE SIDE. One bot laying eyes on somebody
+			# is the only way a team ever learns anything, and it costs a
+			# dictionary walk of at most a dozen entries — the sight test
+			# above is a hundred times dearer and has already been paid.
+			report(int(Game.roster.get(id, {}).get("team", -1)), at)
 			return str(entry[1])
 	return ""
 
@@ -407,7 +639,22 @@ func _bot_cover_goal(id: String, pos: Vector3) -> Vector3:
 ## where it can be asked "does a real attack ever leave the base" without
 ## running a round and watching. That question is not rhetorical: it went
 ## wrong, and no test here could see it.
+## HOW MANY OF THIS SIDE ARE MINDING THE SHOP RIGHT NOW.
+##
+## Read off the blackboard rather than computed here, for two reasons.
+## It is a JUDGEMENT now — the mode's ratio corrected by how many enemies
+## the side has actually seen on its own doorstep, which is BotOrders'
+## job — and it has to be the SAME judgement for every member of the team
+## on the same tick. Recomputing it per bot from live counts means two
+## bots on one side can disagree about how many defenders there are, and
+## then both of them think they are the third of two.
+##
+## Falls back to the flat ratio before the first blackboard refresh, which
+## is the first half-second of a round.
 func _bot_ctf_keepers(team: int) -> int:
+	var known: Dictionary = _intel.get(team, {})
+	if known.has("keepers"):
+		return int(known.keepers)
 	return SiegeRoles.keepers(world.ctf.seats_of(team).size(),
 		world.ctf.elimination(), world.battle.holdout_pushing())
 
@@ -441,27 +688,182 @@ func _bot_ctf_defends(id: String, team: int) -> bool:
 ## standing, in team order, so a side of four with three enemies puts
 ## somebody on each. `nil` (-1) when every enemy flag is already off its
 ## pole and there is nothing to run at.
-func _bot_ctf_target_team(id: String, team: int) -> int:
-	var standing: Array = []
-	for other_team: int in world.ctf._flags.keys():
-		if other_team == team:
+func _bot_ctf_target_team(id: String, team: int, pos: Vector3) -> int:
+	var known: Dictionary = _intel.get(team, {})
+	var standing: Array = known.get("standing", [])
+	if standing.is_empty():
+		# OUT IS NOT THE SAME AS AWAY. A flag taken for good in last flag
+		# standing is marked `out` and never gets a `back_at`, so testing
+		# only `back_at` left raiders being dealt at an eliminated team's
+		# flag whose `pos` is INF — "nothing to do", and they wandered off.
+		# Every capture idled a share of the survivors and the field went
+		# quiet, which is exactly what "the moment they capture the flag
+		# all the players hang back" was. `_standing_flags` tests both.
+		standing = _standing_flags()
+		standing.erase(team)
+	if standing.is_empty():
+		return -1
+	var seats: Array = world.ctf.seats_of(team)
+	var index := SiegeRoles.raider_index(seats.find(id), _bot_ctf_keepers(team))
+	# THE SCOUTS GO OUT FIRST, one to each standing flag. Everything below
+	# is about massing, and massing on its own leaves flags nobody ever
+	# walks at — see BotOrders.scout_target.
+	var scout := BotOrders.scout_target(index, standing.size())
+	if scout >= 0:
+		return int(standing[scout])
+	var bot: Dictionary = roster.get(id, {})
+	if bot.is_empty():
+		return int(standing[index % standing.size()])
+	var now := Time.get_ticks_msec()
+	var chosen := int(bot.get("target_team", -1))
+	var held := standing.has(chosen)
+	if chosen >= 0 and not BotOrders.may_rethink(now - int(bot.get("target_ms", 0)), held):
+		return chosen
+	# WHERE IS MY SIDE GOING? Each candidate scored on how far it is and
+	# how many of us have already committed to it. This is the whole of
+	# "they should see what the other bots are doing and go with them".
+	var commit: Dictionary = known.get("commit", {})
+	var options: Array = []
+	for other_v: Variant in standing:
+		var other := int(other_v)
+		var at: Vector3 = world.ctf._flags.get(other, {}).get("pos", Vector3.INF)
+		options.append({
+			"dist": 999.0 if at == Vector3.INF else pos.distance_to(at),
+			"friends": int(commit.get(other, 0))})
+	var cap := BotOrders.surge_cap(int(known.get("attackers", seats.size())),
+		standing.size())
+	var pick := BotOrders.pick_target(options, cap)
+	if pick < 0:
+		return -1
+	bot.target_team = int(standing[pick])
+	bot.target_ms = now
+	return int(bot.target_team)
+
+## HOW FAR OUT THE DEFENDERS STAND. Inside the cover ring at
+## CTF_COVER_RADIUS, on the shoulder of the mound, so a defender is behind
+## its own wall rather than in front of it. BotHarbour will open this out
+## if the guard is too big to fit at that spacing.
+const HARBOUR_RADIUS := 6.0
+
+## HOW FAR A DEFENDER WILL GO TO MEET SOMETHING. Not "as far as it can
+## see": a keeper that walks at whatever it spots has left the flag, and
+## the base behind it is then guarded by somebody who is technically still
+## a defender. The same fourteen blocks a keeper is allowed to travel to
+## pick a team-mate up.
+const KEEPER_LEASH := 14.0
+
+## A DEFENDED BASE, NOT A MERRY-GO-ROUND.
+##
+## What this replaces was a circle walked at one lap every eighteen
+## seconds. It was written to fix a real thing — a fixed post meant a
+## keeper arrived and then stood perfectly still, which is what a broken
+## bot looks like — but a ring of computer players orbiting a pole is its
+## own complaint, and it is the one that was made: "they just march around
+## the flag, it's kind of dumb".
+##
+## So the guard forms a harbour instead. Each defender holds a sector of
+## its own, the sectors cover the whole compass, seat zero always stands
+## between the flag and wherever the side has last seen an enemy, and
+## anybody with nothing to shoot at faces outwards along their own arc.
+## Nobody walks a lap, because walking laps is how you get shot.
+##
+## Three things it does that the circle could not:
+##
+##   IT TURNS TO FACE THE TROUBLE. The bearing comes off the team's shared
+##   contact reports, so an attack on one side of a base is met by the
+##   whole position rotating towards it — including the defenders who
+##   never saw anything themselves.
+##
+##   IT ENGAGES WITHOUT LEAVING. Anyone visible near the flag is closed
+##   with, but on a leash: a defender that chases is a defender who has
+##   gone.
+##
+##   IT KEEPS OUT OF ITS OWN WAY. Posts are pushed off any team-mate
+##   already standing near them, so two defenders never end up in the same
+##   block arguing about it.
+func _bot_harbour_goal(id: String, team: int, pos: Vector3,
+		home: Vector3) -> Vector3:
+	var known: Dictionary = _intel.get(team, {})
+	var bot: Dictionary = roster.get(id, {})
+	# ANYONE IT CAN SEE comes first. This is a line-of-sight test and not
+	# a distance one, and that is load-bearing: it is the last place in
+	# this file that used to read an enemy's position through solid rock,
+	# so digging a tunnel towards a base turned every defender to face you
+	# through thirty blocks of ground. Sneaking has to be worth doing.
+	#
+	# The same eye and the same test the SHOT uses, so "I can see you" and
+	# "I can hit you" cannot disagree — and the same cap on how many are
+	# worth asking about, because a ray is not free.
+	var near: Array = []
+	for other: String in world.match_alive.keys():
+		if not world.teams_differ(id, other) or world.downed_ids.has(other):
 			continue
-		if int(world.ctf._flags[other_team].back_at) > 0:
+		var st: Dictionary = world.player_state.get(other, {})
+		if st.is_empty():
 			continue
-		# OUT IS NOT THE SAME AS AWAY, and only `back_at` was being
-		# tested. A flag taken for good in last flag standing is marked
-		# `out` and never gets a `back_at` — so an eliminated team's flag
-		# still counted as standing, raiders went on being dealt to it,
-		# and its `pos` is INF, so `ctf_goal` returned "nothing to do" and
-		# they wandered off. Every capture idled a share of the survivors
-		# and the field went quiet, which is exactly what "the moment they
-		# capture the flag it seems like all the players hang back" was.
-		if bool(world.ctf._flags[other_team].get("out", false)):
+		var d: float = home.distance_to(st.pos)
+		if d < 30.0:
+			near.append([d, other])
+	near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var eye := pos + Vector3(0, 1.4, 0)
+	var looked := 0
+	for entry: Array in near:
+		if looked >= SIGHT_TRIES:
+			break
+		looked += 1
+		var at: Vector3 = world.player_state[entry[1]].pos
+		if world.clear_shot(eye, at + Vector3(0, 1.0, 0)):
+			if not bot.is_empty():
+				bot.erase("watch_yaw")
+			report(team, at)
+			return BotHarbour.leashed(home, at, KEEPER_LEASH)
+	# Nothing in sight: hold the position.
+	var count := maxi(1, _bot_ctf_keepers(team))
+	var seat := maxi(world.ctf.seats_of(team).find(id), 0)
+	var bearing := float(known.get("bearing", 0.0))
+	var index := seat % count
+	var want := home + BotHarbour.post(index, count, bearing, HARBOUR_RADIUS)
+	if not bot.is_empty():
+		# WATCH YOUR OWN ARC. Set here and used by the movement step once
+		# the bot has arrived, because yaw otherwise comes from whichever
+		# way it last walked — which at a post it has reached is nothing.
+		# This is the difference between eight bots standing about and
+		# eight sentries.
+		bot.watch_yaw = BotHarbour.facing(index, count, bearing)
+	want = BotHarbour.keep_apart(want, _nearby_mates(id, team, want),
+		BotHarbour.MIN_GAP)
+	want = world.store.clamp_inside(want, 4)
+	# STANDING ROOM, NOT THE TOP OF THE PILE. `surface_y` returns the
+	# highest block in the column, and by the time a siege is under way
+	# that is the roof the defenders themselves put over the base — so a
+	# post derived from it sends the whole guard climbing onto its own
+	# lid. `walk_y` finds the floor a body actually fits on.
+	var stand := walk_y(floori(want.x), floori(want.z), home.y + 2.0)
+	if stand < 0:
+		stand = world.store.surface_y(floori(want.x), floori(want.z))
+	want.y = float(stand) + 1.0
+	return want
+
+## The team-mates close enough to `want` to be in the way of it.
+##
+## Off the blackboard, which already holds every side's standing members —
+## so this is a walk of one team's positions rather than of the whole
+## roster, and it happens when a goal is chosen rather than every frame.
+## The bot's own position is in that list and is deliberately left there:
+## it is at most one shove of its own and dropping it means matching
+## floats.
+const MATES_MIND := 6.0
+
+func _nearby_mates(id: String, team: int, want: Vector3) -> Array:
+	var out: Array = []
+	var me: Vector3 = roster.get(id, {}).get("pos", Vector3.INF)
+	for mate_v: Variant in _intel.get(team, {}).get("mates", []):
+		var mate: Vector3 = mate_v
+		if me != Vector3.INF and mate.distance_squared_to(me) < 0.01:
 			continue
-		standing.append(other_team)
-	standing.sort()
-	return SiegeRoles.target(world.ctf.seats_of(team).find(id),
-		_bot_ctf_keepers(team), standing)
+		if Vector2(mate.x - want.x, mate.z - want.z).length() < MATES_MIND:
+			out.append(mate)
+	return out
 
 ## WHAT A COMPUTER PLAYER IS ACTUALLY TRYING TO DO IN CAPTURE THE FLAG.
 ##
@@ -491,54 +893,10 @@ func ctf_goal(id: String, pos: Vector3) -> Vector3:
 	if world.out_ids.has(id):
 		return home
 	if _bot_ctf_defends(id, team) and home != Vector3.INF:
-		# The keeper. Anyone closing on our flag is the job; otherwise
-		# patrol around it.
-		#
-		# ANYONE IT CAN SEE. This was a plain distance test, and it is the
-		# last place in this file that read an enemy's position through
-		# solid rock: shooting had line of sight, hunting had it, and the
-		# keeper did not — so digging a tunnel towards a base turned every
-		# defender to face you through thirty blocks of ground and they
-		# were standing on the spot when you came up. Reported exactly
-		# that way, and it is the fair complaint: sneaking has to be worth
-		# doing or there is no point digging.
-		#
-		# The same eye and the same test the SHOT uses, so "I can see you"
-		# and "I can hit you" cannot disagree — and the same cap on how
-		# many are worth asking about, because a ray is not free. If the
-		# six nearest are all behind something, nobody has seen you.
-		var near: Array = []
-		for other: String in world.match_alive.keys():
-			if not world.teams_differ(id, other) or world.downed_ids.has(other):
-				continue
-			var st: Dictionary = world.player_state.get(other, {})
-			if st.is_empty():
-				continue
-			var d: float = home.distance_to(st.pos)
-			if d < 30.0:
-				near.append([d, other])
-		near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
-		var eye := pos + Vector3(0, 1.4, 0)
-		var looked := 0
-		for entry: Array in near:
-			if looked >= SIGHT_TRIES:
-				break
-			looked += 1
-			var at: Vector3 = world.player_state[entry[1]].pos
-			if world.clear_shot(eye, at + Vector3(0, 1.0, 0)):
-				return at
-		# ON PATROL, not on sentry duty. A fixed post meant a keeper
-		# reached its spot and then stood perfectly still for the rest of
-		# the round, which is indistinguishable from a broken bot — and
-		# "they just sort of stand there" is the thing being fixed. Walk a
-		# slow circle round the flag instead: about eighteen seconds a lap,
-		# started at its own angle so two keepers are never in step.
-		var ring := float(absi(id.hash()) % 1000) / 1000.0 * TAU \
-			+ float(Time.get_ticks_msec()) * 0.00035
-		return home + Vector3(cos(ring), 0, sin(ring)) * 3.5
+		return _bot_harbour_goal(id, team, pos, home)
 	# The raider, on the flag it was dealt rather than whichever happens to
 	# be closest.
-	var target := _bot_ctf_target_team(id, team)
+	var target := _bot_ctf_target_team(id, team, pos)
 	if target < 0:
 		return Vector3.INF
 	var best: Vector3 = world.ctf._flags[target].get("pos", Vector3.INF)
@@ -589,7 +947,7 @@ func _bot_assault_goal(id: String, team: int, target: Vector3) -> Vector3:
 	# to the rally, and come in again — visible as an attack that turns
 	# round and leaves half way.
 	if now < int(_squad_push_until.get(key, 0)):
-		return _bot_fan_out(id, target)
+		return _bot_fan_out(id, team, target)
 
 	var rally := BotSquads.point_on_bearing(target, bearing, BotSquads.RALLY_RANGE)
 	rally = world.store.clamp_inside(rally, 4)
@@ -615,17 +973,148 @@ func _bot_assault_goal(id: String, team: int, target: Vector3) -> Vector3:
 	if BotSquads.ready_to_push(here, size, waited):
 		_squad_push_until[key] = now + SQUAD_PUSH_MS
 		_squad_since.erase(key)
-		return _bot_fan_out(id, target)
+		return _bot_fan_out(id, team, target)
 	return rally
 
-## A couple of blocks to one side of the flag, so a squad arriving
-## together spreads around the mound instead of treading on each other.
-func _bot_fan_out(id: String, target: Vector3) -> Vector3:
+## SPREAD AROUND THE MOUND, not onto one block of it.
+##
+## The lane off the bot's own id is what stops a squad walking in as a
+## single file, and it is fixed per bot so the shape of the assault is
+## stable rather than shimmering. What it cannot do is notice that the
+## block it picked is where somebody else is already standing — an id
+## hash knows nothing about anybody else — so a squad of three could and
+## did arrive stacked.
+##
+## `keep_apart` is the fix, and it is the same rule the defenders use:
+## look at the team-mates actually near the spot and shuffle off them.
+## That is the "understand where they're standing in relation to the other
+## bots" half of the ask, applied to the attack as well as the defence.
+func _bot_fan_out(id: String, team: int, target: Vector3) -> Vector3:
 	var lane := float(absi(id.hash()) % 5) - 2.0
-	return target + Vector3(lane, 0.0, float(absi(id.hash() >> 3) % 5) - 2.0)
+	var want := target + Vector3(lane, 0.0, float(absi(id.hash() >> 3) % 5) - 2.0)
+	return BotHarbour.keep_apart(want, _nearby_mates(id, team, want),
+		BotHarbour.MIN_GAP)
+
+## WHAT TO DO ABOUT THE LAST SHOT THAT CAME AT US, or INF for "nothing
+## recent enough to be worth acting on".
+##
+## The decision itself is BotThreat's — five inputs, five answers, and a
+## truth table a unit test can walk. This is the part that has to look
+## things up: whether the shooter can be seen from here right now, which
+## is the same `clear_shot` the firing uses so that "I can see you" and
+## "I can hit you" cannot disagree.
+##
+## A DEFENDER STILL DOES NOT LEAVE ITS POST. Everything below is leashed
+## to the flag for anyone minding one, because "somebody shot at me from
+## over there" is otherwise a perfect way to walk a whole guard off a base
+## one bot at a time — which is the same failure the rescue rung had, and
+## it was reported as a side defending a flag nobody was watching.
+func _threat_goal(id: String, bot: Dictionary, pos: Vector3, hp: int) -> Vector3:
+	var when := int(bot.get("threat_ms", 0))
+	if when <= 0:
+		return Vector3.INF
+	var age := Time.get_ticks_msec() - when
+	if BotThreat.stale(age):
+		return Vector3.INF
+	var at: Vector3 = bot.get("threat_at", Vector3.INF)
+	if at == Vector3.INF:
+		return Vector3.INF
+	var armed := int(bot.get("weapon", 13)) != 13
+	var seen := world.clear_shot(pos + Vector3(0, 1.4, 0), at + Vector3(0, 1.0, 0))
+	var action := BotThreat.respond(age, hp, pos.distance_to(at), armed, seen,
+		float(bot.get("nerve", 0.6)))
+	bot.threat_act = action
+	if action == BotThreat.IGNORE:
+		return Vector3.INF
+	# WHICH WAY ROUND THIS ONE GOES, fixed per bot rather than rolled, so
+	# two of them flank opposite sides of the same shooter instead of
+	# both drifting the same way and arriving as one target.
+	var lane := 1.0 if (absi(id.hash()) % 2) == 0 else -1.0
+	var want := at
+	if action == BotThreat.RETURN_FIRE:
+		# STAND AND TRADE. Not "walk at them" — the firing code below
+		# does the shooting and it needs line of sight held, not chased.
+		# A step to one side keeps them from being a stationary target
+		# without giving up the angle they already have.
+		var side := Vector3(pos.z - at.z, 0.0, at.x - pos.x)
+		if side.length() > 0.001:
+			side = side.normalized()
+		want = pos + side * lane * 2.5
+	else:
+		want = BotThreat.move_to(action, pos, at, lane)
+	# ...AND LAY A BLOCK TO GET BEHIND, if that is what the answer was.
+	if BotThreat.wants_cover(action):
+		_bot_build_shield(id, bot, pos, at)
+	bot.erase("watch_yaw")
+	var team := int(Game.roster.get(id, {}).get("team", -1))
+	if world.ctf.active() and team >= 0 and _bot_ctf_defends(id, team):
+		var home: Vector3 = world.ctf._flags.get(team, {}).get("home", Vector3.INF)
+		if home != Vector3.INF:
+			want = BotHarbour.leashed(home, want, KEEPER_LEASH)
+	return world.store.clamp_inside(want, 4)
+
+## HOW MANY BLOCKS ONE COMPUTER PLAYER WILL LAY AS COVER IN A ROUND, and
+## how often. Small and slow on purpose: this is a sandbag thrown down
+## while somebody shoots at you, not a building project, and a bot that
+## can lay unlimited blocks anywhere turns an open field into a maze.
+const SHIELD_BUDGET := 10
+const SHIELD_EVERY := 1.1
+
+## BUILD SOMETHING TO GET BEHIND, right now, between me and them.
+##
+## "Building barricades" as an instinct rather than a scripted routine:
+## the only thing that triggers it is BotThreat deciding this bot should
+## be behind something, so it happens where the fighting is instead of at
+## a fixed spot somebody chose in advance.
+##
+## Two blocks, at chest and head height, one per go — one block is
+## something to crouch behind and the second closes the gap you would be
+## shot through. In the team's own colour where there is a team, so the
+## field ends up showing you who has been fighting where.
+func _bot_build_shield(id: String, bot: Dictionary, pos: Vector3,
+		toward: Vector3) -> void:
+	if float(bot.get("shield_cd", 0.0)) > 0.0:
+		return
+	bot.shield_cd = SHIELD_EVERY
+	if int(bot.get("shield_left", SHIELD_BUDGET)) <= 0:
+		return
+	# The out cannot touch the world, and neither can somebody on the
+	# floor: you do not lay bricks while being picked up.
+	if world.out_ids.has(id) or world.downed_ids.has(id):
+		return
+	var dir := Vector2(toward.x - pos.x, toward.z - pos.z)
+	if dir.length() < 0.001:
+		return
+	dir = dir.normalized()
+	var ahead := Vector2(pos.x, pos.z) + dir * 1.6
+	var wx := floori(ahead.x)
+	var wz := floori(ahead.y)
+	if not world.store.inside_world(wx, wz, 2):
+		return
+	var ground := walk_y(wx, wz, pos.y)
+	if ground < 0:
+		ground = floori(pos.y) - 1
+	var team := int(Game.roster.get(id, {}).get("team", -1))
+	var block: int = Blocks.DIRT if team < 0 \
+		else world.TEAM_WOOL[team % world.TEAM_WOOL.size()]
+	for up in [1, 2]:
+		var cell := Vector3i(wx, ground + up, wz)
+		if cell.y <= 1 or cell.y >= WorldGen.CHUNK_H - 2:
+			continue
+		if world.store.get_block(cell) != Blocks.AIR:
+			continue
+		world.store.set_block(cell, block)
+		bot.shield_left = int(bot.get("shield_left", SHIELD_BUDGET)) - 1
+		world.cl_batch.rpc([cell], block)
+		return
 
 func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 	var pos: Vector3 = bot.pos
+	# THE SENTRY ARC IS RE-EARNED EVERY TIME. Only the harbour sets it, so
+	# clearing it here means a bot that has stopped being a defender —
+	# gone to pick somebody up, been sent out by a thinning guard — stops
+	# turning to face an arc it is no longer holding.
+	bot.erase("watch_yaw")
 	# GETTING HOME COMES FIRST. Before the storm, before a fight, before
 	# anything: if you are out of the round, the only thing that matters is
 	# reaching your own flag and tagging back in. Nothing below this is a
@@ -647,8 +1136,19 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 			var inward := (world.storm_center - Vector3(pos.x, 0, pos.z)).normalized() * 20.0
 			inward.y = 0
 			return pos + inward
-		# Hurt? Break contact and look for loot instead of trading.
 		var hp := int(world.player_state.get(id, {}).get("hp", 5))
+		# SOMEBODY IS SHOOTING AT ME. Above everything except the storm,
+		# because it is the most urgent fact a bot can have and because it
+		# used not to be a fact at all — see `alerted`. This is the rung
+		# that answers both "you can zoom in and shoot at them and they
+		# won't do anything" and "when they're being shot at they don't
+		# seem to care".
+		var answer := _threat_goal(id, bot, pos, hp)
+		if answer != Vector3.INF:
+			return answer
+		# Hurt, with nobody having shot at us recently enough to have left
+		# an alert — walked into a fight rather than been ambushed. Break
+		# contact and look for loot instead of trading.
 		if hp <= 2:
 			var threat := _bot_nearest_enemy(id, pos, 26.0)
 			if threat != "":
@@ -730,8 +1230,54 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 			var jitter := lerpf(7.0, 1.5, nerve)
 			return epos + (pos - epos).normalized() * standoff \
 				+ Vector3(randf_range(-jitter, jitter), 0, randf_range(-jitter, jitter))
-	# Otherwise wander somewhere nearby.
+	# NOTHING OF ITS OWN TO DO — so go where the side has seen something.
+	#
+	# This rung used to be a random walk, and with a hundred players and no
+	# flags to organise around it is most of what a battle royale looks
+	# like from the outside: "you run off and the other bots just run off
+	# in random directions". They are not choosing to split up; nobody has
+	# ever told them anything, so a random direction is the only one
+	# available.
+	#
+	# A contact report is somebody on your own side having actually seen or
+	# been shot by an enemy. Walking towards the freshest one near you is
+	# what a person does when a fight starts across the field, and it costs
+	# a walk of at most a dozen entries.
+	var rally := _rally_point(id, pos)
+	if rally != Vector3.INF:
+		return rally
 	return pos + Vector3(randf_range(-14, 14), 0, randf_range(-14, 14))
+
+## How far a bot will walk towards somewhere its side has reported. Far
+## enough to cross most of a map, short enough that a fight at the other
+## end of the world is somebody else's.
+const RALLY_TO_CONTACT := 90.0
+
+## The freshest thing this side has seen that is worth walking to, spread
+## off whoever is already going, or INF for "nobody has seen anything".
+func _rally_point(id: String, pos: Vector3) -> Vector3:
+	var team := int(Game.roster.get(id, {}).get("team", -1))
+	if team < 0:
+		return Vector3.INF
+	var best := Vector3.INF
+	var newest := 0
+	for entry: Array in _contacts.get(team, []):
+		var at: Vector3 = entry[0]
+		if pos.distance_to(at) > RALLY_TO_CONTACT:
+			continue
+		if int(entry[1]) > newest:
+			newest = int(entry[1])
+			best = at
+	if best == Vector3.INF:
+		return best
+	# NOT ONTO THE SAME BLOCK. Everybody on the side is reading the same
+	# report, so without this they converge on one point and arrive as a
+	# single target — which is the opposite of the problem but just as bad
+	# to play against.
+	var lane := float(absi(id.hash()) % 9) - 4.0
+	var want := best + Vector3(lane, 0.0, float(absi(id.hash() >> 4) % 9) - 4.0)
+	return BotHarbour.keep_apart(want, _nearby_mates(id, team, want),
+		BotHarbour.MIN_GAP)
 
 ## True when a bot can walk from `pos` one step toward `dir` without a
 ## cliff-face climb or a swim: the ground ahead must be near walkable
@@ -1258,6 +1804,77 @@ func _cover_height() -> int:
 func _cover_slots() -> int:
 	return 16 if world.ctf.elimination() else 8
 
+## HOW MANY MINES A SIDE PUTS OUT, and how far from its own flag.
+##
+## "Putting down explosives around the place" — as something the defenders
+## decide to do rather than something scripted into the map. A Boom Block
+## laid on the ground is already a pressure mine in this game: the world
+## arms it, and standing on it sets it off (see TerrainSim.tick_boom_traps).
+## Nobody had ever used that on purpose.
+##
+## THEY GO WELL OUTSIDE THE WALL, and that is not decoration. Defenders
+## hold the harbour at HARBOUR_RADIUS and the cover ring stands at
+## CTF_COVER_RADIUS, so a minefield at twelve to sixteen blocks is beyond
+## everything its own side stands on — otherwise a team spends the round
+## blowing itself up, which is funny once.
+##
+## They are also VISIBLE: a red block sitting on open ground, in the lanes
+## the attacks have been coming down. That is the right trade for a game
+## children play — you can see it, you can shoot it from a distance, you
+## can go round it — and it still makes walking straight at a base cost
+## something.
+##
+## Few of them, and fewer in capture the flag, where a base has to stay
+## takeable or the round is a nil-all draw.
+const MINE_RING_MIN := 12.0
+const MINE_RING_MAX := 16.0
+const MINE_CLEAR_OF_MATES := 5.0
+
+var _mines: Dictionary = {}
+
+func _mine_allowance() -> int:
+	return 8 if world.ctf.elimination() else 4
+
+## Lay one, if there is a sensible place for it. True when something went
+## down, so the caller can spend its build on the wall instead.
+##
+## Aimed down the bearing the side has actually been attacked from, spread
+## either side of it, so a minefield grows where the fighting is rather
+## than evenly round a circle nobody walks on.
+func _bot_lay_mine(team: int, home: Vector3) -> bool:
+	if int(_mines.get(team, 0)) >= _mine_allowance():
+		return false
+	var bearing := float(_intel.get(team, {}).get("bearing", 0.0)) \
+		+ randf_range(-1.1, 1.1)
+	var out := randf_range(MINE_RING_MIN, MINE_RING_MAX)
+	var wx := floori(home.x + cos(bearing) * out)
+	var wz := floori(home.z + sin(bearing) * out)
+	if not world.store.inside_world(wx, wz, 2):
+		return false
+	var ground := walk_y(wx, wz, home.y + 3.0)
+	if ground < 0:
+		return false
+	var cell := Vector3i(wx, ground, wz)
+	var under := world.store.get_block(cell)
+	# Only ever laid in ground somebody could dig anyway. It replaces the
+	# surface block, so it must not be swallowing anything protected — and
+	# `can_carve` is the one place in the game that answers that.
+	if under == Blocks.AIR or Blocks.is_liquid(under) or not world.can_carve(cell, under):
+		return false
+	if under == Blocks.BOOM:
+		return false
+	# NOT UNDER OUR OWN FEET. A team-mate standing there when it arms is
+	# a mine laid for nobody.
+	var here := Vector3(float(wx) + 0.5, float(ground) + 1.0, float(wz) + 0.5)
+	for mate_v: Variant in _intel.get(team, {}).get("mates", []):
+		if Vector3(mate_v).distance_to(here) < MINE_CLEAR_OF_MATES:
+			return false
+	world.store.set_block(cell, Blocks.BOOM)
+	world.terrain._boom_armed[cell] = Time.get_ticks_msec() + world.BOOM_ARM_MSEC
+	world.cl_batch.rpc([cell], Blocks.BOOM)
+	_mines[team] = int(_mines.get(team, 0)) + 1
+	return true
+
 ## The cooldown is counted down with the others in the step, and CHECKED
 ## by the caller before it pays for a sight test — see there.
 func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> void:
@@ -1273,6 +1890,12 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> 
 		return
 	var home: Vector3 = flag.get("home", Vector3.INF)
 	if home == Vector3.INF:
+		return
+	# A SHARE OF THE BUILDING TURNS GO ON THE MINEFIELD instead of the
+	# wall. One in five: the wall is still what a defender mostly does,
+	# and a side that spent every turn laying charges would have a
+	# minefield and no cover to shoot from behind.
+	if randf() < 0.2 and _bot_lay_mine(team, home):
 		return
 	var slots := _cover_slots()
 	var pick := randi() % slots
@@ -1551,6 +2174,10 @@ func _bot_holding_a_revive(id: String, pos: Vector3) -> bool:
 	return false
 
 func tick(delta: float) -> void:
+	# THE TEAM PICTURE FIRST, so every bot in this step reads the same one.
+	# Rebuilt on its own timer inside; this call is an integer compare on
+	# the frames it does nothing.
+	_refresh_intel(delta)
 	_tick_bots(delta)
 	# One packet for everything that moved, at the END of the step — so a
 	# bot that moves and then a second one that moves share a packet
@@ -1582,6 +2209,7 @@ func _tick_bots(delta: float) -> void:
 		bot.dig_cd = maxf(0.0, float(bot.get("dig_cd", 0.0)) - delta)
 		bot.build_out_cd = maxf(0.0, float(bot.get("build_out_cd", 0.0)) - delta)
 		bot.build_cd = maxf(0.0, float(bot.get("build_cd", 0.0)) - delta)
+		bot.shield_cd = maxf(0.0, float(bot.get("shield_cd", 0.0)) - delta)
 		bot.think = float(bot.think) - delta
 		var pos: Vector3 = bot.pos
 		var downed := world.downed_ids.has(id)
@@ -1632,6 +2260,16 @@ func _tick_bots(delta: float) -> void:
 		# There is no useful direction to steer in from directly above, so
 		# the answer is to stop insisting on this goal: take a fresh one
 		# nearby and come at the place from somewhere else.
+		# STOOD AT A POST, WATCHING AN ARC. Yaw otherwise comes from
+		# whichever way the bot last walked, which at a post it has
+		# reached is nothing at all — so a guard that had arrived faced
+		# whatever direction it happened to come in from and stayed that
+		# way. This is the difference between eight bots standing about
+		# and eight sentries. Eased rather than snapped, so a defender
+		# turning to a new threat bearing looks like it turned.
+		if flat.length() < 2.0 and bot.has("watch_yaw"):
+			bot.yaw = lerp_angle(float(bot.yaw), float(bot.watch_yaw),
+				minf(1.0, delta * 3.0))
 		if flat.length() <= 0.8 and absf(to_goal.y) > 3.0:
 			bot.blocked_t = float(bot.get("blocked_t", 0.0)) + delta
 			if float(bot.blocked_t) > 2.0:
@@ -1843,6 +2481,37 @@ func _tick_bots(delta: float) -> void:
 		if world.match_phase == "BATTLE" and world.match_alive.has(id) \
 				and not downed and bot.shoot_cd <= 0.0:
 			var enemy := _bot_nearest_enemy(id, pos, float(bot.get("sight", 48.0)))
+			# NOTHING IN SIGHT, BUT SOMEBODY IS SHOOTING AT ME.
+			#
+			# This is the other half of "you can zoom in and shoot at them
+			# and they won't do anything". Natural eyesight tops out at
+			# fifty-five blocks for the best of them and twenty-two for
+			# the worst, and a scoped shot comes from further than that —
+			# so the bot was not ignoring you, it could not see you, and
+			# nothing that happened to it ever said otherwise.
+			#
+			# THE ANSWER IS ONE RAY, NOT A WIDER SEARCH. Opening the
+			# ordinary scan out to BotThreat.ALERT_SIGHT works and costs
+			# real time: it admits more candidates, sorts them and casts
+			# longer rays, for every bot in every firefight — measured at
+			# about a tenth of the whole server step with ninety-nine of
+			# them. And it is answering a question the bot does not need
+			# to ask, because being shot at TELLS IT WHO AND WHERE. So it
+			# tests exactly that one player, once, and only when the
+			# ordinary scan came back empty.
+			if enemy == "" and int(bot.get("threat_ms", 0)) > 0:
+				var whom := str(bot.get("threat_id", ""))
+				var age := Time.get_ticks_msec() - int(bot.get("threat_ms", 0))
+				var reach := BotThreat.sight(float(bot.get("sight", 48.0)), age)
+				if whom != "" and world.match_alive.has(whom) \
+						and not world.downed_ids.has(whom) \
+						and world.teams_differ(id, whom):
+					var where: Vector3 = world.player_state.get(whom, {}).get(
+						"pos", Vector3.INF)
+					if where != Vector3.INF and pos.distance_to(where) < reach \
+							and world.clear_shot(pos + Vector3(0, 1.4, 0),
+								where + Vector3(0, 1.0, 0)):
+						enemy = whom
 			if enemy != "":
 				var epos: Vector3 = world.player_state[enemy].pos
 				var muzzle := pos + Vector3(0, 1.4, 0)

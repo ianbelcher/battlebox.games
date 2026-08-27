@@ -24,6 +24,12 @@ extends Node
 ##                              setter, and check the clock follows
 ##   WORLD_HUDDLE_TEST=1        count who is at home and who is out in the
 ##                              field, which is "the bots just huddle"
+##   WORLD_SNIPE_TEST=1         shoot a computer player from further away
+##                              than it can see and report whether it does
+##                              anything at all about it
+##   WORLD_SPREAD_TEST=1        how far apart a team's defenders actually
+##                              stand, which is "they just march around
+##                              the flag"
 
 ## The world being probed.
 var world: WorldNode = null
@@ -144,6 +150,7 @@ func tick_bot_watch(delta: float) -> void:
 		return
 	_watch_t = 0.0
 	var stuck := 0
+	var holding := 0
 	var moved_total := 0.0
 	var counted := 0
 	for id: String in world.bots.roster.keys():
@@ -156,19 +163,38 @@ func tick_bot_watch(delta: float) -> void:
 		if world.match_phase != "BATTLE" and world.match_phase != "IDLE":
 			continue
 		counted += 1
-		var at: Vector3 = world.bots.roster[id].pos
+		var bot: Dictionary = world.bots.roster[id]
+		var at: Vector3 = bot.pos
 		var was: Vector3 = _watch_from.get(id, at)
 		var gone := Vector2(at.x - was.x, at.z - was.z).length()
 		moved_total += gone
 		if gone < 2.0:
-			stuck += 1
-			print("BOTWATCH %s STUCK at (%d,%d,%d), moved %.1f in 10s" % [
-				str(Game.roster.get(id, {}).get("name", "?")),
-				floori(at.x), floori(at.y), floori(at.z), gone])
+			# STANDING STILL IS NOT THE SAME AS BEING STUCK, and it used
+			# to be: this counted anybody who had not moved, because at
+			# the time no computer player ever WANTED to stand anywhere.
+			# A defender holding a post in a harbour does, all round, on
+			# purpose — so a metric that cannot tell the two apart reports
+			# a working guard as a field of broken bots.
+			#
+			# The difference is whether it is where it was trying to get
+			# to. At its goal and not moving is a sentry; two blocks short
+			# of a goal it has been failing to reach for ten seconds is
+			# the failure this probe exists for.
+			var want: Vector3 = bot.get("goal", at)
+			if Vector2(at.x - want.x, at.z - want.z).length() < 2.5:
+				holding += 1
+			else:
+				stuck += 1
+				print("BOTWATCH %s STUCK at (%d,%d,%d), moved %.1f in 10s, "
+					% [str(Game.roster.get(id, {}).get("name", "?")),
+						floori(at.x), floori(at.y), floori(at.z), gone]
+					+ "wanted (%d,%d) %.1f away"
+					% [floori(want.x), floori(want.z),
+						Vector2(at.x - want.x, at.z - want.z).length()])
 		_watch_from[id] = at
 	if counted > 0:
-		print("BOTWATCH %d/%d stuck, average %.1f blocks in 10s" % [
-			stuck, counted, moved_total / float(counted)])
+		print("BOTWATCH %d/%d stuck, %d holding a post, average %.1f blocks in 10s"
+			% [stuck, counted, holding, moved_total / float(counted)])
 
 
 ## Every probe, once per frame. They are all inert without their
@@ -434,7 +460,26 @@ func tick_roof(delta: float) -> void:
 					if world.store.get_block(Vector3i(floori(home.x) + dx2,
 							int(home.y) + up, floori(home.z) + dz2)) != Blocks.AIR:
 						wall += 1
-		print("ROOF: t=%.0fs team %d wall=%d roof=%d" % [_roof_t, team_i, wall, roof])
+		# AND THE MINEFIELD. Laying charges is the one bot behaviour with
+		# no visible output at all — no log line, no state, just red
+		# blocks appearing on ground nobody is looking at — so it is
+		# counted here beside the wall and the roof for the same reason
+		# those are.
+		# THE WHOLE DEPTH OF THE APPROACHES, not the flag's own level. The
+		# mound stands three blocks proud of the landscape and the mines
+		# go twelve to sixteen blocks out, on whatever the ground does
+		# there — which is usually well below the summit. Counting two
+		# courses at `home.y` found nothing and reported a minefield that
+		# was being laid perfectly well.
+		var mines := 0
+		for dz3 in range(-18, 19):
+			for dx3 in range(-18, 19):
+				for y3 in range(int(home.y) - 10, int(home.y) + 3):
+					if world.store.get_block(Vector3i(floori(home.x) + dx3,
+							y3, floori(home.z) + dz3)) == Blocks.BOOM:
+						mines += 1
+		print("ROOF: t=%.0fs team %d wall=%d roof=%d mines=%d"
+			% [_roof_t, team_i, wall, roof, mines])
 
 ## WORLD_HOLDOUT_SET=<minutes>: set the round length the way the menu
 ## does — through sv_ctf_config — and let the round start on it.
@@ -495,7 +540,136 @@ func tick_huddle(delta: float) -> void:
 	print("HUDDLE: t=%.0fs at their own base=%d, in between=%d, out in the field=%d"
 		% [_hud_t, home_n, out_n, away_n])
 
+## WORLD_SNIPE_TEST=1: THE COMPLAINT, MEASURED.
+##
+## "If I'm a player I can just zoom in and shoot at them and they won't do
+## anything." That is a claim about a computer player's state after being
+## hit, and there was nothing in this repository that could look at it —
+## the round runs, hearts come off, no error appears, and the bot walks on
+## in the direction it was already going.
+##
+## So: pick a bot, put a shot into it from well beyond the best eyesight
+## in the game, and report the three things that say whether it noticed —
+## which way it is FACING relative to the shot, what it DECIDED to do
+## about it, and whether it has actually MOVED since. A bot that ignores
+## you scores a facing near zero and no decision at all.
+var _snipe_t := 0.0
+var _snipe_who := ""
+var _snipe_from := Vector3.ZERO
+var _snipe_was := Vector3.ZERO
+var _snipe_fired := false
+
+func tick_snipe(delta: float) -> void:
+	if OS.get_environment("WORLD_SNIPE_TEST") != "1" or world == null:
+		return
+	_snipe_t += delta
+	if _snipe_t < 3.0:
+		return
+	_snipe_t = 0.0
+	if world.match_phase != "BATTLE":
+		print("SNIPE: waiting, phase=%s" % world.match_phase)
+		return
+	# FIRE AGAIN whenever the last alert has gone stale, so the decision
+	# being reported is always a live one. Shooting once and then reading
+	# the same bot two minutes later reports whatever it last decided,
+	# which is not the same question at all.
+	if _snipe_fired and world.bots.roster.has(_snipe_who):
+		var age := Time.get_ticks_msec() \
+			- int(world.bots.roster[_snipe_who].get("threat_ms", 0))
+		if age > BotThreat.MEMORY_MS + 3000:
+			_snipe_fired = false
+	if not _snipe_fired:
+		for id: String in world.bots.roster.keys():
+			if not world.match_alive.has(id) or world.downed_ids.has(id):
+				continue
+			var at: Vector3 = world.bots.roster[id].pos
+			# FROM FURTHER THAN IT CAN POSSIBLY SEE. The point is that
+			# eyesight cannot be the thing that saves it.
+			_snipe_from = at + Vector3(65.0, 6.0, 0.0)
+			_snipe_who = id
+			_snipe_was = at
+			_snipe_fired = true
+			print("SNIPE: %s at %v, shot from %v (%.0f blocks, sight is %.0f)"
+				% [str(Game.roster.get(id, {}).get("name", "?")), at, _snipe_from,
+					at.distance_to(_snipe_from),
+					float(world.bots.roster[id].get("sight", 0.0))])
+			world.match_hurt(id, 1, _snipe_from)
+			return
+		print("SNIPE: no computer player was available to shoot at")
+		return
+	var bot: Dictionary = world.bots.roster.get(_snipe_who, {})
+	if bot.is_empty():
+		print("SNIPE: %s left the round" % _snipe_who)
+		return
+	var here: Vector3 = bot.pos
+	# Facing, as how much of a turn it is off the line to the shooter: 1.0
+	# is looking straight at it, -1.0 is directly away.
+	var to_them := Vector2(_snipe_from.x - here.x, _snipe_from.z - here.z)
+	var facing := Vector2(-sin(float(bot.yaw)), -cos(float(bot.yaw)))
+	var toward := 0.0
+	if to_them.length() > 0.01:
+		toward = facing.dot(to_them.normalized())
+	var acts := ["ignore", "return fire", "push", "take cover", "withdraw"]
+	var act := int(bot.get("threat_act", -1))
+	print("SNIPE: %s facing=%+.2f decision=%s moved=%.1f hearts=%d gun=%d %.1fs ago"
+		% [str(Game.roster.get(_snipe_who, {}).get("name", "?")), toward,
+			acts[act] if act >= 0 and act < acts.size() else "NOTHING AT ALL",
+			here.distance_to(_snipe_was),
+			int(world.player_state.get(_snipe_who, {}).get("hp", 0)),
+			int(bot.get("weapon", 13)),
+			float(Time.get_ticks_msec() - int(bot.get("threat_ms", 0))) * 0.001])
+
+## WORLD_SPREAD_TEST=1: are the defenders a position, or a queue?
+##
+## "They just march around the flag" and "they should spread out and set
+## up a platoon harbour" are both claims about the SHAPE a guard makes,
+## and a shape is measurable: how far the nearest defender is from each
+## other defender, and how much of the compass around the flag has
+## somebody covering it. A conga line round a pole scores a tiny nearest
+## distance and a couple of quadrants; a harbour scores a real gap and
+## all four.
+var _spread_t := 0.0
+var _spread_said := 0.0
+
+func tick_spread(delta: float) -> void:
+	if OS.get_environment("WORLD_SPREAD_TEST") != "1" or world == null:
+		return
+	if world.match_phase != "BATTLE" or world.ctf._flags.is_empty():
+		return
+	_spread_t += delta
+	if _spread_t - _spread_said < 20.0:
+		return
+	_spread_said = _spread_t
+	for team_i: int in world.ctf._flags.keys():
+		var home: Vector3 = world.ctf._flags[team_i].get("home", Vector3.INF)
+		if home == Vector3.INF:
+			continue
+		var guard: Array = []
+		for id: String in world.match_alive.keys():
+			if int(Game.roster.get(id, {}).get("team", -1)) != team_i:
+				continue
+			var at: Vector3 = world.player_state.get(id, {}).get("pos", Vector3.INF)
+			if at == Vector3.INF or world.downed_ids.has(id):
+				continue
+			if Vector2(at.x - home.x, at.z - home.z).length() < 16.0:
+				guard.append(at)
+		if guard.size() < 2:
+			print("SPREAD: t=%.0fs team %d has %d on the base"
+				% [_spread_t, team_i, guard.size()])
+			continue
+		var closest := 999.0
+		var quadrants := {}
+		for a in guard.size():
+			quadrants[int(floor((atan2(float(guard[a].z) - home.z,
+				float(guard[a].x) - home.x) + TAU) / (TAU / 4.0))) % 4] = true
+			for b in range(a + 1, guard.size()):
+				closest = minf(closest, Vector3(guard[a]).distance_to(guard[b]))
+		print("SPREAD: t=%.0fs team %d guard=%d nearest_pair=%.1f sides_covered=%d/4"
+			% [_spread_t, team_i, guard.size(), closest, quadrants.size()])
+
 func tick(delta: float) -> void:
+	tick_snipe(delta)
+	tick_spread(delta)
 	tick_huddle(delta)
 	tick_length(delta)
 	tick_roof(delta)

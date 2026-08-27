@@ -67,7 +67,7 @@ back-reference, none declaring an RPC:
 
 | Node | File | Owns |
 | --- | --- | --- |
-| `World/Bots` | `bot_director.gd` | Computer players: pathing, cover, flags, shooting |
+| `World/Bots` | `bot_director.gd` | Computer players: what each one sees, what its team knows, and everything it does about both |
 | `World/Match` | `match_director.gd` | Battle: lobby, drop, storm, revives, the league table |
 | `World/Ctf` | `ctf_director.gd` | Both flag modes: bases, poles, carrying, scoring |
 | `World/Terrain` | `terrain_sim.gd` | Water, fire, growth, explosions |
@@ -77,15 +77,28 @@ back-reference, none declaring an RPC:
 | `World/Probes` | `world_probes.gd` | The `WORLD_*_TEST` dev hooks |
 | `World/Fx` | `world_fx.gd` | Client-side bangs and sparkles |
 
-Five files carry no state at all and exist purely so the awkward part of
-a subsystem can be tested: `render_layers.gd` (who sees whose body on a
-split screen), `bot_squads.gd` (how computer players deal themselves into
-attacking groups), `vehicle_geom.gd` (where a boat goes, and where
-somebody standing on it ends up when it turns), `climb_rule.gd` (what
-walking into something does) and `holdout_rules.gd` (what a round of last
-flag standing is worth, and how much of a team stays home). None of them
-touches an autoload, because a `--script` run has none — which is exactly
-why the logic worth checking has to live somewhere that needs nothing.
+A handful of files carry no state at all and exist purely so the awkward
+part of a subsystem can be tested: `render_layers.gd` (who sees whose body
+on a split screen), `bot_squads.gd` (how computer players deal themselves
+into attacking groups), `bot_orders.gd` (how many of a team stay home, and
+which enemy flag the rest join), `bot_harbour.gd` (where each defender
+stands, and everybody keeping out of everybody else's way),
+`bot_threat.gd` (what a computer player does about being shot at),
+`vehicle_geom.gd` (where a boat goes, and where somebody standing on it
+ends up when it turns), `climb_rule.gd` (what walking into something does)
+and `holdout_rules.gd` (what a round of last flag standing is worth, and
+how much of a team stays home). None of them touches an autoload, because
+a `--script` run has none — which is exactly why the logic worth checking
+has to live somewhere that needs nothing.
+
+The bot ones are all there for the same reason, and it is worth stating
+because it is not obvious: the things that go wrong with computer players
+are RATIOS AND SHAPES, not exceptions. "They all huddle round the flag"
+is a keeper count; "they run off in random directions" is a target
+choice; "they just march around the flag" is a set of coordinates. None
+of those raises anything, none of them fails a boot, and every one of
+them can be asked about directly once the arithmetic is somewhere with no
+world behind it.
 
 The rule the split follows: **if both ends need to know it, the world owns
 it; if only the server needs it to run the simulation, the director owns
