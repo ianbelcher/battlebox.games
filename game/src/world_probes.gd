@@ -24,6 +24,9 @@ extends Node
 ##                              setter, and check the clock follows
 ##   WORLD_HUDDLE_TEST=1        count who is at home and who is out in the
 ##                              field, which is "the bots just huddle"
+##   WORLD_POLE_TEST=1          turn reviving off, knock a bot out on its
+##                              own flag, and check the channel that can
+##                              never finish is never started
 ##   WORLD_SNIPE_TEST=1         shoot a computer player from further away
 ##                              than it can see and report whether it does
 ##                              anything at all about it
@@ -352,6 +355,7 @@ func tick_capture(delta: float) -> void:
 		_cap_took = int(world.ctf_caps.get(mine, 0))
 		print("CAPTURE: took=%d lost=%d before"
 			% [_cap_took, int(world.ctf_lost.get(_cap_target, 0))])
+		_sweep_reach(Vector3(flag.pos))
 	# TOOK IT, or somebody else did? A flag whose position has gone to
 	# infinity has been captured — and in last flag standing that is what a
 	# SUCCESSFUL touch looks like, so the old "the flag went while we
@@ -501,6 +505,132 @@ func tick_length(delta: float) -> void:
 	world.sv_ctf_config(-1, -1, -1, want.to_int())
 	print("HOLDOUT: length set to %d min (world says %.0f)"
 		% [want.to_int(), world.holdout_minutes])
+
+## HOW FAR THE FLAG ACTUALLY REACHES, on each side of it.
+##
+## "It didn't take it when I walked up to it, but it did when I came round
+## the other side, almost like the flag's position was two squares away
+## from it" is a claim about a SHAPE, and the shape of a touch test is
+## measurable: walk out from the pole along each of the four compass
+## directions and note the last step that still counts.
+##
+## If the four numbers match, the reach is a circle centred on the pole and
+## the complaint is about something else. If they do not, the circle is
+## centred somewhere the pole is not — which is precisely the half-block
+## the flag position used to be out by, and it is why this prints all four
+## rather than a yes or a no.
+func _sweep_reach(flag_at: Vector3) -> void:
+	if flag_at == Vector3.INF:
+		return
+	# WALKED OUT FROM THE POLE, NOT FROM THE FLAG POINT — and that
+	# distinction is the entire value of this check.
+	#
+	# Sweeping outward from `flag_at` measures the touch test's symmetry
+	# about its OWN centre, which is symmetric by construction and can
+	# never fail. What a player walks up to is the pole they can SEE, so
+	# the sweep starts at the middle of the pole's block, worked out from
+	# the block itself. If the flag point ever drifts off the pole again
+	# the four numbers stop matching, which is what a person feels as
+	# "I had to come at it from that side".
+	var pole := Vector3(float(floori(flag_at.x)) + 0.5, flag_at.y,
+		float(floori(flag_at.z)) + 0.5)
+	var legs := {"+x": Vector3(1, 0, 0), "-x": Vector3(-1, 0, 0),
+		"+z": Vector3(0, 0, 1), "-z": Vector3(0, 0, -1)}
+	var out: Array = []
+	for name_v: Variant in legs.keys():
+		var step: Vector3 = legs[name_v]
+		var reach := 0.0
+		for i in 40:
+			if not world.ctf._at_flag(pole + step * (float(i) * 0.25), flag_at):
+				break
+			reach = float(i) * 0.25
+		out.append("%s=%.2f" % [str(name_v), reach])
+	print("CAPTURE: reach from the pole at %v  %s  (they should all match)"
+		% [pole, " ".join(out)])
+
+## WORLD_POLE_TEST=1: THE POLE TRAP, reproduced on purpose.
+##
+## Turn reviving OFF through the real setter, knock a computer player out,
+## stand it on its own flag, and watch what the flag channel does with it.
+##
+## What used to happen, and what this exists to keep from coming back: the
+## channel ran anyway, because only `respawn` knew the flag route was shut.
+## It sent revive progress to the client every frame, which freezes anybody
+## it reaches, ran its three seconds, called `respawn`, got nothing, wiped
+## the progress and started again. Forever. On the field that is a player
+## rooted against their own pole reading "reviving", and — since a computer
+## player that is out walks home too — an entire team stacked on the mound
+## and not defending it.
+##
+## Nothing about that raises. The round runs, the clock ticks, and the only
+## visible symptom is a number that keeps resetting to zero. So the check
+## is: with the route shut, progress must never start at all, and the same
+## bot must not still be sat on its own flag a minute later.
+var _pole_t := 0.0
+var _pole_phase := 0
+var _pole_who := ""
+var _pole_home := Vector3.INF
+var _pole_seen := 0.0
+var _pole_started := 0
+
+func tick_pole(delta: float) -> void:
+	if OS.get_environment("WORLD_POLE_TEST") != "1" or world == null:
+		return
+	_pole_t += delta
+	match _pole_phase:
+		0:
+			if world.match_phase != "BATTLE" or world.ctf._flags.is_empty():
+				return
+			if _pole_t < 8.0:
+				return
+			# Through the real setter, not by writing the variable: the
+			# question is whether the SETTING closes the route, and a test
+			# that pokes the field behind it proves nothing about the menu.
+			world.sv_ctf_config(ReviveRule.NONE, -1, -1)
+			print("POLE: reviving set to %d (%s)"
+				% [world.revive_mode, ReviveRule.label(world.revive_mode)])
+			_pole_phase = 1
+			_pole_t = 0.0
+		1:
+			if _pole_t < 1.0:
+				return
+			for id: String in world.bots.roster.keys():
+				var team := int(Game.roster.get(id, {}).get("team", -1))
+				var home: Vector3 = world.ctf._flags.get(team, {}).get(
+					"home", Vector3.INF)
+				if team < 0 or home == Vector3.INF or not world.match_alive.has(id):
+					continue
+				_pole_who = id
+				_pole_home = home
+				world.battle.eliminate(id)
+				print("POLE: knocked %s (team %d) out, out=%s, standing it on "
+					% [str(Game.roster.get(id, {}).get("name", "?")), team,
+						str(world.out_ids.has(id))]
+					+ "its own flag at %v" % home)
+				_pole_phase = 2
+				_pole_t = 0.0
+				return
+			print("POLE: no computer player available")
+			_pole_phase = 3
+		2:
+			# Held ON the flag every frame, because that is the position the
+			# channel reads and the bot's own movement overwrites it.
+			if world.bots.roster.has(_pole_who):
+				world.bots.roster[_pole_who].pos = _pole_home
+			if world.player_state.has(_pole_who):
+				world.player_state[_pole_who].pos = _pole_home
+			if float(world.ctf._flag_progress.get(_pole_who, 0.0)) > 0.0:
+				_pole_started += 1
+			_pole_seen += delta
+			if _pole_t < 5.0:
+				return
+			_pole_t = 0.0
+			print("POLE: after %.0fs on its own flag — progress started on %d "
+				% [_pole_seen, _pole_started]
+				+ "frames, out=%s, %s"
+				% [str(world.out_ids.has(_pole_who)),
+					"ok   the shut door is never knocked on" if _pole_started == 0
+						else "FAIL the channel is running with no way back"])
 
 ## WORLD_HUDDLE_TEST=1: are they playing, or standing on their own flag?
 ##
@@ -668,6 +798,7 @@ func tick_spread(delta: float) -> void:
 			% [_spread_t, team_i, guard.size(), closest, quadrants.size()])
 
 func tick(delta: float) -> void:
+	tick_pole(delta)
 	tick_snipe(delta)
 	tick_spread(delta)
 	tick_huddle(delta)

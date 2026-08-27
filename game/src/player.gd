@@ -785,6 +785,40 @@ func _ride(delta: float) -> void:
 				position)
 			position = VehicleGeom.to_world(Vector3(was.pos), float(was.yaw),
 				spot)
+			# ...AND WHICH WAY YOU ARE POINTING GOES ROUND WITH HER TOO.
+			#
+			# The carry above is exact — measured at zero drift over a
+			# forty-frame turn, as a passenger and at the helm — and it was
+			# still reported as "when you turn, your position on the boat
+			# moves". It is not the position. It is the FACING: only where
+			# you stood was ever carried, so the boat rotated underneath a
+			# body that went on pointing the same way at the world, and the
+			# camera went on looking there as well.
+			#
+			# From the seat that is indistinguishable from sliding, and it
+			# is why it read as the boat turning about the wrong centre:
+			# everything you can see swings around you while you face one
+			# way. Standing on a turning deck turns you. It always did in
+			# life and it never did here.
+			#
+			# Rotated through VehicleGeom rather than Godot's own
+			# `rotated(UP, …)`, which is the opposite sign convention: the
+			# heading has to turn exactly as the position did, and the one
+			# way to be sure of that is to use the same function.
+			# THE TWO RUN OPPOSITE WAYS, and adding the same delta to both
+			# is how this was wrong the first time. `heading` turns the way
+			# VehicleGeom turns things; the yaws this file keeps are the
+			# other way round, because `heading` is (-sin, -cos) of
+			# look_yaw. Caught by the probe rather than by reading it: a
+			# 1.04 radian turn came out as 2.08 radians of drift against
+			# the deck, which is the shape of a sign flip and nothing else.
+			var turned := wrapf(float(was.yaw) - _ride_was_yaw, -PI, PI)
+			if absf(turned) > 0.00001:
+				heading = VehicleGeom.to_world(Vector3.ZERO, turned, heading)
+				var swing := -turned
+				look_yaw = wrapf(look_yaw + swing, -PI, PI)
+				camera_yaw = wrapf(camera_yaw + swing, -PI, PI)
+				rotation.y = wrapf(rotation.y + swing, -PI, PI)
 	var found: Dictionary = view.deck_under(position)
 	var now_id := str(found.get("id", ""))
 	if now_id != ride_id:

@@ -31,15 +31,44 @@ const START_AFTER := 7.0
 ## ticks in which to walk off the boat on its own.
 const SETTLE := 2
 
+## A TURN THE WAY THE HELM DOES IT: a slice of a radian a frame, for long
+## enough that anything lost per frame has somewhere to accumulate. At a
+## boat's own BOAT_TURN of 1.5 rad/s these forty frames are about two
+## thirds of a turn, which is a normal thing to ask of a boat and much
+## more than a single-frame snap can ever reveal.
+const TURN_FRAMES := 40
+const TURN_STEP := 0.026
+
 var _t := 0.0
 var _phase := 0
 var _ticks := 0
 var _vid := ""
 var _from := Vector3.ZERO
+## Where the rider was standing in the boat's own frame before a turn, and
+## which way they were pointing along her.
+var _spot := Vector3.ZERO
+var _faced := 0.0
 var _had := 0
 var _waited := 0.0
 var _failures := 0
 var _quiet: InputSlot = null
+var _helm_hard: InputSlot = null
+
+## Throttle open and the wheel hard over. Player._ride reads the move
+## vector as [steer, -throttle], so this is "full ahead, turning".
+class HelmHard extends InputSlot:
+	func _init() -> void:
+		super(Kind.GAMEPAD, 98)
+	func get_move_vector() -> Vector2:
+		return Vector2(1.0, -1.0)
+	func get_look_vector() -> Vector2:
+		return Vector2.ZERO
+	func is_jump_pressed() -> bool:
+		return false
+	func is_sneak_pressed() -> bool:
+		return false
+	func is_lift_pressed() -> bool:
+		return false
 
 func _ready() -> void:
 	print("BOAT: probe armed")
@@ -72,7 +101,11 @@ func _physics_process(delta: float) -> void:
 	# off the boat in the middle of the measurement — which it did.
 	if _quiet == null:
 		_quiet = InputSlot.new(InputSlot.Kind.GAMEPAD, 99)
-	me.input = _quiet
+		_helm_hard = HelmHard.new()
+	# Whatever is driving THIS phase. Every phase but the steering one
+	# wants the controls held still; that one wants them held over.
+	if me.input != _helm_hard:
+		me.input = _quiet
 	_ticks += 1
 	match _phase:
 		0:
@@ -151,8 +184,52 @@ func _physics_process(delta: float) -> void:
 			var swung := me.position.distance_to(_from)
 			_report(swung > 1.0 and swung < 8.0,
 				"and the rider swung round with it (%.2f blocks)" % swung)
+			# A REAL TURN, not a teleport, and this is the case that was
+			# missing. Everything above snaps the yaw round by a quarter
+			# turn in ONE frame and then asks whether the rider is still
+			# aboard — which a carry can get right while still losing a
+			# little of the rider's spot on every frame of a turn that
+			# takes a second and a half. Reported from play as "when you
+			# turn, your position on the boat moves", and invisible to a
+			# single-frame check by construction.
+			#
+			# So: turn her the way the helm does, a slice at a time, and
+			# measure the rider's spot IN THE BOAT'S OWN FRAME at both
+			# ends. That number should not move at all.
+			_stand_on(me, view, Vector3(0.9, 0.0, 1.8))
+			_spot = VehicleGeom.to_local(Vector3(vv.pos), float(vv.yaw),
+				me.position)
+			_faced = _facing_in_boat(me, vv)
 			_step()
 		5:
+			var turning: Dictionary = view.at(_vid)
+			if _ticks <= TURN_FRAMES:
+				turning.yaw = float(turning.yaw) + TURN_STEP
+				turning.target_yaw = turning.yaw
+				return
+			if _ticks < TURN_FRAMES + SETTLE:
+				return
+			var ended := VehicleGeom.to_local(Vector3(turning.pos),
+				float(turning.yaw), me.position)
+			var slid := Vector2(ended.x - _spot.x, ended.z - _spot.z).length()
+			_report(slid < 0.35,
+				"a gradual turn leaves the rider on the same spot "
+				+ "(slid %.2f blocks: %.2f,%.2f -> %.2f,%.2f over %d frames)"
+				% [slid, _spot.x, _spot.z, ended.x, ended.z, TURN_FRAMES])
+			# AND FACING THE SAME WAY ALONG HER. Standing on a turning deck
+			# turns you: if the bow was ahead of you before the turn it is
+			# ahead of you after it. Without this the deck rotates under a
+			# body that keeps pointing at the same bit of scenery, which is
+			# what "when you turn, your position on the boat moves" turned
+			# out to be — the position was never wrong.
+			var faced_now := _facing_in_boat(me, turning)
+			var swing := absf(wrapf(faced_now - _faced, -PI, PI))
+			_report(swing < 0.25,
+				"…and still facing the same way along her "
+				+ "(turned %.2f rad against the deck over %d frames)"
+				% [swing, TURN_FRAMES])
+			_step()
+		6:
 			if _ticks < SETTLE:
 				return
 			# THE HELM, which is the half this probe never checked. Every
@@ -175,7 +252,7 @@ func _physics_process(delta: float) -> void:
 				"…and this machine knows the helm is its own")
 			_from = Vector3(helm.pos)
 			_step()
-		6:
+		7:
 			# SPEED, not distance travelled. Player._ride drives this same
 			# boat every frame with whatever the stick says — nothing,
 			# here, because the probe holds the controls still — so a
@@ -202,7 +279,7 @@ func _physics_process(delta: float) -> void:
 				Vector3i(floori(me.position.x) + 3, floori(me.position.y),
 					floori(me.position.z)), VehicleGeom.KIND_CAR)
 			_step()
-		7:
+		8:
 			# WAIT ON THE ANSWER, not on a tick count. Every other phase
 			# here measures something local and two ticks is plenty;
 			# this one asked the SERVER for a vehicle and then looked
@@ -213,17 +290,60 @@ func _physics_process(delta: float) -> void:
 			if view.vehicles.size() > _had:
 				_report(true, "a car can be put down (%d → %d)"
 					% [_had, view.vehicles.size()])
-				_finish()
+				_stand_on(me, view, Vector3(0.9, 0.0, 1.8))
+				_step()
 				return
 			_waited += delta
 			if _waited > 4.0:
 				_report(false, "a car can be put down (%d → %d after %.1fs)"
 					% [_had, view.vehicles.size(), _waited])
 				_finish()
+		9:
+			# DRIVING IT YOURSELF, which every case above leaves out.
+			#
+			# The turn tests before this move the boat by writing its yaw
+			# and then look at the rider — a PASSENGER's path. Steering it
+			# is a different route through Player._ride: the helm runs
+			# `drive_mine` in the middle of the carry, so the pose the
+			# rider is projected out of is the one the driver just changed.
+			# A boat that carried passengers perfectly could still slide
+			# its own driver about the deck, and nothing here would know.
+			#
+			# So: hold the stick over, let the real code drive, and measure
+			# the driver's own spot in the boat's frame at both ends.
+			if _ticks == 1:
+				var v0: Dictionary = view.at(_vid)
+				_spot = VehicleGeom.to_local(Vector3(v0.pos), float(v0.yaw),
+					me.position)
+				me.input = _helm_hard
+				return
+			if _ticks < TURN_FRAMES:
+				return
+			me.input = _quiet
+			var vd: Dictionary = view.at(_vid)
+			var now_spot := VehicleGeom.to_local(Vector3(vd.pos),
+				float(vd.yaw), me.position)
+			var slid := Vector2(now_spot.x - _spot.x,
+				now_spot.z - _spot.z).length()
+			_report(slid < 0.35,
+				"driving it yourself leaves you on the same spot "
+				+ "(slid %.2f blocks: %.2f,%.2f -> %.2f,%.2f over %d frames)"
+				% [slid, _spot.x, _spot.z, now_spot.x, now_spot.z, TURN_FRAMES])
+			_finish()
 
 func _step() -> void:
 	_phase += 1
 	_ticks = 0
+
+## WHICH WAY THE RIDER IS POINTING, IN THE BOAT'S OWN FRAME.
+##
+## The heading turned into the boat's frame and read as an angle, so it can
+## be compared before and after a turn. A rider who swung round with the
+## deck reads the same number at both ends; one the deck rotated underneath
+## reads a number that has moved by the whole turn.
+func _facing_in_boat(me: Player, v: Dictionary) -> float:
+	var local := VehicleGeom.to_local(Vector3.ZERO, float(v.yaw), me.heading)
+	return atan2(local.x, local.z)
 
 ## Put the player on a spot of the deck, given in the boat's own frame.
 func _stand_on(me: Player, view: VehicleView, spot: Vector3) -> void:

@@ -195,7 +195,22 @@ func _ctf_build_base(team_i: int, centre: Vector3, pairs: Array) -> Vector3:
 			put(Vector3i(wx, top, wz), skin, pairs)
 	_ctf_raise_pole(team_i, cx, cz, base_y, pairs)
 	# The flag itself is the standing room on the summit, beside the pole.
-	return Vector3(cx, base_y + CTF_MOUND_HEIGHT + 1, cz)
+	#
+	# THE MIDDLE OF THE POLE'S BLOCK, not the corner of it. `cx` and `cz`
+	# are cell indices, and a cell spans from its index to one past it —
+	# so the pole a player can see is centred half a block further on in
+	# BOTH directions than the point every distance in this file was
+	# measured from. Everything that reads the flag inherited that: the
+	# touch radius sat half a block off the thing it is drawn around, so
+	# the reach was half a block shorter on one side than the other, which
+	# is exactly the shape of "I couldn't take it walking up to it, and
+	# then I could from round the other side".
+	#
+	# Safe to move because everything that wants the CELL takes
+	# `floori(home.x)`, and floori of cx + 0.5 is still cx. Only the things
+	# that wanted a POINT change, and they wanted this one.
+	return Vector3(float(cx) + 0.5, base_y + CTF_MOUND_HEIGHT + 1,
+		float(cz) + 0.5)
 
 ## The glowing team-coloured pole on the summit — or the empty air where it
 ## stands while the flag is away.
@@ -363,24 +378,74 @@ func revive_pulse(id: String, pos: Vector3, frac: float, delta: float,
 ## Your flag has to be HOME for this: while somebody is running it back to
 ## their base there is nothing to touch, which is the pressure that makes
 ## losing your flag hurt.
+## FORGET ANY PART-DONE CHANNEL, AND SAY SO OUT LOUD.
+##
+## Telling the client is not optional, and it is the difference between a
+## stall and a lock-up: `Player.revive_locked()` freezes anybody the
+## client believes has revive progress, so dropping the server's copy and
+## leaving the client's behind roots a player to the spot with nothing
+## left running to release them.
+func _clear_flag_progress(id: String) -> void:
+	if not _flag_progress.has(id) and not _revive_pulse_t.has(id):
+		return
+	_flag_progress.erase(id)
+	_revive_pulse_t.erase(id)
+	world.cl_revive_progress.rpc(id, 0.0)
+
+## IS THE WAY BACK THROUGH YOUR OWN FLAG OPEN AT ALL?
+##
+## THE ONE PLACE THAT ANSWERS IT, and that is the whole fix. The answer
+## lived inside `respawn()` alone, so the channel that walks a player up to
+## that door never asked whether the door was there — it just ran, every
+## time, and found it shut at the end.
+##
+## What that did on the field with reviving turned OFF:
+##
+##   You are knocked out. With no team-mate lift there is no down state at
+##   all, so you go straight to `out`, fly home, and touch your own flag.
+##   The channel starts. It sends revive progress to your client, and
+##   `Player.revive_locked()` freezes anybody with revive progress — so you
+##   are now standing still at your own pole. Three seconds later the
+##   channel finishes and calls `respawn`, which returns without doing
+##   anything, because the flag route is closed in this mode. The progress
+##   is wiped, you are still out, you are still stood on the flag, and next
+##   frame the whole thing starts again.
+##
+## Frozen against your own pole, "reviving" forever, unable to walk away
+## from it. Reported exactly that way, twice in two games — and since a
+## computer player that is out walks home too, whole TEAMS piled onto their
+## own poles and stayed there. A side stuck on its own flag is also a side
+## not defending it, which is the other half of what was seen: a base
+## nobody could take, guarded by nobody.
+##
+## So the junction is asked BEFORE the walk to it, not only at the end.
+## Both closed routes live here: a mode with no way back through a flag,
+## and a team already knocked out of a siege, whose flag is gone.
+func flag_route_open(id: String) -> bool:
+	if not ReviveRule.flag_brings_you_back(world.revive_mode, active()):
+		return false
+	if elimination() and team_is_out(int(Game.roster.get(id, {}).get("team", -1))):
+		return false
+	return true
+
 func _ctf_flag_channel(id: String, pos: Vector3, flag: Dictionary,
 		flag_at: Vector3, delta: float) -> void:
+	# THE DOOR FIRST. A channel that cannot finish must never start: it
+	# freezes whoever stands in it, and then it loops.
+	if not flag_route_open(id):
+		_clear_flag_progress(id)
+		return
 	# Belt and braces: this is only ever called from the out and downed
 	# branches, but it is the one place that can start a revive, and a
 	# revive starting on a player who is perfectly well is exactly the
 	# confusion being fixed.
 	if not world.out_ids.has(id) and not world.downed_ids.has(id):
-		if _flag_progress.has(id):
-			_flag_progress.erase(id)
-			_revive_pulse_t.erase(id)
+		_clear_flag_progress(id)
 		return
 	var here: bool = not flag.is_empty() and int(flag.back_at) == 0 \
 		and _at_flag(pos, flag_at)
 	if not here:
-		if _flag_progress.has(id):
-			_flag_progress.erase(id)
-			_revive_pulse_t.erase(id)
-			world.cl_revive_progress.rpc(id, 0.0)
+		_clear_flag_progress(id)
 		return
 	var done := float(_flag_progress.get(id, 0.0)) + delta
 	_flag_progress[id] = done
@@ -448,6 +513,14 @@ func tick(delta: float) -> void:
 					world.bots.roster[id].pos = home_spot
 					world.player_state[id].pos = home_spot
 					world.cl_stand.rpc(id, home_spot, false, [], false)
+					continue
+				# NO DOOR, NO BACKSTOP. With the flag route closed
+				# `respawn` cannot do anything, so firing this only
+				# teleported an out computer player onto its own base to
+				# stand there for the rest of the round — a crowd of bodies
+				# on the mound that reads as a team huddling and is really a
+				# team with nowhere left to go.
+				if not flag_route_open(id):
 					continue
 				var out_since := int(_bot_out_since.get(id, 0))
 				if out_since == 0:
@@ -690,10 +763,12 @@ func respawn(id: String) -> void:
 	# than each route is the point — touching your own flag, the channel a
 	# computer player stands through, and the backstop that recovers a bot
 	# walled into a pit all end up here, and a fourth route added later
-	# cannot forget. See ReviveRule.
-	if not ReviveRule.flag_brings_you_back(world.revive_mode, active()):
-		return
-	if elimination() and team_is_out(int(Game.roster.get(id, {}).get("team", -1))):
+	# cannot forget.
+	#
+	# It is the SAME test the channel now asks before it starts, and it has
+	# to stay that way: the two disagreeing is what froze players against
+	# their own poles for a whole round. See flag_route_open.
+	if not flag_route_open(id):
 		return
 	world.out_ids.erase(id)
 	_flag_progress.erase(id)

@@ -891,6 +891,17 @@ func ctf_goal(id: String, pos: Vector3) -> Vector3:
 	# back, so on the field it looked like it had forgotten the way and was
 	# trying to bring itself round on the spot.
 	if world.out_ids.has(id):
+		# ...ONLY IF THERE IS A WAY BACK IN. With reviving off, touching
+		# your own flag does nothing, so every knocked-out computer player
+		# on the side walked home and then stood on the pole for the rest
+		# of the round. That is most of "two of the five teams were just
+		# stuck on their flag, all running into it" — they were not stuck,
+		# they had arrived, and arriving was worth nothing.
+		#
+		# With the door shut they keep out of the way instead: off the
+		# mound, so the ones still playing have room to defend it.
+		if not world.ctf.flag_route_open(id):
+			return Vector3.INF
 		return home
 	if _bot_ctf_defends(id, team) and home != Vector3.INF:
 		return _bot_harbour_goal(id, team, pos, home)

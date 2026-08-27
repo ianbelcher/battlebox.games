@@ -135,11 +135,28 @@ func drive_mine(vid: String, throttle: float, steer: float,
 	var out := VehicleGeom.drive(int(v.kind), Vector3(v.pos), float(v.yaw),
 		float(v.get("speed", 0.0)), throttle, steer, delta)
 	var moved: Vector3 = out[0]
-	moved = _sit_on_the_world(int(v.kind), Vector3(v.pos), moved)
+	moved = _sit_on_the_world(int(v.kind), Vector3(v.pos), moved,
+		float(out[1]), float(out[2]), delta)
 	v.pos = moved
 	v.yaw = out[1]
-	v.speed = out[2]
+	# A REFUSED MOVE IS A CRASH, so it has to cost the speed as well.
+	#
+	# Speed was assigned from `drive` whatever the world said, so a car
+	# held against a step kept its full thirteen blocks a second — and
+	# spent every frame computing a move it was not allowed to make,
+	# pressed against the same block with the throttle wide open. Nothing
+	# ever bled it off, so it could not settle and it could not get away:
+	# from the seat that is a car that has stopped dead and will not go.
+	if kind_blocked(Vector3(v.pos), moved) and not is_zero_approx(float(out[2])):
+		v.speed = float(out[2]) * 0.25
+	else:
+		v.speed = out[2]
 	return true
+
+## Did the world refuse that move? Compared flat: a car settling onto the
+## ground it is already over has moved in y and gone nowhere.
+func kind_blocked(was: Vector3, now: Vector3) -> bool:
+	return Vector2(now.x - was.x, now.z - was.z).length() < 0.0005
 
 ## A BOAT FLOATS AND A CAR DRIVES OVER THINGS.
 ##
@@ -148,7 +165,32 @@ func drive_mine(vid: String, throttle: float, steer: float,
 ## is held at the waterline; a car rides whatever it is standing on, and
 ## refuses a step it would have to climb a cliff to make, which is what
 ## keeps one from driving up the side of a mountain.
-func _sit_on_the_world(kind: int, was: Vector3, want: Vector3) -> Vector3:
+##
+## THIS IS WHERE "DRIVE ONTO UNEVEN GROUND AND IT JUST BOUNCES AND WILL
+## NOT MOVE" CAME FROM, and it was two separate faults wearing one symptom.
+##
+##   IT SAMPLED ONE COLUMN. The height came from the single block under
+##   the car's CENTRE, so a body nearly four blocks long and three wide
+##   was pinned to a one-block probe. Crossing any boundary between two
+##   ground heights snapped the whole car a full block in a single frame,
+##   over and over as it drove — and since a rider's y is carried with the
+##   vehicle, the passengers went with it. That is the bouncing.
+##
+##   AND A DROP WAS TREATED AS A CLIMB. The test was `absf(ground - was.y)
+##   > CAR_MAX_STEP`, which refuses the ENTIRE move — no forward motion at
+##   all — in both directions. Driving off any ledge deeper than 1.4
+##   blocks therefore froze the car solid against thin air, and it stayed
+##   frozen, because the refusal never changed the situation that caused
+##   it. That is the "it wouldn't move".
+##
+## So: the ground is read across the car's actual FOOTPRINT and the
+## highest point of it wins, which stops a wheel-sized dip swallowing the
+## body; a climb bigger than a kerb still refuses the move, because that
+## is a wall; a DROP never does, it is just a drop; and the body eases on
+## to the height it wants instead of teleporting to it, so a step becomes
+## a short ramp.
+func _sit_on_the_world(kind: int, was: Vector3, want: Vector3, yaw: float,
+		speed: float, delta: float) -> Vector3:
 	if world == null or world.chunks == null:
 		return want
 	if kind == VehicleGeom.KIND_BOAT:
@@ -158,16 +200,51 @@ func _sit_on_the_world(kind: int, was: Vector3, want: Vector3) -> Vector3:
 			# Aground. Stay where she was rather than sailing up the beach.
 			return was
 		return Vector3(want.x, float(WorldGen.SEA_LEVEL) + 0.55, want.z)
-	# A car: find the ground near where it already was.
-	var ground := _ground_near(want, was.y)
-	if ground == INF or absf(ground - was.y) > CAR_MAX_STEP:
+	var ground := _ground_under(kind, want, yaw, was.y)
+	if ground == INF:
 		return was
-	return Vector3(want.x, ground, want.z)
+	# A CLIMB is a wall and refuses the move. A DROP is a drop.
+	if ground - was.y > CAR_MAX_STEP:
+		return was
+	# EASED, and quick enough to keep up with the slope being driven. A
+	# fixed rate is either too slow to climb a hill at speed — the body
+	# sinks into it — or so fast it is the old snap by another name, so it
+	# is tied to how fast the car is actually going.
+	var ride := maxf(CAR_RIDE_MIN, absf(speed) * CAR_RIDE_PER_SPEED)
+	return Vector3(want.x, move_toward(was.y, ground, ride * delta), want.z)
+
+## THE GROUND UNDER THE WHOLE CAR, not under one block of it.
+##
+## Five probes — the four corners of the deck and its middle — taken in the
+## car's own frame so they turn with it, and the HIGHEST wins. Highest,
+## because a body resting on a surface rests on the tallest thing beneath
+## it; averaging buries the nose in a bank, and taking the centre alone is
+## the single-column bug this replaces.
+##
+## Only ever run for the one vehicle this machine is driving, so it is five
+## short column scans a frame and nothing to think about.
+func _ground_under(kind: int, at_pos: Vector3, yaw: float,
+		from_y: float) -> float:
+	var hw := VehicleGeom.half_width(kind) * 0.85
+	var hl := VehicleGeom.half_length(kind) * 0.85
+	var top := INF
+	for corner: Vector3 in [Vector3.ZERO, Vector3(-hw, 0.0, -hl),
+			Vector3(hw, 0.0, -hl), Vector3(-hw, 0.0, hl), Vector3(hw, 0.0, hl)]:
+		var probe := VehicleGeom.to_world(at_pos, yaw, corner)
+		var g := _ground_near(probe, from_y)
+		if g == INF:
+			continue
+		top = g if top == INF else maxf(top, g)
+	return top
 
 ## The top of whatever is under this point, searched from around the
 ## vehicle's current height rather than from the sky — a car in a canyon
 ## should find the canyon floor, not its rim.
 const CAR_MAX_STEP := 1.4
+## How fast the body settles onto the height it wants, in blocks a second:
+## a floor, and a multiple of road speed so a hill can be climbed at pace.
+const CAR_RIDE_MIN := 6.0
+const CAR_RIDE_PER_SPEED := 2.2
 func _ground_near(at_pos: Vector3, from_y: float) -> float:
 	for dy in range(3, -5, -1):
 		var y := floori(from_y) + dy
