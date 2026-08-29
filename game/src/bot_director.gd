@@ -758,12 +758,31 @@ func _bot_ctf_target_team(id: String, team: int, pos: Vector3) -> int:
 ## outward from there rather than starting outside it.
 const HARBOUR_RADIUS := CtfDirector.CTF_FLAG_TOUCH * 0.8
 
-## HOW FAR A DEFENDER WILL GO TO MEET SOMETHING. Not "as far as it can
-## see": a keeper that walks at whatever it spots has left the flag, and
-## the base behind it is then guarded by somebody who is technically still
-## a defender. The same fourteen blocks a keeper is allowed to travel to
-## pick a team-mate up.
-const KEEPER_LEASH := 14.0
+## THE THREE DISTANCES A DEFENDER LIVES BY, and they are three different
+## questions that were all being answered with one number.
+##
+##   WATCH    how far out an enemy is worth REPORTING to the side. Wide:
+##            a contact is what the team knows, and knowing costs nothing.
+##   ENGAGE   how close one has to be before it is worth LEAVING THE POST
+##            for. Just past the cover ring, so it means "at our wall"
+##            rather than "somewhere on the horizon".
+##   LEASH    and once moving, how far out it may ever get. Inside the
+##            wall, so a defender meets an attacker AT the ring and never
+##            beyond it.
+##
+## It used to walk at anything inside thirty blocks on a fourteen-block
+## leash. Thirty is four times the mound, three times the cover ring and
+## six times the radius that counts as the flag; fourteen puts a defender
+## well outside its own wall with the pole unattended behind it. One
+## attacker wandering past the far side of a base pulled the whole guard
+## off it, which is "all the bots leave the flag and chase others".
+##
+## Ordered against the ring rather than written as bare numbers, and a
+## unit test holds the ordering: a defender that can be drawn further out
+## than its own wall is not defending anything.
+const KEEPER_WATCH := 30.0
+const KEEPER_ENGAGE := float(CTF_COVER_RADIUS) + 3.0
+const KEEPER_LEASH := float(CTF_COVER_RADIUS) - 1.0
 
 ## A DEFENDED BASE, NOT A MERRY-GO-ROUND.
 ##
@@ -815,7 +834,7 @@ func _bot_harbour_goal(id: String, team: int, pos: Vector3,
 		if st.is_empty():
 			continue
 		var d: float = home.distance_to(st.pos)
-		if d < 30.0:
+		if d < KEEPER_WATCH:
 			near.append([d, other])
 	near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
 	var eye := pos + Vector3(0, 1.4, 0)
@@ -826,11 +845,28 @@ func _bot_harbour_goal(id: String, team: int, pos: Vector3,
 		looked += 1
 		var at: Vector3 = world.player_state[entry[1]].pos
 		if world.clear_shot(eye, at + Vector3(0, 1.0, 0)):
-			if not bot.is_empty():
-				bot.erase("watch_yaw")
+			# SEEING SOMEBODY IS NOT A REASON TO GO TO THEM.
+			#
+			# Every enemy within thirty blocks used to be walked at, on a
+			# fourteen-block leash. Thirty blocks is four times the mound,
+			# three times the cover ring and six times the radius that
+			# counts as the flag — so one attacker strolling past the far
+			# side of a base drew the entire guard off it, and "all the
+			# bots leave the flag and chase others" is exactly that.
+			#
+			# TELL THE SIDE EITHER WAY. The report is what the team knows
+			# and it is worth having at the full watch distance; what is
+			# gated is the WALKING. And a defender that holds its post is
+			# not passive — the firing code is separate from this and
+			# shoots at anything it has a line to, so standing still is
+			# standing still and shooting.
 			report(team, at)
-			return BotHarbour.leashed(home, at, KEEPER_LEASH)
-	# Nothing in sight: hold the position.
+			if float(entry[0]) <= KEEPER_ENGAGE:
+				if not bot.is_empty():
+					bot.erase("watch_yaw")
+				return BotHarbour.leashed(home, at, KEEPER_LEASH)
+			break
+	# Nothing worth leaving the post for: hold the position.
 	var count := maxi(1, _bot_ctf_keepers(team))
 	var seat := maxi(world.ctf.seats_of(team).find(id), 0)
 	var bearing := float(known.get("bearing", 0.0))

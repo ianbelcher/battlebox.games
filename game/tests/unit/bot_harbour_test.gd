@@ -182,3 +182,31 @@ func test_a_defender_holds_the_flag_it_is_minding() -> void:
 	check(Vector2(post.x, post.z).length() < CtfDirector.CTF_FLAG_TOUCH,
 		"the only defender stood %.2f out, past the %.2f that counts as the flag"
 			% [Vector2(post.x, post.z).length(), CtfDirector.CTF_FLAG_TOUCH])
+
+# ---- a defender that can be drawn off its own wall is not defending ----
+#
+# Three different questions were being answered with one number: how far
+# out an enemy is worth REPORTING, how close one has to be before it is
+# worth LEAVING THE POST for, and how far out a defender may then get.
+# Walking at anything inside thirty blocks on a fourteen-block leash meant
+# one attacker wandering past the far side of a base pulled the whole
+# guard off it — reported as "all the bots leave the flag and chase
+# others". The ordering is the fix, so the ordering is what is checked.
+
+func test_a_defender_never_ends_up_outside_its_own_wall() -> void:
+	check(BotDirector.KEEPER_LEASH < float(BotDirector.CTF_COVER_RADIUS),
+		"a leash of %.1f reaches past the cover ring at %d"
+			% [BotDirector.KEEPER_LEASH, BotDirector.CTF_COVER_RADIUS])
+
+func test_leaving_the_post_means_they_are_at_the_wall() -> void:
+	check(BotDirector.KEEPER_ENGAGE > float(BotDirector.CTF_COVER_RADIUS),
+		"an attacker has to have reached the wall to be worth going out to")
+	check(BotDirector.KEEPER_ENGAGE < BotDirector.KEEPER_WATCH,
+		"seeing somebody is not the same as going to them")
+
+func test_the_guard_still_reports_what_it_cannot_reach() -> void:
+	# The watch distance is what the SIDE learns from, and it costs
+	# nothing — gating the report as well as the walk would blind a team
+	# to anything it was not already fighting.
+	check(BotDirector.KEEPER_WATCH >= 30.0,
+		"contacts are worth having at the full watch distance")
