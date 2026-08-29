@@ -206,6 +206,21 @@ func _physics_process(delta: float) -> void:
 			if _ticks <= TURN_FRAMES:
 				turning.yaw = float(turning.yaw) + TURN_STEP
 				turning.target_yaw = turning.yaw
+				# ...AND WHERE SHE IS BEING PULLED TOWARDS, for the same
+				# reason phase 1 does it. This probe shoved the boat six
+				# blocks sideways to test the carry; the SERVER still has
+				# her where she was, so every broadcast sets `target_pos`
+				# back there and VehicleView's interpolation walks her
+				# towards it a little each frame — with the rider
+				# faithfully carried along. That came out as 0.43 blocks
+				# of "drift" in x, which is the axis of the nudge and not
+				# a coincidence.
+				#
+				# The carry is doing its job. The scenery is moving under
+				# the measurement, and that is this probe's problem: a
+				# real boat moves because its driver moved it, and the
+				# target moves with it.
+				turning.target_pos = turning.pos
 				return
 			if _ticks < TURN_FRAMES + SETTLE:
 				return

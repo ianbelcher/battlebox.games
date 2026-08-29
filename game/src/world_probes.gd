@@ -548,6 +548,45 @@ func _sweep_reach(flag_at: Vector3) -> void:
 	print("CAPTURE: reach from the pole at %v  %s  (they should all match)"
 		% [pole, " ".join(out)])
 
+## WORLD_GHOST_TEST=1, THE SERVER HALF: knock a team out on purpose.
+##
+## The client half (tests/ghost_probe.gd) asks whether a knocked-out team
+## is actually hidden. It cannot answer that until a team has actually
+## been knocked out, and waiting for the computer players to manage a
+## capture is waiting on luck — thirty seconds of "nobody is out yet" and
+## then the run ends.
+##
+## So this takes a side out through the REAL path, `knock_out_team`, which
+## is what a captured flag calls. Not by writing `out_ids` directly: the
+## question is what that function leaves behind, and a test that
+## reproduces its effects rather than calling it proves nothing about it.
+var _ghost_t := 0.0
+var _ghost_done := false
+
+func tick_ghost(delta: float) -> void:
+	if OS.get_environment("WORLD_GHOST_TEST") != "1" or world == null or _ghost_done:
+		return
+	if world.match_phase != "BATTLE" or world.ctf._flags.is_empty():
+		return
+	_ghost_t += delta
+	if _ghost_t < 20.0:
+		return
+	# Whichever side still has a flag and somebody alive to lose it.
+	for team_i: int in world.ctf._flags.keys():
+		if world.ctf.team_is_out(team_i):
+			continue
+		var alive := 0
+		for id: String in world.match_alive.keys():
+			if int(Game.roster.get(id, {}).get("team", -1)) == team_i:
+				alive += 1
+		if alive <= 0:
+			continue
+		_ghost_done = true
+		print("GHOST: knocking team %d out through knock_out_team (%d alive)"
+			% [team_i, alive])
+		world.ctf.knock_out_team(team_i)
+		return
+
 ## WORLD_SIEGE_TEST=1: DOES ANYBODY EVER ACTUALLY REACH A FLAG?
 ##
 ## Last flag standing is decided by touching an enemy pole, and a round of
@@ -904,6 +943,7 @@ func tick_spread(delta: float) -> void:
 			% [_spread_t, team_i, guard.size(), closest, quadrants.size()])
 
 func tick(delta: float) -> void:
+	tick_ghost(delta)
 	tick_siege(delta)
 	tick_pole(delta)
 	tick_snipe(delta)

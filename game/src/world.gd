@@ -2212,7 +2212,20 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 			# ghost means nothing you can act on, and worse, it makes
 			# every grey shape a question: mine, or not? So the other
 			# side's are simply not drawn.
-			child.visible = (not is_down) or _my_team_has(id)
+			# ...AND SOMEBODY WHO IS OUT STAYS PUT AWAY, whatever this
+			# message says about being down. This line knew about one of
+			# the two states a body can be hidden by, so a player who was
+			# OUT and then heard "not down any more" was drawn again —
+			# still untouchable, still unable to shoot, still moving.
+			# That is an opponent you can see, cannot kill, and who never
+			# fires back, which is exactly how it was described from a
+			# real game: "they went into some weird mode".
+			#
+			# `cl_eliminated` hides them and this could un-hide them, so
+			# the two have to agree about the whole rule rather than each
+			# knowing half of it.
+			child.visible = not out_ids.has(id) \
+				and ((not is_down) or _my_team_has(id))
 			if is_down:
 				# THE KNOCKOUT IS SEEN HERE, not only at elimination.
 				#

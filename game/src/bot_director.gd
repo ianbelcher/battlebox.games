@@ -947,10 +947,20 @@ func ctf_goal(id: String, pos: Vector3) -> Vector3:
 		# stuck on their flag, all running into it" — they were not stuck,
 		# they had arrived, and arriving was worth nothing.
 		#
-		# With the door shut they keep out of the way instead: off the
-		# mound, so the ones still playing have room to defend it.
+		# WITH THE DOOR SHUT THEY STOP, and standing still is the whole
+		# point rather than a detail. Returning INF sent them down the
+		# rest of the ladder to the wander rung, so a side whose flag had
+		# been taken spent the remainder of the round touring the map —
+		# measured at all five of a knocked-out team still moving a
+		# minute later.
+		#
+		# They cannot be hurt, cannot shoot and cannot take anything, so
+		# every step is a body with no business on the field: it costs a
+		# position broadcast, it walks through the fight, and the moment
+		# anything fails to hide it, it is an opponent you can see and
+		# cannot kill. Their round is over. Park them.
 		if not world.ctf.flag_route_open(id):
-			return Vector3.INF
+			return pos
 		return home
 	if _bot_ctf_defends(id, team) and home != Vector3.INF:
 		return _bot_harbour_goal(id, team, pos, home)

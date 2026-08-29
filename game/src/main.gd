@@ -146,6 +146,11 @@ func _ready() -> void:
 	# WORLD_BOAT_TEST=1: stand a player on a boat and move it under them.
 	if OS.get_environment("WORLD_BOAT_TEST") == "1":
 		add_child(load("res://tests/boat_probe.gd").new())
+	# WORLD_GHOST_TEST=1: is a knocked-out team actually put away? Only a
+	# client can answer it — the server knows who is out, this knows what
+	# is drawn.
+	if OS.get_environment("WORLD_GHOST_TEST") == "1":
+		add_child(load("res://tests/ghost_probe.gd").new())
 	# WORLD_DOWNED_TINTS=1: knock this player out and report what is red.
 	if OS.get_environment("WORLD_DOWNED_TINTS") == "1":
 		add_child(load("res://tests/downed_tints.gd").new())
