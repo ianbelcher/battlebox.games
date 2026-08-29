@@ -136,3 +136,49 @@ func test_a_threat_on_top_of_the_flag_keeps_the_old_bearing() -> void:
 	var home := Vector3(10, 30, 10)
 	near(BotHarbour.bearing(home, home, 1.25), 1.25, 0.001,
 		"no direction to take: hold the one we had")
+
+# ---- separation must not push you off the objective -------------------
+#
+# THE REGRESSION THIS EXISTS FOR. Spreading out is right, and unbounded it
+# cost the whole of last flag standing: the assault goal is the flag plus
+# a lane offset plus this shove, and the flag only counts as touched
+# inside CtfDirector.CTF_FLAG_TOUCH. From three attackers upward they
+# pushed each other outside it, stood around the pole and fought, and not
+# one flag was taken in a full round.
+#
+# BotDirector clamps the result back inside ASSAULT_HOLD. What is checked
+# here is the thing that made the clamp necessary — that the shove alone
+# really can carry a goal out of reach — so that if anybody removes the
+# clamp, the reason it was there is written down beside a number.
+
+func test_a_crowd_really_can_shove_a_goal_off_the_flag() -> void:
+	var mates: Array = []
+	for i in 3:
+		mates.append(Vector3(cos(float(i) * 2.4) * 1.2, 0.0,
+			sin(float(i) * 2.4) * 1.2))
+	var worst := 0.0
+	for lx in [-2.0, 0.0, 2.0]:
+		for lz in [-2.0, 0.0, 2.0]:
+			var out := BotHarbour.keep_apart(Vector3(lx, 0.0, lz), mates,
+				BotHarbour.MIN_GAP)
+			worst = maxf(worst, Vector2(out.x, out.z).length())
+	check(worst > CtfDirector.CTF_FLAG_TOUCH,
+		"if this stops being true the clamp in BotDirector is dead code, "
+		+ "but it was %.2f against a touch radius of %.2f"
+			% [worst, CtfDirector.CTF_FLAG_TOUCH])
+
+func test_the_clamp_brings_it_back_within_reach() -> void:
+	# The clamp itself, as BotDirector applies it: whatever separation
+	# asked for, an attacker's goal ends up somewhere that scores.
+	check(BotDirector.ASSAULT_HOLD < CtfDirector.CTF_FLAG_TOUCH,
+		"an assault goal held at %.2f must be inside the %.2f that counts"
+			% [BotDirector.ASSAULT_HOLD, CtfDirector.CTF_FLAG_TOUCH])
+
+func test_a_defender_holds_the_flag_it_is_minding() -> void:
+	# A lone keeper is what a small team posts, and at a flat six blocks it
+	# stood outside the radius it was supposedly guarding — an attacker
+	# could walk onto the pole beside it.
+	var post := BotHarbour.post(0, 1, 0.0, BotDirector.HARBOUR_RADIUS)
+	check(Vector2(post.x, post.z).length() < CtfDirector.CTF_FLAG_TOUCH,
+		"the only defender stood %.2f out, past the %.2f that counts as the flag"
+			% [Vector2(post.x, post.z).length(), CtfDirector.CTF_FLAG_TOUCH])

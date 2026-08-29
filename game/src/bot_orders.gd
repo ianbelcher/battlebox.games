@@ -98,8 +98,17 @@ const RALLY_HOME_CAP := 4
 ## wrong here before and neither is visible without playing a round:
 ## somebody always stays while we still have a flag, and somebody always
 ## goes while there is still a flag to take.
+## THE QUIET-DOORSTEP DISCOUNT DOES NOT APPLY TO A SIEGE.
+##
+## Thinning the guard when nobody is at the door is right in capture the
+## flag, where losing your flag costs a point and the round carries on. In
+## last flag standing it costs you the ROUND — there is no coming back —
+## so the mode's own share (HoldoutRules) is already the considered answer
+## and second-guessing it downward every quiet moment is how a siege stops
+## being one. It took a defender off every team in the mode that can least
+## afford it.
 static func keepers(team_size: int, base: int, home_threat: int,
-		targets_left: int) -> int:
+		targets_left: int, siege := false) -> int:
 	if team_size <= 0:
 		return 0
 	if targets_left <= 0:
@@ -107,7 +116,7 @@ static func keepers(team_size: int, base: int, home_threat: int,
 	var want := clampi(base, 0, team_size)
 	if home_threat > 0:
 		want += mini(home_threat, RALLY_HOME_CAP)
-	elif want > 1:
+	elif want > 1 and not siege:
 		want -= 1
 	# Somebody stays, somebody goes. In that order: with a team of one
 	# there is nobody to do both, and going is worth more than staying
@@ -118,8 +127,9 @@ static func keepers(team_size: int, base: int, home_threat: int,
 ## The other side of the same coin, so a caller never has to subtract by
 ## hand and get it the wrong way round.
 static func attackers(team_size: int, base: int, home_threat: int,
-		targets_left: int) -> int:
-	return maxi(0, team_size - keepers(team_size, base, home_threat, targets_left))
+		targets_left: int, siege := false) -> int:
+	return maxi(0, team_size
+		- keepers(team_size, base, home_threat, targets_left, siege))
 
 ## HOW MANY ATTACKERS ONE FLAG IS ALLOWED TO PULL.
 ##

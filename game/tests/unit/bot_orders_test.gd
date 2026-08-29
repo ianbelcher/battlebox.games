@@ -171,3 +171,30 @@ func test_a_flag_that_has_fallen_frees_you_immediately() -> void:
 func test_the_commitment_does_run_out() -> void:
 	check(BotOrders.may_rethink(BotOrders.COMMIT_MS + 1, true),
 		"a raid that never arrives has to be reconsidered eventually")
+
+# ---- a siege is not capture the flag ----------------------------------
+#
+# Thinning the guard when the doorstep is quiet is right where losing a
+# flag costs a point. In last flag standing it costs the ROUND, and doing
+# it there took a defender off every team in the mode that can least
+# afford one — measured as a round in which not a single flag was taken
+# and nobody was minding the pole it was taken from.
+
+func test_a_siege_does_not_thin_its_guard() -> void:
+	for size in range(4, 16):
+		var base := size / 2
+		equal(BotOrders.keepers(size, base, 0, 3, true), base,
+			"a siege of %d should keep the share the mode asked for" % size)
+
+func test_capture_the_flag_still_thins_it() -> void:
+	check(BotOrders.keepers(10, 5, 0, 3, false) < 5,
+		"the quiet-doorstep discount is what stops the capture-the-flag huddle")
+
+func test_a_siege_still_reinforces_under_attack() -> void:
+	check(BotOrders.keepers(10, 5, 3, 3, true) > 5,
+		"enemies at the door bring people home in either mode")
+
+func test_a_siege_still_sends_somebody() -> void:
+	for size in range(2, 20):
+		check(BotOrders.attackers(size, size / 2, 0, 3, true) >= 1,
+			"a team of %d that never attacks cannot win a siege" % size)

@@ -188,8 +188,10 @@ func _refresh_intel(delta: float) -> void:
 			# behind a wall is a harbour that turns its back on them.
 			"bearing": BotHarbour.bearing(Vector3.ZERO, toward,
 				float(old.get("bearing", 0.0))),
-			"keepers": BotOrders.keepers(size, base, threat, mine.size()),
-			"attackers": BotOrders.attackers(size, base, threat, mine.size()),
+			"keepers": BotOrders.keepers(size, base, threat, mine.size(),
+				world.ctf.elimination()),
+			"attackers": BotOrders.attackers(size, base, threat, mine.size(),
+				world.ctf.elimination()),
 			"standing": mine,
 			"commit": commit.get(team, {}),
 			"mates": mates.get(team, []),
@@ -743,7 +745,18 @@ func _bot_ctf_target_team(id: String, team: int, pos: Vector3) -> int:
 ## CTF_COVER_RADIUS, on the shoulder of the mound, so a defender is behind
 ## its own wall rather than in front of it. BotHarbour will open this out
 ## if the guard is too big to fit at that spacing.
-const HARBOUR_RADIUS := 6.0
+##
+## AND INSIDE THE FLAG'S OWN RADIUS, which is the part that was wrong. At
+## a flat 6.0 the whole guard stood OUTSIDE CtfDirector.CTF_FLAG_TOUCH —
+## so a lone keeper, which is what a small team posts, was six blocks from
+## the pole it was supposedly minding and contested nothing. An attacker
+## could walk onto the flag beside it. Reported as "nobody would protect
+## the actual flag", and that is precisely what the number said.
+##
+## Derived from the touch radius so the two cannot drift apart: a defender
+## holding its post is on the flag by construction, and a big guard opens
+## outward from there rather than starting outside it.
+const HARBOUR_RADIUS := CtfDirector.CTF_FLAG_TOUCH * 0.8
 
 ## HOW FAR A DEFENDER WILL GO TO MEET SOMETHING. Not "as far as it can
 ## see": a keeper that walks at whatever it spots has left the flag, and
@@ -1000,11 +1013,43 @@ func _bot_assault_goal(id: String, team: int, target: Vector3) -> Vector3:
 ## look at the team-mates actually near the spot and shuffle off them.
 ## That is the "understand where they're standing in relation to the other
 ## bots" half of the ask, applied to the attack as well as the defence.
+## AND NEVER OUT OF REACH OF THE THING THEY CAME FOR.
+##
+## Spreading out is right and this is what it cost when nothing bounded
+## it: the lane offset is up to 2.83 blocks, `keep_apart` adds up to
+## SPREAD_LIMIT on top, and the flag only counts as touched inside
+## CtfDirector.CTF_FLAG_TOUCH. Worked out for a squad converging on one
+## pole:
+##
+##     attackers at the flag   goal distance   inside 4.5?
+##                         1            2.83   yes
+##                         2            4.20   yes
+##                         3            4.68   NO
+##                         4            5.21   NO
+##                         5            6.19   NO
+##
+## So from three attackers upward they shoved each other out of the only
+## radius that scores, stood around it, and fought — and the better they
+## got at arriving together, the less able they were to take anything.
+## A whole round of last flag standing with not one flag captured, which
+## is the mode not happening at all.
+##
+## The separation is kept — arriving stacked is its own problem — but the
+## result is pulled back inside the radius afterwards. Derived from
+## CTF_FLAG_TOUCH rather than written out, because the one thing that must
+## never drift is this number against that one.
+const ASSAULT_HOLD := CtfDirector.CTF_FLAG_TOUCH * 0.6
+
 func _bot_fan_out(id: String, team: int, target: Vector3) -> Vector3:
 	var lane := float(absi(id.hash()) % 5) - 2.0
 	var want := target + Vector3(lane, 0.0, float(absi(id.hash() >> 3) % 5) - 2.0)
-	return BotHarbour.keep_apart(want, _nearby_mates(id, team, want),
+	want = BotHarbour.keep_apart(want, _nearby_mates(id, team, want),
 		BotHarbour.MIN_GAP)
+	var out := Vector3(want.x - target.x, 0.0, want.z - target.z)
+	if out.length() > ASSAULT_HOLD:
+		want = target + out.normalized() * ASSAULT_HOLD
+		want.y = target.y
+	return want
 
 ## WHAT TO DO ABOUT THE LAST SHOT THAT CAME AT US, or INF for "nothing
 ## recent enough to be worth acting on".

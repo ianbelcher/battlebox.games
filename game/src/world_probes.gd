@@ -548,6 +548,94 @@ func _sweep_reach(flag_at: Vector3) -> void:
 	print("CAPTURE: reach from the pole at %v  %s  (they should all match)"
 		% [pole, " ".join(out)])
 
+## WORLD_SIEGE_TEST=1: DOES ANYBODY EVER ACTUALLY REACH A FLAG?
+##
+## Last flag standing is decided by touching an enemy pole, and a round of
+## it came back with not one flag taken from start to finish — "essentially
+## battle royale except there's no storm at the end". Nothing errors in
+## that round. Every side has attackers, they leave home, they fight, and
+## the scoreline stays empty, because attacking and ARRIVING are different
+## things and only one of them is visible from the outside.
+##
+## So this measures the only distance that decides the mode: how close
+## anybody actually gets to a flag that is not their own, tracked as a
+## running minimum so a single frame inside the radius cannot be missed.
+## And the same for the owners, because "nobody would protect the actual
+## flag" is the same measurement from the other side.
+##
+## The number to compare both against is CtfDirector.CTF_FLAG_TOUCH. An
+## attacker whose closest approach all round is outside it is a bot that
+## did everything but the one thing that scores.
+var _siege_t := 0.0
+var _siege_said := 0.0
+var _siege_near: Dictionary = {}
+var _siege_own: Dictionary = {}
+
+func tick_siege(delta: float) -> void:
+	if OS.get_environment("WORLD_SIEGE_TEST") != "1" or world == null:
+		return
+	if world.match_phase != "BATTLE" or world.ctf._flags.is_empty():
+		return
+	_siege_t += delta
+	for team_i: int in world.ctf._flags.keys():
+		var flag: Dictionary = world.ctf._flags[team_i]
+		if bool(flag.get("out", false)) or int(flag.back_at) > 0:
+			continue
+		var at: Vector3 = flag.get("pos", Vector3.INF)
+		if at == Vector3.INF:
+			continue
+		for id: String in world.match_alive.keys():
+			if world.downed_ids.has(id) or world.out_ids.has(id):
+				continue
+			var who: Vector3 = world.player_state.get(id, {}).get("pos", Vector3.INF)
+			if who == Vector3.INF:
+				continue
+			var flat := Vector2(who.x - at.x, who.z - at.z).length()
+			var theirs := int(Game.roster.get(id, {}).get("team", -1)) == team_i
+			var book := _siege_own if theirs else _siege_near
+			if flat < float(book.get(team_i, 9999.0)):
+				book[team_i] = flat
+	if _siege_t - _siege_said < 20.0:
+		return
+	_siege_said = _siege_t
+	var caps := 0
+	for team_i: int in world.ctf_caps.keys():
+		caps += int(world.ctf_caps[team_i])
+	# AIMING AT IT AND REACHING IT ARE DIFFERENT FAILURES, and only one of
+	# them is a bug in the orders. A goal that sits outside the touch
+	# radius is a bot that would not capture even standing on its own
+	# objective — that is the spread bug. A goal ON the flag with the bot
+	# still twenty blocks away is a bot being stopped on the way in, which
+	# is a wall, a fight, or the terrain, and a different thing entirely.
+	var aimed := 9999.0
+	for id: String in world.bots.roster.keys():
+		var want: Vector3 = world.bots.roster[id].get("goal", Vector3.INF)
+		if want == Vector3.INF:
+			continue
+		for team_j: int in world.ctf._flags.keys():
+			if int(Game.roster.get(id, {}).get("team", -1)) == team_j:
+				continue
+			var flag_j: Vector3 = world.ctf._flags[team_j].get("pos", Vector3.INF)
+			if flag_j == Vector3.INF:
+				continue
+			aimed = minf(aimed, Vector2(want.x - flag_j.x, want.z - flag_j.z).length())
+	for team_i: int in world.ctf._flags.keys():
+		var enemy := float(_siege_near.get(team_i, 9999.0))
+		var owner := float(_siege_own.get(team_i, 9999.0))
+		print("SIEGE: t=%.0fs flag %d — nearest enemy %.1f (%s), nearest owner %.1f (%s)"
+			% [_siege_t, team_i, enemy,
+				"IN REACH" if enemy < CtfDirector.CTF_FLAG_TOUCH else "never got there",
+				owner,
+				"on it" if owner < CtfDirector.CTF_FLAG_TOUCH else "off it"])
+	print("SIEGE: t=%.0fs closest attacker GOAL to any enemy flag: %.1f (%s)"
+		% [_siege_t, aimed,
+			"aimed to capture" if aimed < CtfDirector.CTF_FLAG_TOUCH
+				else "AIMED SHORT — the orders themselves cannot score"])
+	print("SIEGE: t=%.0fs touch radius is %.1f, flags taken so far: %d"
+		% [_siege_t, CtfDirector.CTF_FLAG_TOUCH, caps])
+	_siege_near.clear()
+	_siege_own.clear()
+
 ## WORLD_POLE_TEST=1: THE POLE TRAP, reproduced on purpose.
 ##
 ## Turn reviving OFF through the real setter, knock a computer player out,
@@ -798,6 +886,7 @@ func tick_spread(delta: float) -> void:
 			% [_spread_t, team_i, guard.size(), closest, quadrants.size()])
 
 func tick(delta: float) -> void:
+	tick_siege(delta)
 	tick_pole(delta)
 	tick_snipe(delta)
 	tick_spread(delta)
