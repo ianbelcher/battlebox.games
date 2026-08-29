@@ -38,6 +38,12 @@ var _ride_was_yaw := 0.0
 ## Sent to the server about as often as a position is.
 var _ride_send := 0.0
 const RIDE_SEND_HZ := 15.0
+## How long the deck test may keep missing before a rider is treated
+## as having stepped off. Three or four frames: long enough that a
+## wobble at the rail on a turning boat is not a disembarkation,
+## short enough that walking off still feels immediate.
+const RIDE_GRACE_SECONDS := 0.2
+var _ride_grace := RIDE_GRACE_SECONDS
 ## HOW FAR ABOVE THE FEET "room above" IS TESTED, and therefore how far a
 ## top-out has to lift you. Named because it is load-bearing in two places
 ## that have to agree: the probe below decides when a climb has reached
@@ -821,6 +827,31 @@ func _ride(delta: float) -> void:
 				rotation.y = wrapf(rotation.y + swing, -PI, PI)
 	var found: Dictionary = view.deck_under(position)
 	var now_id := str(found.get("id", ""))
+	# ONE MISSED FRAME IS NOT STEPPING OFF.
+	#
+	# `deck_under` is a box test against the deck as it is RIGHT NOW, and
+	# on a turning boat a rider near the rail can fall a hair outside it
+	# for a single frame — the body is carried by last frame's pose and
+	# tested against this one. Dropping the ride there costs that frame's
+	# carry, so the rider stands still in the world while the deck turns
+	# under them, and every dropped frame is a permanent slice of their
+	# place on the boat.
+	#
+	# Invisible on an idle server and obvious on a busy one, which is
+	# exactly how it hid: the boat probe measured 0.00 blocks of drift run
+	# on its own and 0.69 through a full integration run with the same
+	# code. Frame times are the only difference.
+	#
+	# So a miss has to persist before it counts. Walking off is still
+	# walking off — a fifth of a second is three or four frames, and you
+	# are metres away by then — but a wobble at the rail is no longer a
+	# disembarkation.
+	if now_id.is_empty() and not ride_id.is_empty():
+		_ride_grace -= delta
+		if _ride_grace > 0.0:
+			now_id = ride_id
+	else:
+		_ride_grace = RIDE_GRACE_SECONDS
 	if now_id != ride_id:
 		# Stepping off frees the helm; stepping on asks for it. The server
 		# decides — see VehicleDirector.board — and it is first aboard,

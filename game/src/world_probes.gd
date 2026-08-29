@@ -570,6 +570,8 @@ var _siege_t := 0.0
 var _siege_said := 0.0
 var _siege_near: Dictionary = {}
 var _siege_own: Dictionary = {}
+## Did anybody actually satisfy the game's own touch test this window?
+var _siege_touch: Dictionary = {}
 
 func tick_siege(delta: float) -> void:
 	if OS.get_environment("WORLD_SIEGE_TEST") != "1" or world == null:
@@ -595,6 +597,21 @@ func tick_siege(delta: float) -> void:
 			var book := _siege_own if theirs else _siege_near
 			if flat < float(book.get(team_i, 9999.0)):
 				book[team_i] = flat
+			# THE GAME'S OWN TEST, NOT A COPY OF HALF OF IT.
+			#
+			# The distance above is flat, and `_at_flag` is not: it also
+			# wants the player within CTF_FLAG_REACH_Y of the flag's own
+			# height. Reporting "in reach" off the flat distance alone
+			# therefore counts somebody tunnelling underneath or flying
+			# over as having arrived — which reads as eight arrivals and
+			# no captures, and sends the next person looking for a bug in
+			# the capture code that is really a bug in this line.
+			#
+			# So the verdict is asked of `_at_flag` itself. A probe that
+			# measures nearly the same thing as the game is worse than no
+			# probe: it is wrong in a way that looks like data.
+			if not theirs and world.ctf._at_flag(who, at):
+				_siege_touch[team_i] = true
 	if _siege_t - _siege_said < 20.0:
 		return
 	_siege_said = _siege_t
@@ -624,7 +641,7 @@ func tick_siege(delta: float) -> void:
 		var owner := float(_siege_own.get(team_i, 9999.0))
 		print("SIEGE: t=%.0fs flag %d — nearest enemy %.1f (%s), nearest owner %.1f (%s)"
 			% [_siege_t, team_i, enemy,
-				"IN REACH" if enemy < CtfDirector.CTF_FLAG_TOUCH else "never got there",
+				"IN REACH" if bool(_siege_touch.get(team_i, false)) else "never got there",
 				owner,
 				"on it" if owner < CtfDirector.CTF_FLAG_TOUCH else "off it"])
 	print("SIEGE: t=%.0fs closest attacker GOAL to any enemy flag: %.1f (%s)"
@@ -635,6 +652,7 @@ func tick_siege(delta: float) -> void:
 		% [_siege_t, CtfDirector.CTF_FLAG_TOUCH, caps])
 	_siege_near.clear()
 	_siege_own.clear()
+	_siege_touch.clear()
 
 ## WORLD_POLE_TEST=1: THE POLE TRAP, reproduced on purpose.
 ##
