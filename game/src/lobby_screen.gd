@@ -344,6 +344,9 @@ func _build_games_panel() -> Control:
 # ------------------------------------------------------------------
 
 func _show_rooms(rooms: Array) -> void:
+	# A list that arrived is the end of whatever went wrong last time.
+	if _status != null and _status.visible and not _busy:
+		_set_status("")
 	for child in _games_box.get_children():
 		child.queue_free()
 	# THE ALWAYS-ON WORLD IS IN THE LIST. It used to be lifted out and
@@ -916,10 +919,15 @@ func _on_failed(what: String, message: String) -> void:
 	# A lobby that is down must never block Play: the always-on game is on
 	# a fixed code, so it still works with nothing listed.
 	if what == "list":
+		# The list is polled, so a failure is a moment rather than a state
+		# — it says so where the list would be, and says nothing in the
+		# status line under the button. That line used to read "Play still
+		# works — it is always there", which named a button that no longer
+		# exists and stayed up in ember after the list had loaded fine.
 		if _games_note != null:
-			_games_note.text = "Can't reach the games list right now."
+			_games_note.text = "Can't reach the games list — trying again…"
 			_games_note.visible = true
-		_set_status("Play still works — it is always there")
+		_set_status("")
 	else:
 		# A create that failed happened on the setup screen, and that is
 		# where whoever pressed the button is still standing.
