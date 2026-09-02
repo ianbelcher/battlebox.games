@@ -1,29 +1,27 @@
 class_name WorldMenu
 extends Control
-## The WORLD menu (G): everything belonging to the whole table rather
-## than to one player. Per-player things (blocks, characters) live in
-## PlayerHud.
+## The WORLD menu (G): the three things worth knowing while a game is
+## running, and nothing that changes it.
 ##
-## Tabs follow what each thing actually IS, not which code owns it, and
-## they are in the order the decisions are made:
-##   Game    creative or battle royale, plus that mode's settings. FIRST,
-##           because the mode is what gives the rest of this menu meaning
-##           — and, as modes are added, what decides which tabs exist.
-##   Map     what world you're in and how play works in it — the map, its
-##           size. True in every mode.
-##   Players who's here, their names, teams, and computer players.
-##   Audio   talking to each other, and how loud everything is. Its own
-##           tab because it was under "Video", where nobody looked: a
-##           child hunting for voice chat is not going to open a tab
-##           called Video, and volume was never a video setting either.
-##   Video   how the world is drawn, and what this machine is running.
+##   Game     what this game IS (read only), how the round is going, the
+##            code that gets a friend in, and the way out to another game
+##   Players  who is here, their names and teams, and computer players
+##   Audio    talking to each other, and how loud everything is
+##   Video    how the world is drawn, and what this machine is running
 ##   Credits
 ##
-## There is no Scores tab and no Help tab. Opening this menu FREEZES
-## everyone at the table, so it is the wrong place to read a scoreboard or
-## look up a control: both now live in each player's own menu, which only
-## stops the player who opened it. Scores also only make sense in a mode
-## that keeps score — see PlayerHud._page_visible.
+## IT USED TO BE A SETTINGS PAGE and that is the thing that changed. The
+## mode, the map, the world's size, the round length, the capture target,
+## how you get back up, who can fly — all of it was in here, reachable
+## mid-round by anybody who opened a menu. The mode and the map threw the
+## round away and rebuilt the world under whoever was standing on it; the
+## rest changed the rules out from under people halfway through. One
+## person idly reading a menu, everyone else's game gone.
+##
+## Every one of those is asked on the front page now, before the world
+## exists, which is the only moment any of them is free to answer. See
+## game_setup.gd. Nothing in here changes how the game is played, and
+## tests/menu_controls.gd fails if any of it comes back.
 ##
 ## KEYBOARD AND MOUSE, both:
 ##   mouse     click anything
@@ -59,19 +57,6 @@ var _panel: PanelContainer
 var _tabs: TabContainer
 var _players_box: VBoxContainer
 var _this_game: Label
-var _length_btns: Dictionary = {}
-var _fly_answer_btns: Dictionary = {}
-var _battle_only: Array = []
-## Shown in any mode with knockouts (battle royale AND capture the flag).
-var _fight_only: Array = []
-var _ctf_only: Array = []
-var _capture_only: Array = []
-var _holdout_only: Array = []
-var _hold_len_btns: Dictionary = {}
-var _drop_btns: Dictionary = {}
-var _target_btns: Dictionary = {}
-var _revive_btns: Dictionary = {}
-var _creative_only: Array = []
 var _add_bot_btn: Button
 var _voice_btn: Button
 var _voice_mute_btn: Button
@@ -223,7 +208,6 @@ func _ready() -> void:
 	# anyone looked.
 	_build_game_tab()
 	_build_players_tab()
-	_build_score_tab()
 	_build_audio_tab()
 	_build_video_tab()
 	_build_credits_tab()
@@ -261,7 +245,10 @@ func _build_header() -> Control:
 	title.add_theme_color_override("font_color", UiTheme.ACCENT)
 	titles.add_child(_font(title, UiTheme.T_TITLE))
 	var sub := Label.new()
-	sub.text = "Settings for everyone at this table"
+	# NOT "settings" any more. Everything this menu could set is decided on
+	# the front page before the world exists; what is left is the score,
+	# the way in for a friend, and the way out to another game.
+	sub.text = "How this game is going, and who else can join"
 	sub.add_theme_color_override("font_color", UiTheme.INK_FAINT)
 	titles.add_child(_font(sub, UiTheme.T_NOTE))
 
@@ -448,108 +435,30 @@ func _mark(btn: Button, on: bool) -> void:
 ## What is left here is everything that can be changed WITHOUT throwing
 ## the round away: how you get back up, what happens when you are knocked
 ## out, what it takes to win, and how long a round runs.
+## THE ONLY TAB THAT IS ABOUT THIS GAME, and it does not change it.
+##
+## It used to be a settings page: the mode, the map, the world's size, how
+## long a round runs, what it takes to win, how you get back up, who can
+## fly. Every one of those decides how the game is PLAYED, and every one
+## of them was reachable, mid-round, by anybody who opened a menu — the
+## mode and the map by throwing the round away and rebuilding the world
+## under whoever was standing on it, the rest by changing the rules out
+## from under people halfway through.
+##
+## They are all asked on the front page now, before the world exists,
+## which is the only moment any of them is free to answer (see
+## game_setup.gd). What is left in here is the three things you actually
+## want from a menu while a game is running:
+##
+##   how it is going     the score
+##   who else            the code and the link that get a friend in
+##   somewhere else      leaving, to go and play a different game
 func _build_game_tab() -> void:
 	var box := _tab("Game")
 	_build_this_game_card(box)
-
-	# Knockouts work the same way in every mode that HAS them, so these sit
-	# above the per-mode settings and show for all of them.
-	var ko_group := VBoxContainer.new()
-	ko_group.add_theme_constant_override("separation", _s(8))
-	box.add_child(ko_group)
-	_fight_only.append(ko_group)
-
-	# GETTING BACK UP IS ONE QUESTION. It was two cards — "can you be
-	# picked up" and "getting back up" — with CAPTURING sitting between
-	# them, and they are not separate settings, they are three rungs of
-	# one ladder. Split apart they could be set to contradict each other.
-	# See ReviveRule.
-	var rev_card := _section(ko_group, "Getting back up")
-	var rev_row := _row(rev_card)
-	for mode_v: int in ReviveRule.choices(true):
-		var rev_val: int = mode_v
-		var btn4 := _choice(rev_row, ReviveRule.label(rev_val), func() -> void:
-			if Game.world != null:
-				Game.world.sv_ctf_config.rpc_id(1, rev_val, -1, -1))
-		_min(btn4, 190, 44)
-		_revive_btns[rev_val] = btn4
-		# Flying home to your own flag needs a flag to fly to.
-		if rev_val == ReviveRule.MATES_AND_FLAG:
-			_ctf_only.append(btn4)
-
-	var ko_card := _section(ko_group, "When you are knocked out")
-	var ko_row := _row(ko_card)
-	for spec2 in [[0, "Keep your weapons"], [1, "Drop them where you fell"]]:
-		var drop_val: int = spec2[0]
-		var btn2 := _choice(ko_row, str(spec2[1]), func() -> void:
-			if Game.world != null:
-				Game.world.sv_ctf_config.rpc_id(1, -1, -1, drop_val))
-		_min(btn2, 150, 44)
-		_drop_btns[drop_val] = btn2
-
-	# CAPTURING IS NOT IN EVERY FLAG MODE. This showed for `flag_mode()`,
-	# which covers last flag standing — where there is no capturing and no
-	# target to reach: you take a flag to knock a team OUT.
-	var cap_group := VBoxContainer.new()
-	cap_group.add_theme_constant_override("separation", _s(8))
-	box.add_child(cap_group)
-	_capture_only.append(cap_group)
-	var ctf_card := _section(cap_group, "Capturing")
-	var target_row := _row(ctf_card)
-	for t in [1, 3, 5, 10]:
-		var target_val: int = t
-		var btn3 := _choice(target_row, "First to %d" % t, func() -> void:
-			if Game.world != null:
-				Game.world.sv_ctf_config.rpc_id(1, -1, target_val, -1))
-		_min(btn3, 96, 44)
-		_target_btns[target_val] = btn3
-
-	# Last flag standing had nothing here at all, which is worse than the
-	# wrong card: a mode with a clock, an elimination rule and a scoring
-	# table unlike anything else in the game, explained nowhere.
-	var hold_group := VBoxContainer.new()
-	hold_group.add_theme_constant_override("separation", _s(8))
-	box.add_child(hold_group)
-	_holdout_only.append(hold_group)
-	# ITS OWN CLOCK, the same way battle royale has one. This was a
-	# constant: ten minutes, every round, with no way to say otherwise.
-	var hold_len := _section(hold_group, "How long a round lasts")
-	var hold_len_row := _row(hold_len)
-	for mins_v: int in GameSetup.ROUND_LENGTHS:
-		var hold_mins: int = mins_v
-		var btn6 := _choice(hold_len_row, HoldoutRules.length_label(hold_mins),
-			func() -> void:
-				if Game.world != null:
-					Game.world.sv_ctf_config.rpc_id(1, -1, -1, -1, hold_mins))
-		_min(btn6, 120, 46)
-		_hold_len_btns[hold_mins] = btn6
-
-	var hold_card := _section(hold_group, "Last flag")
-	for line in ["Lose your flag and your team is out.",
-			"Last team holding: %d points." % HoldoutRules.ROUND_POINTS,
-			"Two left: %d each. Three: %d each. Four or more: none."
-				% [HoldoutRules.share(2), HoldoutRules.share(3)]]:
-		var bullet := Label.new()
-		bullet.text = "•   " + str(line)
-		bullet.add_theme_color_override("font_color", UiTheme.INK_DIM)
-		bullet.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		hold_card.add_child(_font(bullet, UiTheme.T_LABEL))
-
-	var len_group := VBoxContainer.new()
-	len_group.add_theme_constant_override("separation", _s(8))
-	box.add_child(len_group)
-	_battle_only.append(len_group)
+	_build_score_card(box)
+	_build_invite_card(box)
 	_build_leaving_card(box)
-	var len_card := _section(len_group, "How long a battle lasts")
-	var len_row := _row(len_card)
-	for minutes_v: int in GameSetup.ROUND_LENGTHS:
-		var minutes: int = minutes_v
-		var btn := _choice(len_row, GameSetup.length_label(minutes), func() -> void:
-			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, minutes, -1))
-		_min(btn, 120, 46)
-		_length_btns[minutes] = btn
-
 
 ## WHAT THIS GAME IS, as a sentence rather than as a row of buttons.
 ##
@@ -627,11 +536,10 @@ var _score_rows: VBoxContainer
 var _score_sig := ""
 var _score_empty: Label
 
-func _build_score_tab() -> void:
-	var box := _tab("Score")
+func _build_score_card(box: Control) -> void:
 	var card := _section(box, "How it is going")
 	_score_empty = Label.new()
-	_score_empty.text = "No round is running. Start one from the Game tab."
+	_score_empty.text = "No round is running yet."
 	_score_empty.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	card.add_child(_font(_score_empty, UiTheme.T_LABEL))
 	_score_rows = VBoxContainer.new()
@@ -726,8 +634,7 @@ func _flag_gone(team: int) -> bool:
 
 func _build_players_tab() -> void:
 	var box := _tab("Players")
-	_build_invite_card(box)
-	_build_flying_card(box)
+
 	var manage_card := _section(box, "Teams and computer players")
 	# Two per row, not four: at four across, "Add a computer player" was
 	# wider than its column and lost its last word. Plain ASCII +/− on
@@ -787,19 +694,7 @@ func _sig_of_roster() -> String:
 	var teams: int = world.team_count if world != null else 4
 	var ids: Array = Game.roster.keys()
 	ids.sort()
-	# The world's flying settings are in here too, because they are the
-	# DEFAULT every player follows until they are singled out — change one
-	# and every row in the Fly column changes without a single roster
-	# entry moving.
-	#
-	# BOTH of them, and that is not fussiness. There are two defaults now,
-	# one for people and one for computers, and pressing "Computers only"
-	# from "Nobody" moves only the second — so a signature watching just
-	# the first does not change, the list is not rebuilt, and every ✈ in
-	# the column goes on showing the old answer.
-	var out := "t%d|f%s%s|" % [teams,
-		world.client_fly if world != null else false,
-		world.client_fly_bots if world != null else false]
+	var out := "t%d|" % teams
 	for id: String in ids:
 		var e: Dictionary = Game.roster[id]
 		out += "%s:%s:%s:%s:%s;" % [id, e.get("name", ""), e.get("team", -1),
@@ -841,8 +736,8 @@ func _refresh_players() -> void:
 	# they are counting. As separate rows they drifted apart the moment a
 	# name was a different length.
 	var grid := GridContainer.new()
-	# name | one cell per team | can-fly | remove
-	grid.columns = team_count + 3
+	# name | one cell per team | remove
+	grid.columns = team_count + 2
 	grid.add_theme_constant_override("h_separation", _s(6))
 	grid.add_theme_constant_override("v_separation", _s(6))
 	_players_box.add_child(grid)
@@ -852,63 +747,9 @@ func _refresh_players() -> void:
 	grid.add_child(_min(Control.new(), 210, 0))
 	for t in team_count:
 		grid.add_child(_team_header(t, counts[t], cell_w))
-	var fly_head := Label.new()
-	fly_head.text = "Fly"
-	fly_head.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	fly_head.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	grid.add_child(_font(fly_head, UiTheme.T_NOTE))
 	grid.add_child(Control.new())
 	for id_v in ids:
 		_add_player_row(grid, str(id_v), team_count, cell_w)
-
-## WHO CAN FLY. Groups first, because that is how it gets used: hand it to
-## every computer player, then take it off the ones on Red. Doing that one
-## player at a time in a room of fifty is not something anybody would sit
-## through — but the column in the roster below is there for when you want
-## exactly one child to be able to float out of trouble.
-## WHO CAN FLY, and it lives here rather than on the Map tab because
-## flying is a property of a PLAYER, not of a world. It was a world switch
-## with a per-player override on top, which is two ideas doing one job:
-## the map said "no flying" while three people were in the air, and the
-## switch looked broken to the one person using both halves.
-##
-## Four answers, and they are the four that people actually want. Two of
-## them cannot be said with a single on/off at all — "computers only" is
-## how you let the bots reach a base over its wall while everybody at the
-## table plays on the ground, and "humans only" is how you give the small
-## ones a way out of trouble without handing it to twenty bots.
-##
-## THE PER-TEAM BUTTONS ARE GONE. A button per team is five more things to
-## read for an answer nobody was giving in terms of teams, and the row
-## grew every time a team was added. Anyone who wants one player in the
-## air taps the ✈ against their name in the table below.
-## NOBODY FIRST, because it is the default and the list should read in the
-## order it steps up: nobody, then everybody, then one side or the other.
-## Flying has to be switched ON deliberately — a game where everyone can
-## fly by default is a game nobody walks anywhere in.
-const FLY_ANSWERS := [
-	["Nobody", "nobody"],
-	["Everyone", "everyone"],
-	["Humans only", "humans"],
-	["Computers only", "computers"],
-]
-
-func _build_flying_card(box: Control) -> void:
-	var card := _section(box, "Who can fly",
-		"Double-tap jump. Or tap ✈ beside one name to decide about them.")
-	var row := _row(card)
-	for spec in FLY_ANSWERS:
-		var answer := str(spec[1])
-		# Wide enough for the longest of them. At 150 "No computers" lost
-		# its last letter and read as "No computer", which is a different
-		# and wrong instruction.
-		var btn := _choice(row, str(spec[0]), func() -> void:
-			if Game.world != null:
-				Game.world.sv_set_fly.rpc_id(1, answer, -1, true)
-			Sfx.play("pop", -6.0))
-		_min(btn, 178, 44)
-		_fly_answer_btns[answer] = btn
-
 
 ## Whatever the team is actually CALLED — teams can be renamed, and the
 ## header used to show the hard-coded colour list instead.
@@ -982,7 +823,6 @@ func _add_player_row(grid: GridContainer, id: String, team_count: int,
 	var team := int(entry.get("team", -1))
 	for t in team_count:
 		grid.add_child(_team_cell(id, t, team, cell_w))
-	grid.add_child(_fly_cell(id))
 	var kick := _button("✕", func() -> void:
 		Game.sv_kick_player.rpc_id(1, id)
 		Sfx.play("pop", -6.0), UiTheme.T_BODY)
@@ -991,21 +831,6 @@ func _add_player_row(grid: GridContainer, id: String, team_count: int,
 	kick.add_theme_color_override("font_hover_color", Color.WHITE)
 	_min(kick, 46, 44)
 	grid.add_child(kick)
-
-## One player's own answer, in the roster where their name is. Shows what
-## is true for them right now — including when that is only because of the
-## world's setting — so the column can be read down rather than worked out.
-func _fly_cell(id: String) -> Button:
-	var can: bool = Game.world.fly_allowed_for(id) if Game.world != null else false
-	var cell := _button("✈" if can else "·", func() -> void:
-		if Game.world != null:
-			Game.world.sv_set_fly.rpc_id(1, "one", -1, not can, id)
-		Sfx.play("pop", -6.0), UiTheme.T_BODY)
-	cell.tooltip_text = "This player can fly" if can else "This player cannot fly"
-	cell.add_theme_color_override("font_color",
-		UiTheme.ACCENT if can else UiTheme.INK_FAINT)
-	_min(cell, 46, 44)
-	return cell
 
 func _team_cell(id: String, t: int, current: int, cell_w: int) -> Button:
 	var entry: Dictionary = Game.roster[id]
@@ -1307,38 +1132,6 @@ func _refresh(force := false) -> void:
 	if world == null:
 		return
 	_refresh_this_game()
-	for minutes: int in _length_btns:
-		_mark(_length_btns[minutes], minutes == world.client_minutes)
-	for answer: String in _fly_answer_btns:
-		_mark(_fly_answer_btns[answer], answer == world.fly_answer())
-	var battling: bool = world.client_mode == "battle"
-	var ctf: bool = world.flag_mode()
-	for node in _battle_only:
-		if is_instance_valid(node):
-			(node as Control).visible = battling
-	for node in _ctf_only:
-		if is_instance_valid(node):
-			(node as Control).visible = ctf
-	for node in _capture_only:
-		if is_instance_valid(node):
-			(node as Control).visible = world.client_mode == "ctf"
-	for node in _holdout_only:
-		if is_instance_valid(node):
-			(node as Control).visible = world.client_mode == "holdout"
-	for node in _fight_only:
-		if is_instance_valid(node):
-			(node as Control).visible = battling or ctf
-	for node in _creative_only:
-		if is_instance_valid(node):
-			(node as Control).visible = not (battling or ctf)
-	for val: int in _drop_btns:
-		_mark(_drop_btns[val], (val == 1) == world.client_drop)
-	for val: int in _revive_btns:
-		_mark(_revive_btns[val], val == world.client_revive_mode)
-	for mins: int in _hold_len_btns:
-		_mark(_hold_len_btns[mins], mins == int(world.client_holdout_minutes))
-	for val: int in _target_btns:
-		_mark(_target_btns[val], val == world.client_ctf_target)
 
 var _auto_ms := 0
 var _tick := 0.0

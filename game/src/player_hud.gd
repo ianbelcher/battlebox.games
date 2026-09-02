@@ -1278,51 +1278,15 @@ func _scroll_to_character() -> void:
 	if btn != null:
 		_char_scroll.ensure_control_visible(btn)
 
-## WHAT KIND OF GAME THIS IS, IS NOT CHANGED FROM INSIDE IT.
-##
-## There were mode buttons here and another set in the world menu, and
-## pressing either ended the round everybody was playing and — if the map
-## went with it — rebuilt the world under their feet. One person's idle
-## poke, everyone else's game over. A game is what it was made as; the
-## front page asks all of this before the world exists, and leaving to
-## start a different one is two presses away in the world menu.
-##
-## What is left here is the round LENGTH, which changes nothing anybody is
-## standing on.
+## THE ROUND TAB IS GONE, and with it the last of the game's own settings
+## that were reachable from inside it. The mode and the map went first;
+## the round length was the leftover, and it is the same objection — it
+## changes how the game is played, under people who are playing it. All of
+## it is asked on the front page before the world exists. See
+## game_setup.gd.
 func _build_game_tab() -> void:
-	var tab := _scrolled_tab("Round", _game_tabs)
-	tab.add_theme_constant_override("separation", _us(10))
-	_battle_opts = VBoxContainer.new()
-	_battle_opts.add_theme_constant_override("separation", _us(10))
-	tab.add_child(_battle_opts)
-	var length_row := HBoxContainer.new()
-	length_row.add_theme_constant_override("separation", _us(8))
-	_battle_opts.add_child(length_row)
-	var length_label := Label.new()
-	length_label.text = "Game length:"
-	length_label.add_theme_font_size_override("font_size", _us(20))
-	length_row.add_child(length_label)
-	for minutes_v: int in GameSetup.ROUND_LENGTHS:
-		var preset_btn := Button.new()
-		preset_btn.focus_mode = Control.FOCUS_NONE
-		preset_btn.text = GameSetup.length_label(minutes_v)
-		preset_btn.add_theme_font_size_override("font_size", _us(18))
-		var minutes: int = minutes_v
-		preset_btn.pressed.connect(func() -> void:
-			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, minutes, -1)
-			Sfx.play("tick", -8.0))
-		length_row.add_child(preset_btn)
-		_length_btns[minutes] = preset_btn
-	# No Flying row here. Flying is decided per player, on the Players
-	# page of the world menu — see WorldMenu.FLY_ANSWERS. It was a
-	# world switch in two places at once, and neither knew about the
-	# per-player answers sitting on top of it.
+	var tab := _scrolled_tab("Players", _game_tabs)
 
-	# NO ARENA SIZE HERE EITHER. The world's size is baked into the
-	# terrain — it is a square slab cut to that width — so changing it
-	# rebuilds the world, which is the same objection as the map.
-	tab = _scrolled_tab("Players", _game_tabs)
 	tab.add_theme_constant_override("separation", _us(10))
 	_lobby_countdown = Label.new()
 	_lobby_countdown.add_theme_font_size_override("font_size", _us(22))
@@ -1854,11 +1818,9 @@ static func _flag_ink(dx: int, dy: int) -> int:
 
 
 var _team_box: VBoxContainer
-var _length_btns: Dictionary = {}
 
 var _lobby_countdown: Label
 
-var _battle_opts: VBoxContainer
 var _battle_start: Button
 var _add_bot_btn: Button
 var _center_note: Label
@@ -1919,10 +1881,6 @@ func _mark_selected(btn: Button, on: bool) -> void:
 func _refresh_battle_highlights() -> void:
 	if world == null:
 		return
-	for minutes: int in _length_btns.keys():
-		_mark_selected(_length_btns[minutes], minutes == world.client_minutes)
-	if _battle_opts != null:
-		_battle_opts.visible = world.client_mode == "battle"
 	_refresh_team_box()
 
 ## The team matrix: one row per player, one column per team. You can move

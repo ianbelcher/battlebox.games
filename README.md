@@ -9,15 +9,17 @@ whole of it — clone it and run your own.
 
 Anyone can start a game, and sets it up before going in: the mode, the
 map, how big the world is, how long a round lasts, how many teams, how
-many computer players are waiting in it. A public one is listed for
+many computer players are waiting in it, and who is allowed to fly. A public one is listed for
 everybody, with what it is written under its name; a private one gets a
 two-word code and is shared as a link. When the last player leaves, a
 created game closes itself.
 
-A game is what it was made as. None of that can be changed from inside a
-running world — changing the mode ends the round everybody is playing,
-and changing the map rebuilds the world under their feet. Leaving to
-start a different one is two presses away in the world menu.
+A game is what it was made as. **None of it can be changed from inside a
+running world.** Changing the mode ended the round everybody was playing
+and changing the map rebuilt the world under their feet — one person idly
+reading a menu, everyone else's game gone. The world menu now holds three
+things and no settings: how the round is going, the code that gets a
+friend in, and the way out to a different game.
 
 One game never closes: the lobby keeps it up whether or not anybody is
 in it. It is otherwise ordinary — listed like the rest, saying what it

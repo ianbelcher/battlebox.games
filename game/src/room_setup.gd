@@ -70,6 +70,14 @@ static func apply(world: Node) -> void:
 			ReviveRule.NONE, ReviveRule.MATES_AND_FLAG)
 	if EnvConfig.has("WORLD_DROP_KO"):
 		world.drop_on_knockout = EnvConfig.flag("WORLD_DROP_KO")
+	# WHO CAN FLY, as one of FlyRule's four answers turned back into the
+	# pair of defaults the world keeps. Two defaults rather than one
+	# because "computers only" and "humans only" cannot be said with a
+	# single switch — see FlyRule.
+	var flying := EnvConfig.text("WORLD_FLY", "")
+	if flying in FlyRule.ANSWERS:
+		world.battle_fly = FlyRule.people_fly(flying)
+		world.battle_fly_bots = FlyRule.computers_fly(flying)
 	print(describe(world))
 
 ## One line on the room's stdout saying what it came up as. The lobby

@@ -30,8 +30,8 @@ func test_the_screen_opens_on_a_game_and_the_fallback_stays_neutral() -> void:
 
 func test_a_whole_game_survives_intact() -> void:
 	var asked := {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
-		"bots": 10, "target": 5, "teams": 8, "revive": ReviveRule.MATES,
-		"drop": true}
+		"bots": 10, "target": 5, "teams": 8, "fly": "humans",
+		"revive": ReviveRule.MATES, "drop": true}
 	equal(GameSetup.clean(asked), asked, "nothing chosen is thrown away")
 
 func test_a_mode_nobody_has_written_falls_back() -> void:
@@ -67,6 +67,25 @@ func test_a_round_length_means_the_same_thing_in_every_mode() -> void:
 ## Teams are a property of the game, chosen with everything else, and
 ## applied before a single computer player is spawned — they are spread
 ## across whatever teams exist at the moment they are made.
+## WHO CAN FLY is a condition of the game like any other. It was a world
+## setting reachable from inside a running game — and worse, with a
+## per-player override on top of it, so the answer could be changed under
+## somebody mid-round in two different places.
+func test_flying_is_decided_before_the_game_starts() -> void:
+	equal(GameSetup.defaults()["fly"], "nobody",
+		"a game where everybody can fly from the start is a game nobody "
+		+ "walks anywhere in")
+	equal(GameSetup.clean({"fly": "humans"})["fly"], "humans", "and it is kept")
+	equal(GameSetup.clean({"fly": "wings"})["fly"], "nobody",
+		"an answer FlyRule does not have is not an answer")
+	for answer: String in GameSetup.FLY_ANSWERS:
+		equal(GameSetup.clean({"fly": answer})["fly"], answer,
+			"%s is one of FlyRule's own four" % answer)
+
+func test_a_world_is_said_as_the_square_it_is() -> void:
+	equal(GameSetup.size_label(400), "400 × 400",
+		"which is the world, written down")
+
 func test_teams_are_part_of_the_game() -> void:
 	equal(GameSetup.clean({"teams": 8})["teams"], 8, "eight sides")
 	equal(GameSetup.clean({"teams": 7})["teams"], GameSetup.DEFAULT_TEAMS,

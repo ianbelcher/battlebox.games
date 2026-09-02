@@ -116,7 +116,8 @@ def free_port() -> int:
 MODES = ("creative", "battle", "ctf", "holdout")
 MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space")
 SIZES = (50, 100, 200, 400, 800)
-BOT_COUNTS = (0, 3, 5, 10, 20, 40)
+FLY_ANSWERS = ("everyone", "nobody", "computers", "humans")
+BOT_COUNTS = (0, 3, 5, 10, 20, 40, 100)
 TARGETS = (1, 3, 5, 10)
 TEAM_COUNTS = (2, 3, 4, 5, 6, 8)
 # ONE LIST, for every mode that has a clock. It used to be 3/5/8 for
@@ -134,11 +135,12 @@ ROUND_LENGTHS = (3, 5, 10, 60)
 DEFAULT_SETTINGS = {
     "mode": "creative",
     "map": "classic",
-    "size": 200,
+    "size": 400,
     "minutes": 5,
     "bots": 5,
     "target": 3,
     "teams": 5,
+    "fly": "nobody",
     "revive": 2,
     "drop": False,
 }
@@ -159,7 +161,7 @@ DEFAULT_SETTINGS = {
 # one number here that costs CPU: every one of them pathfinds on that
 # room's single thread.
 HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, mode="battle", map="classic",
-                      teams=5, minutes=10)
+                      teams=5, minutes=10, size=400)
 
 
 def _snap(raw: dict, field: str, allowed, fallback):
@@ -189,6 +191,8 @@ def clean_settings(raw: object) -> dict:
     out["bots"] = _snap(raw, "bots", BOT_COUNTS, DEFAULT_SETTINGS["bots"])
     out["target"] = _snap(raw, "target", TARGETS, DEFAULT_SETTINGS["target"])
     out["teams"] = _snap(raw, "teams", TEAM_COUNTS, DEFAULT_SETTINGS["teams"])
+    out["fly"] = (raw.get("fly") if raw.get("fly") in FLY_ANSWERS
+                  else DEFAULT_SETTINGS["fly"])
     out["minutes"] = _snap(raw, "minutes", ROUND_LENGTHS,
                            DEFAULT_SETTINGS["minutes"])
     # The revive ladder is a range (none / team-mates / and your flag),
@@ -222,6 +226,7 @@ def settings_env(settings: dict) -> dict:
         "WORLD_BOTS": str(clean["bots"]),
         "WORLD_CTF_TARGET": str(clean["target"]),
         "WORLD_TEAMS": str(clean["teams"]),
+        "WORLD_FLY": str(clean["fly"]),
         "WORLD_REVIVE": str(clean["revive"]),
         "WORLD_DROP_KO": "1" if clean["drop"] else "0",
     }
@@ -238,7 +243,7 @@ def clean_name(raw: str) -> str:
 
 class Lobby:
     def __init__(self, server_binary: str, max_rooms: int, idle_exit: int,
-                 world_size: int, house_bots: int = 20) -> None:
+                 world_size: int, house_bots: int = 100) -> None:
         self.server_binary = server_binary
         self.max_rooms = max_rooms
         self.idle_exit = idle_exit
@@ -549,7 +554,7 @@ def main(argv: list[str] | None = None) -> int:
                         default=int(os.environ.get("WORLD_SIZE", "250")))
     parser.add_argument(
         "--house-bots", type=int,
-        default=int(os.environ.get("LOBBY_HOUSE_BOTS", "20")),
+        default=int(os.environ.get("LOBBY_HOUSE_BOTS", "100")),
         help="computer players in the always-on game. Every one of them "
              "pathfinds on that room's single thread, so this is the "
              "number to turn down if the shared world gets choppy",

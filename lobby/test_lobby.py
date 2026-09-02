@@ -214,8 +214,8 @@ class SettingsTests(unittest.TestCase):
 
     def test_a_whole_game_survives_intact(self):
         asked = {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
-                 "bots": 10, "target": 5, "teams": 8, "revive": 1,
-                 "drop": True}
+                 "bots": 10, "target": 5, "teams": 8, "fly": "humans",
+                 "revive": 1, "drop": True}
         self.assertEqual(lobby.clean_settings(asked), asked)
 
     def test_a_mode_nobody_has_written_is_not_started(self):
@@ -236,10 +236,8 @@ class SettingsTests(unittest.TestCase):
         # 137 is not a small world. It is a number nothing on the screen
         # can produce, so it is somebody sending their own POST — and a
         # clamp would quietly build them a world at the nearest edge.
-        self.assertEqual(lobby.clean_settings({"size": 137})["size"], 200)
-        self.assertEqual(lobby.clean_settings({"size": 99999})["size"], 200)
-        self.assertEqual(lobby.clean_settings({"size": -1})["size"], 200)
-        self.assertEqual(lobby.clean_settings({"size": "big"})["size"], 200)
+        for bad in (137, 99999, -1, "big"):
+            self.assertEqual(lobby.clean_settings({"size": bad})["size"], 400)
 
     def test_a_round_length_means_the_same_thing_in_every_mode(self):
         # One list, for every mode that has a clock. It was 3/5/8 for
@@ -250,6 +248,11 @@ class SettingsTests(unittest.TestCase):
                 lobby.clean_settings({"mode": mode, "minutes": 10})["minutes"],
                 10, mode)
         self.assertEqual(lobby.clean_settings({"minutes": 8})["minutes"], 5)
+
+    def test_who_can_fly_is_part_of_the_game(self):
+        self.assertEqual(lobby.clean_settings({})["fly"], "nobody")
+        self.assertEqual(lobby.clean_settings({"fly": "humans"})["fly"], "humans")
+        self.assertEqual(lobby.clean_settings({"fly": "wings"})["fly"], "nobody")
 
     def test_teams_are_part_of_the_game(self):
         self.assertEqual(lobby.clean_settings({"teams": 8})["teams"], 8)
@@ -276,12 +279,14 @@ class SettingsEnvTests(unittest.TestCase):
     def test_every_setting_reaches_the_room(self):
         env = lobby.settings_env({"mode": "holdout", "map": "sky", "size": 800,
                                   "minutes": 3, "bots": 20, "target": 10,
-                                  "teams": 8, "revive": 0, "drop": True})
+                                  "teams": 8, "fly": "everyone", "revive": 0,
+                                  "drop": True})
         self.assertEqual(env["WORLD_MODE"], "holdout")
         self.assertEqual(env["WORLD_THEME"], "sky")
         self.assertEqual(env["WORLD_SIZE"], "800")
         self.assertEqual(env["WORLD_ROUND_MINUTES"], "3")
         self.assertEqual(env["WORLD_TEAMS"], "8")
+        self.assertEqual(env["WORLD_FLY"], "everyone")
         self.assertEqual(env["WORLD_BOTS"], "20")
         self.assertEqual(env["WORLD_CTF_TARGET"], "10")
         self.assertEqual(env["WORLD_REVIVE"], "0")
@@ -299,7 +304,7 @@ class SettingsEnvTests(unittest.TestCase):
         # around clean_settings.
         env = lobby.settings_env({"map": "; rm -rf /", "size": 99999})
         self.assertEqual(env["WORLD_THEME"], "classic")
-        self.assertEqual(env["WORLD_SIZE"], "200")
+        self.assertEqual(env["WORLD_SIZE"], "400")
 
     def test_a_flag_that_is_off_is_zero_not_absent(self):
         # WORLD_DROP_KO is read as "is it exactly 1", so an absent
@@ -321,6 +326,13 @@ class HouseTests(unittest.TestCase):
                          "the house settings are valid settings")
         self.assertEqual(settings["mode"], "battle")
         self.assertEqual(settings["teams"], 5)
+
+    def test_the_always_on_world_can_hold_a_full_house(self):
+        # Five teams of twenty. The bot count is a flag, and 100 has to be
+        # a value clean_settings will actually accept or the always-on
+        # world quietly snaps back to the default handful.
+        self.assertEqual(lobby.clean_settings(
+            dict(lobby.HOUSE_SETTINGS, bots=100))["bots"], 100)
 
 
 class RoomSettingsJsonTests(unittest.TestCase):

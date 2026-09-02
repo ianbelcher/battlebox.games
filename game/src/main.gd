@@ -516,29 +516,12 @@ func _build_game_screen() -> void:
 	_lobby_label = _make_label("BATTLE ROYALE", 34, GOLD, 6)
 	lobby_box.add_child(_lobby_label)
 	lobby_box.add_child(_make_label("Pick your team!", 20, Color.WHITE))
-	var presets := HBoxContainer.new()
-	presets.add_theme_constant_override("separation", int(8 * ui_scale()))
-	lobby_box.add_child(presets)
-	presets.add_child(_make_label("Storm:", 18, Color(1, 1, 1, 0.7)))
-	for minutes in [3, 5, 8]:
-		var preset_btn := Button.new()
-		preset_btn.focus_mode = Control.FOCUS_NONE
-		preset_btn.focus_mode = Control.FOCUS_NONE
-		preset_btn.text = "%d min" % minutes
-		preset_btn.add_theme_font_size_override("font_size", int(18 * ui_scale()))
-		var m: int = minutes
-		preset_btn.pressed.connect(func() -> void:
-			Game.world.sv_match_config.rpc_id(1, m, -1))
-		presets.add_child(preset_btn)
-	var loot_btn := Button.new()
-	loot_btn.focus_mode = Control.FOCUS_NONE
-	loot_btn.focus_mode = Control.FOCUS_NONE
-	loot_btn.text = "Loot only"
-	loot_btn.toggle_mode = true
-	loot_btn.add_theme_font_size_override("font_size", int(18 * ui_scale()))
-	loot_btn.toggled.connect(func(on: bool) -> void:
-		Game.world.sv_match_config.rpc_id(1, -1, 1 if on else 0))
-	presets.add_child(loot_btn)
+	# NO STORM OR LOOT BUTTONS HERE. This overlay is what everybody looks
+	# at in the twenty seconds before a battle drops, and it carried two
+	# of the game's own settings — how long the round runs, and whether
+	# there are weapons on the ground. Both are asked on the front page
+	# before the world exists now, which is the only moment either of them
+	# is free to answer. See game_setup.gd.
 	_team_rows = VBoxContainer.new()
 	_team_rows.add_theme_constant_override("separation", int(8 * ui_scale()))
 	lobby_box.add_child(_team_rows)

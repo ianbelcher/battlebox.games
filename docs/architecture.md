@@ -70,13 +70,17 @@ this way: the terrain **is** the map that was asked for. Chosen from
 inside a running game instead, the same setting is a world reset
 performed on people who are standing in the world.
 
-**And they cannot be changed afterwards.** The mode, the map and the
-world's size are gone from both in-game menus: changing the mode ended
-the round everybody was in, and changing the map or the size rebuilt the
-world under whoever was standing on it — one person idly reading a menu,
-everyone else's game over. The world menu keeps what costs nothing to
-change mid-round (the round length, what it takes to win, how you get
-back up) and gains a way out to the front page.
+**And none of it can be changed afterwards.** Every setting above is
+gone from both in-game menus — the mode, the map, the world's size, the
+round length, the capture target, how you get back up, who can fly.
+Changing the mode ended the round everybody was in; changing the map or
+the size rebuilt the world under whoever was standing on it; the rest
+changed the rules out from under people halfway through. One person idly
+reading a menu, everyone else's game over.
+
+The world menu is now three things and no settings: how the round is
+going, the code that gets a friend in, and the way out to the front page.
+`game/tests/menu_controls.gd` fails if any of the old rows come back.
 
 The always-on world is not special either, beyond not closing when the
 last person leaves. It is spawned with settings like any other room,
@@ -89,7 +93,7 @@ listed like any other room, and says what it is like any other room.
 | `main.gd` | The shell: screens, the connect/reconnect loop, the server bootstrap |
 | `lobby_screen.gd` | The first screen — play, join a running game, or set one up |
 | `title_backdrop.gd` | What is behind it: sky, skyline, drifting blocks |
-| `neon_wordmark.gd` | BattleBox, drawn as the neon sign the intro ends on |
+| `neon_wordmark.gd` | BattleBox, as the neon sign the intro ends on — see `tools/make_wordmark.py` |
 | `game_setup.gd` | The table of what a new game can be. Pure; no nodes |
 | `lobby_client.gd` | The lobby's JSON API, with no UI in it |
 | `ui_theme.gd` | Every colour, radius and font size in every menu |

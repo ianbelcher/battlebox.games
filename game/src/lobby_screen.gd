@@ -282,7 +282,7 @@ func _build_hero() -> Control:
 ## as the settings underneath, which is the game introducing itself in a
 ## voice it does not have anywhere else.
 func _wordmark() -> Control:
-	return NeonWordmark.new("BattleBox").setup(UiTheme.T_DISPLAY, _scale)
+	return NeonWordmark.new().setup(_scale)
 
 ## Somebody read you a code. Small, because it is the least common way in
 ## and it used to be a full-width form field with a heading over it.
@@ -563,6 +563,7 @@ func _build_setup() -> Control:
 	_build_choice_field(column, "teams", "How many teams?", _team_options(), "")
 	_build_choice_field(column, "bots", "Computer players",
 		_bot_options(), "")
+	_build_choice_field(column, "fly", "Who can fly?", _fly_options(), "")
 	_build_choice_field(column, "revive", "Getting back up",
 		_revive_options(), "")
 	_build_choice_field(column, "drop", "When you are knocked out",
@@ -661,9 +662,14 @@ func _build_choice_field(parent: Control, field: String, title: String,
 
 func _size_options() -> Array:
 	var out: Array = []
-	for row: Dictionary in GameSetup.SIZES:
-		out.append({"value": int(row["value"]),
-			"label": "%s · %s" % [row["label"], row["note"]]})
+	for size: int in GameSetup.SIZES:
+		out.append({"value": size, "label": GameSetup.size_label(size)})
+	return out
+
+func _fly_options() -> Array:
+	var out: Array = []
+	for answer: String in GameSetup.FLY_ANSWERS:
+		out.append({"value": answer, "label": GameSetup.fly_label(answer)})
 	return out
 
 ## Every length either mode offers, in one row. The row is rebuilt when
@@ -749,6 +755,16 @@ func _refresh_setup() -> void:
 		for value: Variant in _choices["minutes"]:
 			var btn: Button = _choices["minutes"][value]
 			btn.disabled = not (int(value) in allowed)
+	# HOW MANY EACH SIDE GETS. The number of computer players and the
+	# number of teams are two rows apart and only mean anything together,
+	# so the bots row is re-labelled whenever the teams change rather than
+	# leaving somebody to divide one by the other.
+	if _choices.has("bots"):
+		var teams := int(_wanted.get("teams", GameSetup.DEFAULT_TEAMS))
+		var split := teams if GameSetup.uses("teams", mode) else 0
+		for value: Variant in _choices["bots"]:
+			var bot_btn: Button = _choices["bots"][value]
+			bot_btn.text = "  %s  " % GameSetup.bots_label(int(value), split)
 
 
 ## Back to the front, from outside. main.gd calls this when somebody

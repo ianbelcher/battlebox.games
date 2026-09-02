@@ -55,6 +55,14 @@ be **looked at**, not reasoned about. You do not need a screen for that:
 tools/screenshot.sh /tmp/shots          # the first screen
 ```
 
+The wordmark on that screen is traced out of the intro video rather than
+set in a font — the sign was built and lit in Minecraft and no typeface
+is those shapes. Re-make it with:
+
+```sh
+python3 tools/make_wordmark.py web/demo.mp4 game/assets/ui/wordmark.png
+```
+
 The front page has three screens and only one of them is up on arrival,
 so the other two have a hook rather than being unreachable to a camera:
 

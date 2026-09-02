@@ -28,7 +28,7 @@ class_name GameSetup
 
 ## The keys a settings dictionary holds. Anything else is dropped.
 const FIELDS := ["mode", "map", "size", "minutes", "bots", "target",
-	"teams", "revive", "drop"]
+	"teams", "fly", "revive", "drop"]
 
 ## HOW ARE WE PLAYING. `note` is the one line under the name on the tile —
 ## what the mode IS, in the words a child would use, not its rules.
@@ -57,21 +57,25 @@ const MAPS := [
 ## HOW BIG, in blocks across. The same five the world menu offers, and
 ## they double each time on purpose: a row of near-identical numbers is a
 ## row nobody can choose from.
-const SIZES := [
-	{"value": 50, "label": "Tiny", "note": "50 across"},
-	{"value": 100, "label": "Small", "note": "100 across"},
-	{"value": 200, "label": "Medium", "note": "200 across"},
-	{"value": 400, "label": "Big", "note": "400 across"},
-	{"value": 800, "label": "Huge", "note": "800 across"},
-]
+## SAID AS THE SQUARE IT IS. "Tiny · 50 across" made somebody work out
+## what tiny meant; "50 × 50" is the world, written down.
+const SIZES := [50, 100, 200, 400, 800]
 
 ## SOMEBODY TO PLAY AGAINST from the first second. A world with nobody in
 ## it is a field, and the first child in is alone in it until a grown-up
 ## finds the Players tab.
-const BOT_COUNTS := [0, 3, 5, 10, 20, 40]
+## A hundred is Game.MAX_PLAYERS — a full house, and what the
+## always-on world runs with.
+const BOT_COUNTS := [0, 3, 5, 10, 20, 40, 100]
 
 ## Captures to win, in capture the flag.
 const TARGETS := [1, 3, 5, 10]
+
+## WHO CAN FLY. It was a world setting reachable from inside the game,
+## which is the same objection as the mode and the map: it changes how the
+## game is played, under people who are playing it. FlyRule owns the four
+## answers and what each means; this is where one is chosen.
+const FLY_ANSWERS := FlyRule.ANSWERS
 
 ## HOW LONG A ROUND RUNS, in minutes. ONE LIST, for every mode that has a
 ## clock.
@@ -100,7 +104,9 @@ const TEAM_COUNTS := [2, 3, 4, 5, 6, 8]
 ## closing in on it.
 const DEFAULT_MODE := "creative"
 const DEFAULT_MAP := "classic"
-const DEFAULT_SIZE := 200
+## Four hundred across. Two hundred is a park; this is a place with
+## somewhere to go in it.
+const DEFAULT_SIZE := 400
 const DEFAULT_MINUTES := 5
 const DEFAULT_BOTS := 5
 const DEFAULT_TARGET := 3
@@ -120,6 +126,7 @@ static func defaults() -> Dictionary:
 		"bots": DEFAULT_BOTS,
 		"target": DEFAULT_TARGET,
 		"teams": DEFAULT_TEAMS,
+		"fly": "nobody",
 		"revive": ReviveRule.MATES_AND_FLAG,
 		"drop": false,
 	}
@@ -180,6 +187,8 @@ static func uses(field: String, mode: String) -> bool:
 			# Nobody is on a side in creative: there is nothing to be on a
 			# side FOR, and the colours are just colours.
 			return mode != "creative"
+		"fly":
+			return true
 		_:
 			return true
 
@@ -199,25 +208,44 @@ static func map_label(key: String) -> String:
 	return _label_in(MAPS, "key", key, "Island")
 
 static func size_label(value: int) -> String:
-	for row: Dictionary in SIZES:
-		if int(row["value"]) == value:
-			return str(row["label"])
-	return "%d across" % value
+	return "%d × %d" % [value, value]
 
 static func length_label(minutes: int) -> String:
 	return "No clock" if minutes >= UNLIMITED else "%d min" % minutes
 
 ## "5 computer players", and "Just us" rather than "0 computer players" —
 ## a zero reads as something failing to load.
-static func bots_label(count: int) -> String:
+## HOW MANY COMPUTER PLAYERS, and — because the two settings only make
+## sense together — what that works out at per side.
+##
+## "5 teams" and "100 computer players" are two numbers on two rows, and
+## reading them as one game is arithmetic somebody should not have to do:
+## the report was "I said five teams but a hundred players, so that should
+## be 20 players per team, but when I jump in it seems like there are only
+## five". Now the row says it.
+static func bots_label(count: int, teams := 0) -> String:
 	if count <= 0:
 		return "Just us"
+	var each := ""
+	if teams > 1 and count >= teams:
+		each = "  ·  %d a side" % (count / teams)
 	if count == 1:
 		return "1 computer player"
-	return "%d computer players" % count
+	return "%d computer players%s" % [count, each]
 
 static func teams_label(count: int) -> String:
 	return "%d teams" % count
+
+static func fly_label(answer: String) -> String:
+	match answer:
+		"everyone":
+			return "Everybody can fly"
+		"humans":
+			return "People can fly"
+		"computers":
+			return "Computer players can fly"
+		_:
+			return "Nobody flies"
 
 static func _label_in(table: Array, key_name: String, wanted: String,
 		fallback: String) -> String:
@@ -265,22 +293,19 @@ static func clean(raw: Dictionary) -> Dictionary:
 		out["mode"] = str(raw["mode"])
 	if _has_key(raw, MAPS, "map"):
 		out["map"] = str(raw["map"])
-	out["size"] = _snap_int(raw, "size", _values_of(SIZES), DEFAULT_SIZE)
+	out["size"] = _snap_int(raw, "size", SIZES, DEFAULT_SIZE)
 	out["bots"] = _snap_int(raw, "bots", BOT_COUNTS, DEFAULT_BOTS)
 	out["target"] = _snap_int(raw, "target", TARGETS, DEFAULT_TARGET)
 	out["teams"] = _snap_int(raw, "teams", TEAM_COUNTS, DEFAULT_TEAMS)
+	out["fly"] = str(raw.get("fly", "nobody"))
+	if not (out["fly"] in FLY_ANSWERS):
+		out["fly"] = "nobody"
 	out["minutes"] = _snap_int(raw, "minutes", lengths_for(str(out["mode"])),
 		DEFAULT_MINUTES)
 	# The revive ladder is a range rather than a list, so it clamps.
 	out["revive"] = clampi(int(raw.get("revive", ReviveRule.MATES_AND_FLAG)),
 		ReviveRule.NONE, ReviveRule.MATES_AND_FLAG)
 	out["drop"] = bool(raw.get("drop", false))
-	return out
-
-static func _values_of(table: Array) -> Array:
-	var out: Array = []
-	for row: Dictionary in table:
-		out.append(int(row["value"]))
 	return out
 
 static func _has_key(raw: Dictionary, table: Array, field: String) -> bool:
