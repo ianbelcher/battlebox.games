@@ -194,3 +194,127 @@ class PlayerCountTests(unittest.TestCase):
         self.assertEqual(blob["players"], 19)
         self.assertEqual(blob["humans"], 1)
         self.assertEqual(blob["bots"], 18)
+
+
+class SettingsTests(unittest.TestCase):
+    """WHAT A NEW GAME WAS ASKED TO BE, checked before anything is started.
+
+    These settings come off a POST, and a POST is a POST: the front page
+    is one thing that can send one. Every value that reaches a room
+    process has been through clean_settings, and the tests below are what
+    say so — the failure they exist for is not a crash, it is a game that
+    boots 4,000 blocks across because somebody typed a number.
+    """
+
+    def test_nothing_at_all_is_the_default_game(self):
+        self.assertEqual(lobby.clean_settings({}), lobby.DEFAULT_SETTINGS)
+        self.assertEqual(lobby.clean_settings(None), lobby.DEFAULT_SETTINGS)
+        # A list, a string, a number — anything that is not an object.
+        self.assertEqual(lobby.clean_settings(["ctf"]), lobby.DEFAULT_SETTINGS)
+
+    def test_a_whole_game_survives_intact(self):
+        asked = {"mode": "ctf", "map": "castles", "size": 400, "minutes": 8,
+                 "bots": 10, "target": 5, "revive": 1, "drop": True}
+        self.assertEqual(lobby.clean_settings(asked), asked)
+
+    def test_a_mode_nobody_has_written_is_not_started(self):
+        self.assertEqual(lobby.clean_settings({"mode": "zombies"})["mode"],
+                         lobby.DEFAULT_SETTINGS["mode"])
+
+    def test_a_room_nobody_configured_is_still_a_world_to_build_in(self):
+        # What a bare POST has always produced. The front page always
+        # sends a whole settings object and opens on battle royale; a
+        # script that has never heard of a mode must not be handed one.
+        self.assertEqual(lobby.clean_settings({})["mode"], "creative")
+
+    def test_a_map_nobody_has_written_is_not_generated(self):
+        self.assertEqual(lobby.clean_settings({"map": "../../etc"})["map"],
+                         lobby.DEFAULT_SETTINGS["map"])
+
+    def test_a_size_off_the_list_is_refused_rather_than_clamped(self):
+        # 137 is not a small world. It is a number nothing on the screen
+        # can produce, so it is somebody sending their own POST — and a
+        # clamp would quietly build them a world at the nearest edge.
+        self.assertEqual(lobby.clean_settings({"size": 137})["size"], 200)
+        self.assertEqual(lobby.clean_settings({"size": 99999})["size"], 200)
+        self.assertEqual(lobby.clean_settings({"size": -1})["size"], 200)
+        self.assertEqual(lobby.clean_settings({"size": "big"})["size"], 200)
+
+    def test_round_length_follows_the_mode_that_asked_for_it(self):
+        # The two clocked modes do not offer the same lengths, and a
+        # length from the other one's list is not a length.
+        self.assertEqual(lobby.clean_settings({"mode": "holdout",
+                                               "minutes": 10})["minutes"], 10)
+        self.assertEqual(lobby.clean_settings({"mode": "battle",
+                                               "minutes": 10})["minutes"], 5)
+        self.assertEqual(lobby.clean_settings({"mode": "battle",
+                                               "minutes": 8})["minutes"], 8)
+
+    def test_the_revive_ladder_clamps_to_its_rungs(self):
+        # A range rather than a list of choices, so out-of-range lands on
+        # the nearest rung instead of the default.
+        self.assertEqual(lobby.clean_settings({"revive": 0})["revive"], 0)
+        self.assertEqual(lobby.clean_settings({"revive": 9})["revive"], 2)
+        self.assertEqual(lobby.clean_settings({"revive": -4})["revive"], 0)
+        self.assertEqual(lobby.clean_settings({"revive": "yes"})["revive"], 2)
+
+    def test_bots_are_a_choice_and_none_is_one_of_them(self):
+        self.assertEqual(lobby.clean_settings({"bots": 0})["bots"], 0)
+        self.assertEqual(lobby.clean_settings({"bots": 20})["bots"], 20)
+        self.assertEqual(lobby.clean_settings({"bots": 400})["bots"], 5)
+
+
+class SettingsEnvTests(unittest.TestCase):
+    """The room process is configured entirely from its environment, so
+    this mapping IS how a chosen setting becomes a real world."""
+
+    def test_every_setting_reaches_the_room(self):
+        env = lobby.settings_env({"mode": "holdout", "map": "sky", "size": 800,
+                                  "minutes": 2, "bots": 20, "target": 10,
+                                  "revive": 0, "drop": True})
+        self.assertEqual(env["WORLD_MODE"], "holdout")
+        self.assertEqual(env["WORLD_THEME"], "sky")
+        self.assertEqual(env["WORLD_SIZE"], "800")
+        self.assertEqual(env["WORLD_ROUND_MINUTES"], "2")
+        self.assertEqual(env["WORLD_BOTS"], "20")
+        self.assertEqual(env["WORLD_CTF_TARGET"], "10")
+        self.assertEqual(env["WORLD_REVIVE"], "0")
+        self.assertEqual(env["WORLD_DROP_KO"], "1")
+
+    def test_everything_is_a_string(self):
+        # It is going into os.environ, which takes strings and raises on
+        # anything else — and the raise would happen inside spawn(), one
+        # frame after somebody pressed a button.
+        for key, value in lobby.settings_env({}).items():
+            self.assertIsInstance(value, str, key)
+
+    def test_the_environment_is_cleaned_on_the_way_through(self):
+        # settings_env is reachable with raw input; it must not be a hole
+        # around clean_settings.
+        env = lobby.settings_env({"map": "; rm -rf /", "size": 99999})
+        self.assertEqual(env["WORLD_THEME"], "classic")
+        self.assertEqual(env["WORLD_SIZE"], "200")
+
+    def test_a_flag_that_is_off_is_zero_not_absent(self):
+        # WORLD_DROP_KO is read as "is it exactly 1", so an absent
+        # variable and "0" mean the same thing — but an absent one also
+        # means "the room inherited whatever this process had", which is
+        # not the same at all.
+        self.assertEqual(lobby.settings_env({"drop": False})["WORLD_DROP_KO"], "0")
+
+
+class RoomSettingsJsonTests(unittest.TestCase):
+    def test_a_room_says_what_it_is(self):
+        # The front page reads this to write "Capture the flag · Castles"
+        # under a game's name. Without it the list is names alone, which
+        # answers none of the questions somebody browsing it is asking.
+        room = lobby.Room("brave-otter", "Ian's game", True, 9100,
+                          settings=lobby.clean_settings({"mode": "ctf",
+                                                         "map": "castles"}))
+        self.assertEqual(room.as_json()["settings"]["mode"], "ctf")
+        self.assertEqual(room.as_json()["settings"]["map"], "castles")
+
+    def test_a_room_with_none_reports_an_empty_object(self):
+        # Not a made-up default: a room that did not say what it is must
+        # not be described on the front page as though it had.
+        self.assertEqual(lobby.Room("x", "x", True, 1).as_json()["settings"], {})

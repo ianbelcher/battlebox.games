@@ -48,8 +48,20 @@ func list_rooms() -> void:
 
 ## Start a game. `public` decides whether strangers see it on the front
 ## page; either way the answer carries the code that gets people in.
-func create_room(display_name: String, public: bool) -> void:
-	var body := JSON.stringify({"name": display_name, "public": public})
+##
+## `settings` is what KIND of game — mode, world, size, round length, how
+## many computer players (see game_setup.gd). It travels with the create
+## rather than being applied once the creator has connected, because a
+## world is generated at boot from its environment: sent this way the
+## terrain IS the map that was asked for, and sent afterwards it is a
+## reset performed on somebody who is already standing in it.
+##
+## Sent as given. Clamping it here would be a courtesy, not a defence —
+## the lobby validates it again on arrival, because a POST is a POST.
+func create_room(display_name: String, public: bool,
+		settings: Dictionary = {}) -> void:
+	var body := JSON.stringify({"name": display_name, "public": public,
+		"settings": settings})
 	var err := _create_req.request("%s/api/rooms" % api_base(),
 		PackedStringArray(["Content-Type: application/json"]),
 		HTTPClient.METHOD_POST, body)

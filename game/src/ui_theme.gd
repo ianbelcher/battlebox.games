@@ -21,28 +21,62 @@ extends Object
 ## Sizes here are DESIGN pixels at scale 1.0. px() multiplies them.
 
 # ------------------------------------------------------------------
-# Palette — a cool near-black with one warm accent. Everything the eye
-# should land on is gold; everything else recedes.
+# Palette — GRAPHITE AND EMBER.
+#
+# It was navy and gold, which is where this started and what it was
+# judged on: "the motif is absolutely disgustingly bad". Two problems,
+# and they compound. Every dark surface had blue in it, so the whole game
+# sat under a cold cast that nothing warmed up; and the one accent was a
+# yellow close enough to that blue's complement to vibrate against it.
+#
+# So the grounds are NEUTRAL now — a true graphite with no hue in it at
+# all — and the accent is a single hot ember. Neutral ground is what lets
+# one saturated colour carry a whole interface: there is nothing else on
+# screen competing to be looked at, so ember means "this is the thing",
+# everywhere, without ever being explained.
+#
+# THREE COLOURS TOTAL, and the third earns its place. LIVE is mint, and
+# it says one thing only: there are PEOPLE in here. It is not decoration
+# and it is never used for anything else — a game with players in it and
+# a game with twenty bots in it have to look different at a glance, and
+# a second accent is the cheapest way to say so.
 # ------------------------------------------------------------------
 
-const SCRIM      := Color(0.012, 0.016, 0.030, 0.82)  ## behind a modal
-const SURFACE    := Color("0e1119")   ## the panel itself
-const SURFACE_2  := Color("171c28")   ## cards, buttons at rest
-const SURFACE_3  := Color("222939")   ## hover
-const LINE       := Color("2c3448")   ## hairlines and borders
-const LINE_SOFT  := Color(1, 1, 1, 0.06)
+## The page behind every panel. Not black — black reads as a hole in a
+## screen; this reads as a surface with a light on it somewhere.
+const VOID       := Color("0a0a0c")
+const SCRIM      := Color(0.02, 0.019, 0.024, 0.86)  ## behind a modal
+const SURFACE    := Color("141317")   ## the panel itself
+const SURFACE_2  := Color("1e1c23")   ## cards, buttons at rest
+const SURFACE_3  := Color("2a2831")   ## hover
+const LINE       := Color("34313c")   ## hairlines and borders
+const LINE_SOFT  := Color(1, 1, 1, 0.055)
+## A LIT TOP EDGE. Drawn as a top-only border in a colour lighter than
+## the fill, which is how a real surface catches the light — and the
+## cheapest way to stop a flat rectangle reading as flat.
+const EDGE       := Color(1, 1, 1, 0.10)
 
-const INK        := Color("e9edf6")   ## primary text
-const INK_DIM    := Color("98a4bd")   ## labels, section headings
-const INK_FAINT  := Color("616e8a")   ## notes, disabled
+const INK        := Color("f2f1f5")   ## primary text
+const INK_DIM    := Color("a5a1af")   ## labels, section headings
+const INK_FAINT  := Color("6b6775")   ## notes, disabled
 
-const ACCENT     := Color("ffc94d")   ## selection, focus, brand
-const ACCENT_DEEP:= Color("d99f28")   ## pressed
-const ON_ACCENT  := Color("191307")   ## text on a gold fill
-const DANGER     := Color("ff6b6b")
+const ACCENT     := Color("ff5f2e")   ## selection, focus, brand
+const ACCENT_DEEP:= Color("d94413")   ## pressed
+## Ember at low alpha, for the fill behind a chosen tile. A tint rather
+## than the full colour: a grid of solid ember tiles is a grid with
+## nothing chosen in it.
+const ACCENT_SOFT:= Color(1.0, 0.373, 0.18, 0.14)
+## Dark on ember, never white. White on this orange is 3.2:1 and dark is
+## 5.9:1 — the button a four-year-old is meant to find has to be the most
+## legible thing on the screen, not the least.
+const ON_ACCENT  := Color("1a0b04")
+## PEOPLE ARE IN THERE. This colour means that and nothing else.
+const LIVE       := Color("4fd88a")
+const DANGER     := Color("ff5c5c")
 
 ## Type scale, design px. Anything that puts a number in a font size
 ## override should take it from here instead of making one up.
+const T_DISPLAY := 58
 const T_TITLE   := 30
 const T_TAB     := 21
 const T_HEADING := 17
@@ -51,9 +85,9 @@ const T_LABEL   := 17
 const T_NOTE    := 14
 const T_HINT    := 15
 
-const R_PANEL   := 18
-const R_CARD    := 12
-const R_CONTROL := 9
+const R_PANEL   := 14
+const R_CARD    := 10
+const R_CONTROL := 7
 
 static func px(n: float, sc: float) -> int:
 	return maxi(1, int(round(n * sc)))
@@ -84,19 +118,21 @@ static func flat(bg: Color, radius: int, sc: float, border := 0.0,
 ## sheet floating over the world rather than a hole cut into it.
 static func panel_box(sc: float) -> StyleBoxFlat:
 	var sb := flat(SURFACE, R_PANEL, sc, 1.0, LINE)
-	sb.shadow_color = Color(0, 0, 0, 0.55)
-	sb.shadow_size = px(28, sc)
+	sb.shadow_color = Color(0, 0, 0, 0.7)
+	sb.shadow_size = px(34, sc)
 	sb.shadow_offset = Vector2(0, px(8, sc))
 	sb.set_content_margin_all(px(22, sc))
 	return sb
 
-## A grouped block of settings inside a panel.
+## A grouped block of settings inside a panel. Lit along its top edge
+## rather than outlined all round: an outline draws a box, a lit edge
+## makes the same rectangle read as a surface lying on the one behind it.
 static func card_box(sc: float) -> StyleBoxFlat:
-	var sb := flat(SURFACE_2, R_CARD, sc, 1.0, LINE_SOFT)
+	var sb := lit_box(SURFACE_2, R_CARD, sc)
 	sb.set_content_margin_all(px(14, sc))
 	return sb
 
-## The gold "this one is chosen" fill, for toggle-style buttons.
+## The ember "this one is chosen" fill, for toggle-style buttons.
 static func selected_box(sc: float) -> StyleBoxFlat:
 	var sb := flat(ACCENT, R_CONTROL, sc)
 	sb.content_margin_left = px(16, sc)
@@ -113,6 +149,66 @@ static func hint_box(sc: float) -> StyleBoxFlat:
 	sb.content_margin_top = px(4, sc)
 	sb.content_margin_bottom = px(4, sc)
 	return sb
+
+## A CARD WITH A LIT TOP EDGE. Same fill as card_box, but the hairline
+## runs along the top only and in a lighter colour, so the surface reads
+## as catching a light from above rather than as a rectangle of flat
+## paint. It is one line of code and it is most of the difference between
+## "a dark box" and "a surface".
+static func lit_box(bg: Color, radius: int, sc: float) -> StyleBoxFlat:
+	var sb := flat(bg, radius, sc)
+	sb.border_width_top = maxi(1, int(round(sc)))
+	sb.border_color = EDGE
+	return sb
+
+## A row in a list, with its state marked by a bar down the RIGHT edge.
+##
+## THE RIGHT EDGE, NOT THE LEFT, and that is a considered choice rather
+## than a coin toss: a coloured rail down the left of a rounded card is
+## the single most over-used shape in machine-generated interfaces, and
+## it looks like one. It also puts the mark at the start of the reading
+## order, where it competes with the name; on the right it sits with the
+## thing it is actually about — how many people are in there.
+static func rail_box(bg: Color, sc: float, rail := Color(0, 0, 0, 0)) -> StyleBoxFlat:
+	var sb := flat(bg, R_CARD, sc)
+	sb.border_width_top = maxi(1, int(round(sc)))
+	sb.border_color = EDGE
+	if rail.a > 0.0:
+		# Godot gives a stylebox ONE border colour, so the rail and the
+		# lit edge cannot both be drawn by it. The rail is the louder of
+		# the two and wins; the row keeps its shape either way.
+		sb.set_border_width_all(0)
+		sb.border_width_right = px(3, sc)
+		sb.border_color = rail
+	return sb
+
+## HEAVIER TYPE THAN THE BUNDLED FONT HAS.
+##
+## The game ships one weight — the engine's default face plus three
+## fallbacks for symbols — so a heading cannot simply ask for bold, and
+## for a long time nothing did: every title on every screen was set in
+## the same weight as the body text under it, which is why none of them
+## read as titles. FontVariation's synthetic embolden thickens the strokes
+## of whatever face is actually in use, and works the same on the web
+## build (where there are no system fonts to borrow from) as it does here.
+##
+## `tracking` is glyph spacing in design px — negative tightens a display
+## line, positive opens up a small upper-case label, and both are what
+## make a wordmark look set rather than typed.
+static func heavy(sc: float, embolden := 0.6, tracking := 0.0) -> FontVariation:
+	var face := FontVariation.new()
+	var theme := ThemeDB.get_default_theme()
+	# get_default_theme() has a font on it once Game._install_fallback_fonts
+	# has run; ThemeDB.fallback_font is what is there before that, and on
+	# the two platforms that skip the install entirely.
+	if theme != null and theme.default_font != null:
+		face.base_font = theme.default_font
+	else:
+		face.base_font = ThemeDB.fallback_font
+	face.variation_embolden = embolden
+	if not is_zero_approx(tracking):
+		face.set_spacing(TextServer.SPACING_GLYPH, int(round(tracking * sc)))
+	return face
 
 # ------------------------------------------------------------------
 # The Theme

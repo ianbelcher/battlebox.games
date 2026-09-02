@@ -32,6 +32,20 @@ const KNOWN := {
 	"WORLD_CLOCK": "pin the day fraction, 0..1, so a given hour can be looked at",
 	"WORLD_FAST": "1 shrinks the day to 90s and sapling growth to 8s",
 
+	# --- What a room was ASKED to be -------------------------------------
+	#
+	# Chosen on the front page before the room exists, carried here by the
+	# lobby (see lobby/lobby.py's settings_env) and applied at boot. A
+	# world is generated from its environment and never written to disk,
+	# so this is the difference between a room that IS a desert and a room
+	# that resets itself into one while somebody is standing in it.
+	"WORLD_MODE": "creative | battle | ctf | holdout — the mode a room starts in",
+	"WORLD_ROUND_MINUTES": "how long a round of battle royale or last flag standing runs",
+	"WORLD_BOTS": "computer players waiting in the world at boot",
+	"WORLD_CTF_TARGET": "captures needed to win capture the flag",
+	"WORLD_REVIVE": "0 nobody · 1 team-mates · 2 team-mates and your own flag",
+	"WORLD_DROP_KO": "1 drops your weapons where you fell",
+
 	# --- Rooms ---------------------------------------------------------
 	"WORLD_ROOM_CODE": "this room's join code; absent means the always-on game",
 	"WORLD_ROOM_NAME": "what the creator called this room",
@@ -76,6 +90,7 @@ const KNOWN := {
 	"WORLD_MENU_TEST": "1 opens the world menu on its own",
 	"WORLD_MENU_TAB": "leave the world menu on this tab",
 	"WORLD_MENU_PROBE": "1 drives the world menu with synthetic input",
+	"WORLD_LOBBY_SCREEN": "new | code — open one of the front page's other screens at boot",
 	"WORLD_BOT_PIT_TEST": "drop the bots into holes this deep, to exercise digging out",
 	"WORLD_BOT_WEAPON": "give every bot this weapon id at the drop",
 	"WORLD_TEST_FILTER": "run only unit tests whose name contains this",

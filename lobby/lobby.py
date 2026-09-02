@@ -67,6 +67,7 @@ class Room:
     bots: int = 0
     started_at: float = field(default_factory=time.monotonic)
     house: bool = False
+    settings: dict = field(default_factory=dict)
 
     def as_json(self) -> dict:
         return {
@@ -78,6 +79,11 @@ class Room:
             "bots": self.bots,
             "house": self.house,
             "age": int(time.monotonic() - self.started_at),
+            # WHAT THIS GAME IS, so the front page can say so. A list of
+            # room names answers none of the questions somebody browsing
+            # it is actually asking; "Capture the flag, Castles, 400
+            # across" answers all of them.
+            "settings": dict(self.settings),
         }
 
     def alive(self) -> bool:
@@ -88,6 +94,117 @@ def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
+
+
+# ---------------------------------------------------------------------
+# WHAT A NEW GAME CAN BE.
+#
+# The same table as game/src/game_setup.gd, and it is duplicated on
+# purpose rather than shared. Nothing in this process can read GDScript,
+# and more importantly: THE CLIENT'S COPY IS NOT A VALIDATOR. A POST is a
+# POST — the front page is one thing that can send one, and the room this
+# spawns runs a real server process with a real world in it. So the rules
+# are checked again here, against this table, before anything is started.
+#
+# Adding a setting means a row in both. game/tests/unit/game_setup_test.gd
+# and the tests below each check their own side; if they ever disagree the
+# symptom is a game that starts with a setting quietly ignored, which is
+# the kind of bug nobody reports because it just looks like the button did
+# not work.
+# ---------------------------------------------------------------------
+
+MODES = ("creative", "battle", "ctf", "holdout")
+MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space")
+SIZES = (50, 100, 200, 400, 800)
+BOT_COUNTS = (0, 3, 5, 10, 20)
+TARGETS = (1, 3, 5, 10)
+BATTLE_LENGTHS = (3, 5, 8, 60)
+HOLDOUT_LENGTHS = (2, 5, 10, 60)
+
+# The NEUTRAL baseline — what a field becomes when it arrives missing.
+# Creative, because a bare POST with no settings in it is not somebody
+# pressing "New game" on the front page (that screen always sends a whole
+# object, and it opens on battle royale — see GameSetup.opening_choice);
+# it is a script or a test, and what those have always got is a world to
+# build in rather than a storm closing in.
+DEFAULT_SETTINGS = {
+    "mode": "creative",
+    "map": "classic",
+    "size": 200,
+    "minutes": 5,
+    "bots": 5,
+    "target": 3,
+    "revive": 2,
+    "drop": False,
+}
+
+## What the always-on world is. It is the place to go and build in peace,
+## so it is creative, and it is the biggest of the maps because everybody
+## shares it.
+HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, map="classic", bots=5)
+
+
+def _snap(raw: dict, field: str, allowed, fallback):
+    """A choice out of a list, or the default. SNAPPED rather than
+    clamped: a world 137 blocks across is not a small world, it is a
+    number nothing can produce, and letting it through starts a game
+    nobody asked for."""
+    value = raw.get(field, fallback)
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return value if value in allowed else fallback
+
+
+def clean_settings(raw: object) -> dict:
+    """Whatever arrived, made safe. Unknown keys dropped, unknown values
+    replaced by the default, numbers snapped to the table above."""
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_SETTINGS)
+    out = dict(DEFAULT_SETTINGS)
+    if raw.get("mode") in MODES:
+        out["mode"] = raw["mode"]
+    if raw.get("map") in MAPS:
+        out["map"] = raw["map"]
+    out["size"] = _snap(raw, "size", SIZES, DEFAULT_SETTINGS["size"])
+    out["bots"] = _snap(raw, "bots", BOT_COUNTS, DEFAULT_SETTINGS["bots"])
+    out["target"] = _snap(raw, "target", TARGETS, DEFAULT_SETTINGS["target"])
+    lengths = HOLDOUT_LENGTHS if out["mode"] == "holdout" else BATTLE_LENGTHS
+    out["minutes"] = _snap(raw, "minutes", lengths, DEFAULT_SETTINGS["minutes"])
+    # The revive ladder is a range (none / team-mates / and your flag),
+    # so it clamps rather than snapping.
+    try:
+        out["revive"] = max(0, min(2, int(raw.get("revive", 2))))
+    except (TypeError, ValueError):
+        out["revive"] = 2
+    out["drop"] = bool(raw.get("drop", False))
+    return out
+
+
+def settings_env(settings: dict) -> dict:
+    """The room process's side of the same table.
+
+    A world is generated at boot from its environment and never written
+    to disk, so handing the settings over THIS way — rather than having
+    the creator's client send them once it has connected — is what makes
+    the terrain actually be the map that was asked for. The alternative
+    is a room that boots as an island and then resets itself into a
+    desert while somebody is standing in it.
+
+    Every value is a string: this is going into os.environ.
+    """
+    clean = clean_settings(settings)
+    return {
+        "WORLD_MODE": str(clean["mode"]),
+        "WORLD_THEME": str(clean["map"]),
+        "WORLD_SIZE": str(clean["size"]),
+        "WORLD_ROUND_MINUTES": str(clean["minutes"]),
+        "WORLD_BOTS": str(clean["bots"]),
+        "WORLD_CTF_TARGET": str(clean["target"]),
+        "WORLD_REVIVE": str(clean["revive"]),
+        "WORLD_DROP_KO": "1" if clean["drop"] else "0",
+    }
 
 
 def clean_name(raw: str) -> str:
@@ -113,11 +230,14 @@ class Lobby:
     async def start_house(self) -> None:
         """The always-on public game. There is always somewhere to play,
         and its Play button never has to wait for a process to boot."""
-        await self.spawn(HOUSE_CODE, "BattleBox", True, house=True)
+        settings = dict(HOUSE_SETTINGS, size=self.world_size)
+        await self.spawn(HOUSE_CODE, "BattleBox", True, house=True,
+                         settings=settings)
 
     async def spawn(self, code: str, display_name: str, is_public: bool,
-                    house: bool = False) -> Room:
+                    house: bool = False, settings: dict | None = None) -> Room:
         port = free_port()
+        clean = clean_settings(settings or {})
         env = dict(
             os.environ,
             WORLD_PORT=str(port),
@@ -126,8 +246,12 @@ class Lobby:
             WORLD_ROOM_PUBLIC="1" if is_public else "0",
             # The house room never exits; every other room reaps itself.
             WORLD_IDLE_EXIT="0" if house else str(self.idle_exit),
-            WORLD_SIZE=str(self.world_size),
             GODOT_SILENCE_ROOT_WARNING="1",
+            # LAST, so what the creator chose beats both this process's
+            # environment and the --world-size default. WORLD_SIZE used to
+            # be set here unconditionally, which would have silently
+            # overridden every world size anybody picked.
+            **settings_env(clean),
         )
         process = await asyncio.create_subprocess_exec(
             *self.server_binary.split(),
@@ -135,7 +259,8 @@ class Lobby:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        room = Room(code, display_name, is_public, port, process, house=house)
+        room = Room(code, display_name, is_public, port, process, house=house,
+                    settings=clean)
         self.rooms[code] = room
         asyncio.create_task(self._follow(room))
         await self._await_listening(room)
@@ -203,9 +328,16 @@ class Lobby:
 
     def public_rooms(self) -> list[dict]:
         listed = [r for r in self.rooms.values() if r.is_public and r.alive()]
-        # The house room first, then the busiest, then the newest. A player
-        # opening the page wants somewhere with people in it.
-        listed.sort(key=lambda r: (not r.house, -r.players, r.started_at))
+        # The house room first, then the one with the most PEOPLE in it,
+        # then the most players of any kind, then the newest.
+        #
+        # People first, and that is the whole point of the ordering: this
+        # sorted on the total, so a room holding twenty computer players
+        # and nobody at all was put above a room with three children in
+        # it. The front page then highlights the busy one, in a colour
+        # that means "there are people here", at the top of the list.
+        listed.sort(key=lambda r: (not r.house, -r.humans, -r.players,
+                                   r.started_at))
         return [r.as_json() for r in listed]
 
     # -- HTTP ----------------------------------------------------------
@@ -272,8 +404,10 @@ class Lobby:
         code = names.make_code(set(self.rooms))
         display_name = clean_name(str(wanted.get("name", ""))) or code
         is_public = bool(wanted.get("public", True))
+        settings = clean_settings(wanted.get("settings"))
         try:
-            room = await self.spawn(code, display_name, is_public)
+            room = await self.spawn(code, display_name, is_public,
+                                    settings=settings)
         except (RuntimeError, TimeoutError) as problem:
             print(f"lobby: could not start {code}: {problem}", flush=True)
             await _respond(writer, 500, {"error": "the game would not start"})

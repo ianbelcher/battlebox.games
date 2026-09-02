@@ -1,27 +1,36 @@
 class_name LobbyScreen
 extends Control
-## The first thing anybody sees: which game do you want to be in?
+## THE FIRST THING ANYBODY SEES. Three screens, in the order the
+## decisions are made:
 ##
-## THE FOUR-YEAR-OLD PATH HAS TO SURVIVE THIS SCREEN EXISTING. Play is the
-## big gold button, it holds focus, and it needs no reading — Space, Enter
-## or Ⓐ joins the always-on world exactly as pressing Play always did.
-## Everything else is below it and optional.
+##   HOME    play, or join one of the games running, or start one
+##   NEW     what that new game IS — mode, world, size, length, who else
+##   CODE    the two words that get a friend into the private one
 ##
-## Everything else has to be legible too, which the first version was not:
-## the create and join fields were default-sized LineEdits — about twelve
-## pixels of text on a 1280-wide screen — next to a button drawn at 34.
-## Anything a child is expected to hit is at least CONTROL_HEIGHT tall
-## here, and anything they are expected to read is at least T_BODY.
+## WHAT THIS USED TO BE, and why none of it survived: one 620-pixel
+## column of stacked form fields. A gold Play button, then a heading, then
+## a list, then a text box, then a checkbox, then another text box. The
+## games actually running — the only thing on the screen that changes, and
+## the reason to be looking at it — were fourth down the page in body
+## text. And "start a new game" took a NAME and nothing else, so the mode,
+## the map, the size and the round length could only be chosen from inside
+## a world that had already been generated as something else.
+##
+## So the screen is now two columns and the right-hand one is a list of
+## games with what they ARE written under them; and starting a game is a
+## screen of its own that asks the questions a game needs answered before
+## it exists. See game_setup.gd for that table, and lobby/lobby.py for
+## what happens to the answers.
+##
+## THE FOUR-YEAR-OLD PATH HAS TO SURVIVE ALL OF IT. Play is the big ember
+## button, it holds focus from the first frame, and it needs no reading:
+## Space, Enter or Ⓐ joins the always-on world exactly as it always did.
+## Everything else is beside it and optional.
 ##
 ## And everything here is REACHABLE WITHOUT A MOUSE. Every control on this
-## screen was FOCUS_NONE, which meant a gamepad could do exactly one thing
-## with it: press Play. Starting a game, making it private, picking one
-## out of the list and typing a code were all mouse-only — on the first
-## screen of a game whose players are mostly holding controllers.
-##
-## The screen has TWO states. The chooser, and — after making a private
-## game — the code. See _build_code_panel for why the code gets a screen
-## of its own rather than a line of status text.
+## screen was FOCUS_NONE once, which meant a gamepad could do exactly one
+## thing with it: press Play. On the first screen of a game whose players
+## are mostly holding controllers.
 ##
 ## Emits `join_requested` with a room code. It connects to nothing itself:
 ## main.gd owns the socket and the reconnect loop, and a second one here
@@ -35,32 +44,63 @@ signal join_requested(code: String, display_name: String)
 const REFRESH_SECONDS := 6.0
 ## Nothing a child has to hit is smaller than this, in design pixels.
 const CONTROL_HEIGHT := 52
-const COLUMN_WIDTH := 620
+## The hero column and the games panel, in design pixels at scale 1.
+const HERO_WIDTH := 620
+const LIST_WIDTH := 560
+## The setup screen's panel.
+const SETUP_WIDTH := 940
+## Room around the columns, and between them. Design pixels.
+const PAGE_MARGIN := 40
+const COLUMN_GAP := 56
 
 var _api: LobbyClient
 var _scale := 1.0
+
+# --- the three screens ---
+var _home: Control
+var _setup: Control
+var _code_panel: Control
+
+# --- home ---
 var _games_box: VBoxContainer
 var _games_note: Label
 var _status: Label
-var _name_edit: LineEdit
-var _code_edit: LineEdit
-var _public_toggle: CheckBox
-var _create_button: Button
 var _house_players: Label
-var _chooser: Control
-var _code_panel: Control
+var _play_button: Button
+var _code_edit: LineEdit
+var _split_row: BoxContainer
+## The spacer that lines the games list up with the tagline beside it.
+## Only means anything while the two columns are side by side.
+var _list_offset: Control
+
+# --- new game ---
+var _name_edit: LineEdit
+var _private_button: Button
+var _create_button: Button
+var _summary_label: Label
+var _wanted: Dictionary = {}
+var _private := false
+## field name -> {value: Button}. Repainted, never rebuilt.
+var _choices: Dictionary = {}
+## field name -> the whole labelled group, hidden when the mode has no
+## use for it.
+var _groups: Dictionary = {}
+
+# --- code ---
 var _code_label: Label
 var _link_label: LineEdit
 var _link_group: Control
 var _go_button: Button
 var _made_code := ""
 var _made_name := ""
+
 var _refresh_at := 0.0
 var _busy := false
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_scale = UiTheme.scale_for(get_viewport_rect().size)
+	_wanted = GameSetup.opening_choice()
 	_api = LobbyClient.new()
 	add_child(_api)
 	_api.rooms_listed.connect(_show_rooms)
@@ -68,13 +108,28 @@ func _ready() -> void:
 	_api.lookup_finished.connect(_on_lookup)
 	_api.failed.connect(_on_failed)
 	_build()
+	get_viewport().size_changed.connect(_reflow)
 	refresh()
+	# WORLD_LOBBY_SCREEN=new|code — open one of the other two screens at
+	# boot, so tools/screenshot.sh can photograph them. Every other screen
+	# in this game has a hook like this, and these two are behind button
+	# presses a screenshot run cannot make.
+	#
+	# `code` shows a made-up code, because the real one comes from making
+	# a real room. It is there to check that the panel LAYS OUT — which is
+	# the only thing a picture can tell you and the thing that has been
+	# wrong before: this screen exists because its predecessor drew for
+	# exactly zero frames.
+	match EnvConfig.text("WORLD_LOBBY_SCREEN", ""):
+		"new":
+			_open_setup.call_deferred()
+		"code":
+			_show_code.call_deferred("brave-otter", "Your game")
 
 func _process(delta: float) -> void:
-	# `visible` is this whole screen; `_chooser` is the half with the list
-	# on it. Once the code is up there is nothing on screen a refresh
-	# could change, and the only thing left to do is press the button.
-	if not visible or _chooser == null or not _chooser.visible:
+	# `visible` is this whole screen; `_home` is the half with the list on
+	# it. On the other two there is nothing a refresh could change.
+	if not visible or _home == null or not _home.visible:
 		return
 	_refresh_at -= delta
 	if _refresh_at <= 0.0:
@@ -84,6 +139,25 @@ func refresh() -> void:
 	_refresh_at = REFRESH_SECONDS
 	_api.list_rooms()
 
+## Two columns, or one. Flipped rather than rebuilt: a BoxContainer lays
+## its children out the other way round the moment `vertical` changes, so
+## a window somebody is dragging never destroys the text box they are
+## typing a code into.
+func _reflow() -> void:
+	if _split_row == null:
+		return
+	# MEASURED, not guessed. This was a hand-picked "under 1180 design
+	# pixels" threshold, and on a 900-wide window it worked out at 885 —
+	# eight pixels under the width the two columns actually need, so the
+	# page stayed in two columns and the games list ran off the right-hand
+	# edge of the screen. Adding up what the columns are is the only
+	# version of this that stays right when one of them changes width.
+	var needed := _px(HERO_WIDTH) + _px(LIST_WIDTH) + _px(COLUMN_GAP) \
+		+ _px(PAGE_MARGIN) * 2
+	_split_row.vertical = get_viewport_rect().size.x < needed
+	if _list_offset != null:
+		_list_offset.visible = not _split_row.vertical
+
 # ------------------------------------------------------------------
 # Building
 # ------------------------------------------------------------------
@@ -92,245 +166,168 @@ func _build() -> void:
 	# Its own backdrop, first child so everything else sits on it. It used
 	# to be pushed in from main.gd, which meant the screen depended on the
 	# order somebody else added things in.
-	add_child(_backdrop())
+	add_child(TitleBackdrop.new())
+	_home = _build_home()
+	add_child(_home)
+	_setup = _build_setup()
+	_setup.visible = false
+	add_child(_setup)
+	_code_panel = _build_code_panel()
+	_code_panel.visible = false
+	add_child(_code_panel)
+	_reflow()
 
+## Which of the three is up. The other two are hidden outright rather
+## than layered: a child pressing a button behind an overlay is a bug
+## waiting to happen, and a focused control on a hidden screen is how the
+## front page once ended up answering Space with a room code it did not
+## have.
+func _show(screen: Control, focus: Control) -> void:
+	for child: Control in [_home, _setup, _code_panel]:
+		if child != null:
+			child.visible = child == screen
+	if focus != null:
+		focus.grab_focus()
+
+# ------------------------------------------------------------------
+# Home
+# ------------------------------------------------------------------
+
+func _build_home() -> Control:
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(scroll)
-	# Everything below is the CHOOSER. It gets swapped out wholesale when
-	# a private game is made, because at that moment there is exactly one
-	# thing worth reading on the screen and it is not a list of options.
-	_chooser = scroll
+
 	var centre := CenterContainer.new()
 	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centre.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.add_child(centre)
 
+	var pad := MarginContainer.new()
+	for side: String in ["margin_left", "margin_right"]:
+		pad.add_theme_constant_override(side, _px(PAGE_MARGIN))
+	for side: String in ["margin_top", "margin_bottom"]:
+		pad.add_theme_constant_override(side, _px(48))
+	centre.add_child(pad)
+
+	_split_row = BoxContainer.new()
+	_split_row.add_theme_constant_override("separation", _px(COLUMN_GAP))
+	pad.add_child(_split_row)
+	_split_row.add_child(_build_hero())
+	_split_row.add_child(_build_games_panel())
+	return scroll
+
+## The left column: what this is, and the one press that gets you in.
+func _build_hero() -> Control:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", _px(14))
-	column.custom_minimum_size = Vector2(_px(COLUMN_WIDTH), 0)
-	centre.add_child(column)
+	column.add_theme_constant_override("separation", _px(10))
+	column.custom_minimum_size = Vector2(_px(HERO_WIDTH), 0)
+	# TOP, not centre. Two columns of different heights each centred on
+	# their own middle line up on nothing: the heading over the games list
+	# floated half way down beside the wordmark, which reads as a layout
+	# that has come apart rather than as two columns.
+	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 
-	var pad := Control.new()
-	pad.custom_minimum_size = Vector2(0, _px(18))
-	column.add_child(pad)
-	column.add_child(_text("BattleBox", UiTheme.T_TITLE + 8, UiTheme.ACCENT, 6))
+	# THE WORDMARK, in two colours and one word. Two labels rather than
+	# rich text: the split has to land between the same two syllables at
+	# every scale, and a BBCode parse is a thing that can go wrong on a
+	# screen whose whole job is a first impression.
+	var mark := HBoxContainer.new()
+	mark.add_theme_constant_override("separation", 0)
+	mark.add_child(_display("BATTLE", UiTheme.T_DISPLAY, UiTheme.INK))
+	mark.add_child(_display("BOX", UiTheme.T_DISPLAY, UiTheme.ACCENT))
+	column.add_child(mark)
+
 	column.add_child(_text("Build. Battle. Be the last one standing.",
-		UiTheme.T_BODY, UiTheme.INK_DIM))
+		UiTheme.T_BODY + 2, UiTheme.INK_DIM))
+	column.add_child(_gap(18))
 
-	# THE always-on world, as its own card. It is not one row in a list of
-	# equals: it is the game, and the one a child gets to without reading.
-	column.add_child(_gap(6))
-	column.add_child(_house_card())
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", _px(12))
+	column.add_child(buttons)
 
-	_status = _text("", UiTheme.T_NOTE, UiTheme.INK_FAINT)
+	_play_button = _primary_button("Play now", UiTheme.T_TITLE)
+	_play_button.pressed.connect(func() -> void: _join(Room.HOUSE_CODE, "BattleBox"))
+	buttons.add_child(_play_button)
+	# DEFERRED, because this column is not in the tree yet — it is being
+	# built and gets added by the caller. grab_focus() on a node outside
+	# the tree logs an error and does nothing, which quietly cost Play its
+	# focus once and with it the whole point of the screen: Space, Enter
+	# or Ⓐ doing the obvious thing without anyone reading a word.
+	_play_button.call_deferred("grab_focus")
+
+	var new_game := _ghost_button("New game", UiTheme.T_BODY + 2)
+	new_game.custom_minimum_size = Vector2(_px(180), _px(78))
+	new_game.pressed.connect(_open_setup)
+	buttons.add_child(new_game)
+
+	column.add_child(_gap(10))
+	_house_players = _text("the world everyone shares", UiTheme.T_NOTE,
+		UiTheme.INK_FAINT)
+	column.add_child(_house_players)
+
+	_status = _text("", UiTheme.T_NOTE, UiTheme.ACCENT)
 	_status.visible = false
 	column.add_child(_status)
 
-	# What else is running. Empty is a normal state and says so, rather
-	# than leaving a titled hole.
-	column.add_child(_gap(4))
-	column.add_child(_heading("OTHER GAMES RUNNING NOW"))
+	column.add_child(_gap(22))
+	column.add_child(_build_join_row())
+	return column
+
+## Somebody read you a code. Small, because it is the least common way in
+## and it used to be a full-width form field with a heading over it.
+func _build_join_row() -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _px(10))
+	var caption := _eyebrow("Got a code?")
+	caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(caption)
+	_code_edit = _field("brave-otter")
+	_code_edit.max_length = 40
+	_code_edit.custom_minimum_size = Vector2(_px(220), _px(CONTROL_HEIGHT - 6))
+	_code_edit.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_code_edit.text_submitted.connect(func(_t: String) -> void: _join_typed())
+	row.add_child(_code_edit)
+	var go := _ghost_button("Join", UiTheme.T_LABEL)
+	go.custom_minimum_size = Vector2(0, _px(CONTROL_HEIGHT - 6))
+	go.pressed.connect(_join_typed)
+	row.add_child(go)
+	return row
+
+## The right column: what is actually running, and what each one IS.
+func _build_games_panel() -> Control:
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", _px(12))
+	column.custom_minimum_size = Vector2(_px(LIST_WIDTH), 0)
+	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+
+	# Level with the tagline rather than with the top of the wordmark: the
+	# heading is a small upper-case label and the wordmark is 58px, so
+	# sharing a top edge makes them look mis-set rather than aligned.
+	# Stacked, there is nothing to line up WITH, so it goes away.
+	_list_offset = _gap(96)
+	column.add_child(_list_offset)
+
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", _px(14))
+	head.add_child(_eyebrow("Playing right now"))
+	var rule := HSeparator.new()
+	rule.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rule.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	rule.add_theme_stylebox_override("separator", _hairline())
+	head.add_child(rule)
+	column.add_child(head)
+
 	# Says something from the first frame. An empty heading over an empty
 	# box reads as broken, and the list only arrives a moment later — or
 	# never, if the lobby is unreachable.
-	_games_note = _text("Looking…", UiTheme.T_LABEL, UiTheme.INK_FAINT)
-	_games_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_games_note = _text("Looking…", UiTheme.T_LABEL, UiTheme.INK_FAINT, true)
 	column.add_child(_games_note)
+
 	_games_box = VBoxContainer.new()
-	_games_box.add_theme_constant_override("separation", _px(6))
+	_games_box.add_theme_constant_override("separation", _px(8))
 	column.add_child(_games_box)
-
-	column.add_child(_gap(4))
-	column.add_child(_build_create())
-	column.add_child(_gap(4))
-	column.add_child(_build_join())
-	var tail := Control.new()
-	tail.custom_minimum_size = Vector2(0, _px(24))
-	column.add_child(tail)
-
-	_code_panel = _build_code_panel()
-	_code_panel.visible = false
-	add_child(_code_panel)
-
-## Made a private game — so stop, and say the code.
-##
-## THIS SCREEN EXISTS BECAUSE THE MESSAGE DID NOT WORK. The code used to
-## go into the status line, one call before the screen was swapped for the
-## connecting screen: it was set and then hidden in the same frame, so it
-## drew for exactly zero frames. A private game whose code nobody can read
-## is a game nobody else can ever join, which is the entire feature gone —
-## and it looked completely fine, because the label was definitely there.
-##
-## So the code gets a screen of its own that waits for a press. That is
-## not friction; for a private game the code IS the thing you just made.
-func _build_code_panel() -> Control:
-	var centre := CenterContainer.new()
-	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-
-	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", UiTheme.card_box(_scale))
-	centre.add_child(card)
-	var inner := VBoxContainer.new()
-	inner.add_theme_constant_override("separation", _px(10))
-	for side: String in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		inner.add_theme_constant_override(side, _px(26))
-	inner.custom_minimum_size = Vector2(_px(COLUMN_WIDTH), 0)
-	card.add_child(inner)
-
-	inner.add_child(_text("YOUR GAME IS READY", UiTheme.T_NOTE, UiTheme.INK_FAINT))
-	inner.add_child(_text("Nobody can join unless you give them this:",
-		UiTheme.T_BODY, UiTheme.INK_DIM))
-	# The code, as big as the title on the front page. It is meant to be
-	# read out across a room to somebody holding a tablet.
-	_code_label = _text("", UiTheme.T_TITLE + 8, UiTheme.ACCENT, 6)
-	inner.add_child(_code_label)
-
-	# And the same thing as a link, because on the web that is what people
-	# actually send each other. Selectable, so it can be copied — a Label
-	# cannot be, and "copy" is the only thing anyone wants to do with it.
-	# Grouped, so the whole idea can be hidden at once off the web rather
-	# than leaving a caption over an empty box.
-	_link_group = VBoxContainer.new()
-	_link_group.add_theme_constant_override("separation", _px(6))
-	_link_group.add_child(_gap(4))
-	_link_group.add_child(_text("Or send them this link:",
-		UiTheme.T_LABEL, UiTheme.INK_DIM))
-	_link_label = _field("")
-	_link_label.editable = false
-	_link_label.add_theme_color_override("font_uneditable_color", UiTheme.INK)
-	_link_group.add_child(_link_label)
-	inner.add_child(_link_group)
-
-	inner.add_child(_gap(6))
-	var go := Button.new()
-	go.text = "  Start playing  "
-	go.custom_minimum_size = Vector2(0, _px(68))
-	go.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE, _scale))
-	var rest := UiTheme.flat(UiTheme.ACCENT, UiTheme.R_CARD, _scale)
-	var hot := UiTheme.flat(UiTheme.ACCENT.lightened(0.16), UiTheme.R_CARD, _scale)
-	for state: String in ["normal", "hover", "pressed", "focus"]:
-		go.add_theme_stylebox_override(state, rest if state == "normal" else hot)
-	for state: String in ["font_color", "font_hover_color", "font_pressed_color",
-			"font_focus_color"]:
-		go.add_theme_color_override(state, UiTheme.ON_ACCENT)
-	go.pressed.connect(func() -> void: _join(_made_code, _made_name))
-	inner.add_child(go)
-	inner.add_child(_text("You can read it again from the world menu (G) at any time.",
-		UiTheme.T_NOTE, UiTheme.INK_FAINT))
-	_go_button = go
-	return centre
-
-## Swap the chooser for the code. Not a dialog on top: there is nothing
-## else to do on this screen now, and a child pressing a button behind an
-## overlay is a bug waiting to happen.
-func _show_code(code: String, display_name: String) -> void:
-	_made_code = code
-	_made_name = display_name
-	_code_label.text = code
-	var link := Room.link_for(Game.web_origin(), code)
-	# Off the web there is no address to hand anybody, so the link half of
-	# the card would just be an empty box promising something it has not
-	# got. The code above it still works.
-	_link_label.text = link
-	_link_group.visible = not link.is_empty()
-	_chooser.visible = false
-	_code_panel.visible = true
-	# Focus moves HERE, and only now.
-	#
-	# It used to be grabbed while this panel was being built, which is the
-	# same frame Play grabs it — and this one ran second, so the front
-	# page ended up with its focus on a button inside a hidden panel.
-	# Space or Ⓐ, the one press the whole screen is designed around, would
-	# then have joined a room with no code. Nothing about that is visible:
-	# the front page looks right, and the button that answers is off
-	# screen.
-	_go_button.grab_focus()
-
-## The always-on game: one big button, and how many people are in it.
-func _house_card() -> Control:
-	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", UiTheme.card_box(_scale))
-	var inner := VBoxContainer.new()
-	inner.add_theme_constant_override("separation", _px(8))
-	for side: String in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		inner.add_theme_constant_override(side, _px(16))
-	card.add_child(inner)
-
-	var play := Button.new()
-	play.text = "  ▶   Play  "
-	play.custom_minimum_size = Vector2(0, _px(76))
-	play.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE + 6, _scale))
-	var rest := UiTheme.flat(UiTheme.ACCENT, UiTheme.R_CARD, _scale)
-	var hot := UiTheme.flat(UiTheme.ACCENT.lightened(0.16), UiTheme.R_CARD, _scale)
-	for state: String in ["normal", "hover", "pressed", "focus"]:
-		play.add_theme_stylebox_override(state, rest if state == "normal" else hot)
-	for state: String in ["font_color", "font_hover_color", "font_pressed_color",
-			"font_focus_color"]:
-		play.add_theme_color_override(state, UiTheme.ON_ACCENT)
-	play.pressed.connect(func() -> void: _join(Room.HOUSE_CODE, "BattleBox"))
-	inner.add_child(play)
-	# DEFERRED, because this card is not in the tree yet — it is being
-	# built and gets added by the caller. grab_focus() on a node outside
-	# the tree logs an error and does nothing, which quietly cost Play its
-	# focus and with it the whole point of the screen: Space, Enter or Ⓐ
-	# doing the obvious thing without anyone reading a word.
-	play.call_deferred("grab_focus")
-
-	_house_players = _text("the world everyone shares", UiTheme.T_NOTE, UiTheme.INK_FAINT)
-	inner.add_child(_house_players)
-	return card
-
-## Start your own. One button does it; the name and the privacy switch sit
-## beside it for anybody who wants them.
-func _build_create() -> Control:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", _px(8))
-	box.add_child(_heading("OR START YOUR OWN"))
-
-	_name_edit = _field("name your game (optional)")
-	_name_edit.max_length = 32
-	_name_edit.text_submitted.connect(func(_t: String) -> void: _create())
-
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", _px(10))
-	row.add_child(_name_edit)
-	_create_button = _chunky_button("Start a new game")
-	_create_button.pressed.connect(_create)
-	row.add_child(_create_button)
-	box.add_child(row)
-
-	# Public by default: a game nobody can find is the surprising choice,
-	# and hiding one should be a deliberate act.
-	_public_toggle = CheckBox.new()
-	_public_toggle.text = "  Anyone can join it"
-	_public_toggle.button_pressed = true
-	_public_toggle.add_theme_font_size_override("font_size",
-		UiTheme.px(UiTheme.T_LABEL, _scale))
-	_public_toggle.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	_public_toggle.toggled.connect(func(on: bool) -> void:
-		_public_toggle.text = "  Anyone can join it" if on \
-			else "  Private — only people with the code")
-	box.add_child(_public_toggle)
-	return box
-
-## Somebody read you a code.
-func _build_join() -> Control:
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", _px(8))
-	box.add_child(_heading("GOT A CODE FROM A FRIEND?"))
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", _px(10))
-	_code_edit = _field("brave-otter")
-	_code_edit.max_length = 40
-	_code_edit.text_submitted.connect(func(_t: String) -> void: _join_typed())
-	row.add_child(_code_edit)
-	var go := _chunky_button("Join")
-	go.pressed.connect(_join_typed)
-	row.add_child(go)
-	box.add_child(row)
-	return box
+	return column
 
 # ------------------------------------------------------------------
 # The list
@@ -348,58 +345,84 @@ func _show_rooms(rooms: Array) -> void:
 		else:
 			others.append(entry)
 	if others.is_empty():
-		_games_note.text = "None right now — start one below and it will show up here."
-		_games_note.visible = true
+		# A titled hole reads as something that failed to load. An empty
+		# list is a normal state and gets a box of its own saying so.
+		_games_note.visible = false
+		_games_box.add_child(_empty_card())
 		return
 	_games_note.visible = false
 	for entry: Dictionary in others:
 		_games_box.add_child(_room_row(entry))
 
+## One game. The name and what it IS on the left, how busy it is on the
+## right — and the state marked by a bar down the RIGHT edge, which is
+## where the thing it is about already lives. (UiTheme.rail_box has the
+## rest of that argument.)
 func _room_row(entry: Dictionary) -> Button:
 	var code := str(entry.get("code", ""))
 	var display_name := str(entry.get("name", code))
 	var who := _people_in(entry)
 	var humans: int = who[0]
 	var bots: int = who[1]
+	var busy := humans > 0
+
 	var row := Button.new()
-	row.custom_minimum_size = Vector2(0, _px(CONTROL_HEIGHT + 6))
+	row.custom_minimum_size = Vector2(0, _px(70))
+	row.tooltip_text = "Join %s" % code
+	var rail := UiTheme.LIVE if busy else Color(0, 0, 0, 0)
 	row.add_theme_stylebox_override("normal",
-		UiTheme.flat(UiTheme.SURFACE_2, UiTheme.R_CONTROL, _scale))
+		UiTheme.rail_box(UiTheme.SURFACE_2, _scale, rail))
 	for state: String in ["hover", "pressed", "focus"]:
 		row.add_theme_stylebox_override(state,
-			UiTheme.flat(UiTheme.SURFACE_3, UiTheme.R_CONTROL, _scale))
-	row.tooltip_text = "Join %s" % code
+			UiTheme.rail_box(UiTheme.SURFACE_3, _scale,
+				rail if busy else UiTheme.ACCENT))
 	row.pressed.connect(func() -> void: _join(code, display_name))
 
-	# The name on the left, how busy it is on the right. A Button cannot
-	# align two things independently, so the text lives in a layout laid
-	# over it — and that layout must not eat the click.
+	# A Button cannot align two things independently, so the text lives in
+	# a layout laid over it — and that layout must not eat the click.
 	var line := HBoxContainer.new()
 	line.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	line.offset_left = _px(16)
-	line.offset_right = -_px(16)
+	line.offset_right = -_px(18)
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	line.add_theme_constant_override("separation", _px(12))
-	var name_label := Label.new()
-	name_label.text = display_name
-	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	name_label.add_theme_font_size_override("font_size",
-		UiTheme.px(UiTheme.T_BODY, _scale))
-	name_label.add_theme_color_override("font_color", UiTheme.INK)
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	line.add_child(name_label)
-	var count := Label.new()
-	count.text = _crowd(humans, bots)
-	count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	count.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_NOTE, _scale))
+
+	var names := VBoxContainer.new()
+	names.add_theme_constant_override("separation", _px(2))
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	names.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	names.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_child(names)
+	names.add_child(_row_label(display_name, UiTheme.T_BODY, UiTheme.INK))
+	# WHAT THE GAME IS. Without this the list is names, and a name answers
+	# none of the questions somebody choosing between two games is asking.
+	# A room that did not report its settings — an older one — gets its
+	# code instead of a made-up description.
+	var what := GameSetup.summary(entry.get("settings", {}))
+	if bots > 0 and not what.is_empty():
+		what += " · %s" % GameSetup.bots_label(bots)
+	names.add_child(_row_label(what if not what.is_empty() else code,
+		UiTheme.T_NOTE, UiTheme.INK_FAINT))
+
+	var crowd := HBoxContainer.new()
+	crowd.add_theme_constant_override("separation", _px(8))
+	crowd.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	crowd.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_child(crowd)
+	crowd.add_child(_dot(UiTheme.LIVE if busy else UiTheme.INK_FAINT))
+	# THE SHORT FORM HERE, and the computer players said once on the line
+	# above instead. The full sentence — "waiting for players + 20
+	# computer players" — is wider than the space left beside a game's
+	# name, so the label was squeezed to nothing and every row showed a
+	# dot with no number against it.
+	#
 	# Lit for PEOPLE only. A room full of bots is not a room worth
 	# highlighting, and colouring it as though it were is the same lie the
 	# number used to tell.
-	count.add_theme_color_override("font_color",
-		UiTheme.ACCENT if humans > 0 else UiTheme.INK_FAINT)
-	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	line.add_child(count)
+	var count := _row_label("%d playing" % humans if busy else "waiting",
+		UiTheme.T_NOTE, UiTheme.LIVE if busy else UiTheme.INK_FAINT)
+	count.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	crowd.add_child(count)
 	row.add_child(line)
 	return row
 
@@ -437,6 +460,392 @@ static func _people_in(entry: Dictionary) -> Array:
 	return [humans, bots]
 
 # ------------------------------------------------------------------
+# New game
+# ------------------------------------------------------------------
+
+## THE SCREEN THIS PAGE WAS MISSING. Every question a game needs answered
+## is asked here, before the world exists — which is the only time any of
+## them is free to answer. See game_setup.gd.
+func _build_setup() -> Control:
+	# A SCROLLING BODY UNDER A FIXED BAR, which is the shape every
+	# settings sheet in every application has, and it is here for a
+	# reason: the first version was one long scroll with "Create and
+	# play" at the bottom of it, so on a 1280x800 screen the button that
+	# does the thing was off the bottom edge. A page of options whose
+	# only action is out of sight is a page that looks like it does not
+	# work.
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# THE ART GOES QUIET HERE. The backdrop has voxel cubes drifting
+	# across it, which is right for a title screen and wrong behind eight
+	# rows of settings: a cube passing over a line of text takes the line
+	# with it. Same scrim the world menu uses, for the same reason.
+	root.add_child(_scrim())
+
+	var scroll := ScrollContainer.new()
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll.offset_bottom = -_px(96)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+
+	var centre := CenterContainer.new()
+	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centre.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(centre)
+
+	var pad := MarginContainer.new()
+	for side: String in ["margin_left", "margin_right"]:
+		pad.add_theme_constant_override(side, _px(40))
+	for side: String in ["margin_top", "margin_bottom"]:
+		pad.add_theme_constant_override(side, _px(44))
+	centre.add_child(pad)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", _px(26))
+	column.custom_minimum_size = Vector2(_px(SETUP_WIDTH), 0)
+	pad.add_child(column)
+
+	# --- header -------------------------------------------------------
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", _px(16))
+	column.add_child(head)
+	var titles := VBoxContainer.new()
+	titles.add_theme_constant_override("separation", 0)
+	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(titles)
+	titles.add_child(_display("New game", UiTheme.T_TITLE + 6, UiTheme.INK))
+	titles.add_child(_text("Set it up here, then you are in it.",
+		UiTheme.T_LABEL, UiTheme.INK_DIM))
+	var back := _ghost_button("Back", UiTheme.T_LABEL)
+	back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(_close_setup)
+	head.add_child(back)
+
+	# --- what it is called, and who can find it -----------------------
+	var name_card := _card(column)
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", _px(10))
+	name_card.add_child(name_row)
+	_name_edit = _field("name your game (optional)")
+	_name_edit.max_length = 32
+	_name_edit.text_submitted.connect(func(_t: String) -> void: _create())
+	name_row.add_child(_name_edit)
+	# A BUTTON, NOT A CHECKBOX. The old one was a ☐ glyph the size of a
+	# full stop with a sentence beside it that changed when you clicked
+	# it, so there was no way to tell the two states apart across a room.
+	_private_button = _ghost_button("Anyone can join", UiTheme.T_LABEL)
+	_private_button.custom_minimum_size = Vector2(_px(230), _px(CONTROL_HEIGHT))
+	_private_button.pressed.connect(_toggle_private)
+	name_row.add_child(_private_button)
+
+	# --- the mode, and then everything the mode implies ---------------
+	_build_mode_field(column)
+	_build_map_field(column)
+	_build_choice_field(column, "size", "How big is the world?",
+		_size_options(), "")
+	_build_choice_field(column, "minutes", "How long is a round?",
+		_length_options(), "")
+	_build_choice_field(column, "target", "Captures to win",
+		_target_options(), "")
+	_build_choice_field(column, "bots", "Computer players",
+		_bot_options(), "They are in the world before anybody arrives.")
+	_build_choice_field(column, "revive", "Getting back up",
+		_revive_options(), "")
+	_build_choice_field(column, "drop", "When you are knocked out",
+		_drop_options(), "")
+
+	root.add_child(_build_action_bar())
+	_refresh_setup()
+	return root
+
+## What you are about to make, and the button that makes it. Pinned to
+## the bottom of the screen, so it is on screen whatever the window is
+## and however many settings this grows to.
+func _build_action_bar() -> Control:
+	var bar := PanelContainer.new()
+	bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	bar.offset_top = -_px(96)
+	var box := UiTheme.flat(UiTheme.SURFACE, 0, _scale)
+	box.border_width_top = maxi(1, int(round(_scale)))
+	box.border_color = UiTheme.LINE
+	box.content_margin_left = _px(40)
+	box.content_margin_right = _px(40)
+	box.content_margin_top = _px(18)
+	box.content_margin_bottom = _px(18)
+	bar.add_theme_stylebox_override("panel", box)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _px(20))
+	bar.add_child(row)
+
+	var words := VBoxContainer.new()
+	words.add_theme_constant_override("separation", _px(2))
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(words)
+	words.add_child(_eyebrow("You are about to start"))
+	# READ BACK WHAT WAS CHOSEN. Half these settings are two screens of
+	# scrolling apart by the time you reach the button, and a sentence
+	# saying what you actually picked is the difference between pressing
+	# it and scrolling back up to check.
+	_summary_label = _text("", UiTheme.T_BODY, UiTheme.INK)
+	words.add_child(_summary_label)
+
+	_create_button = _primary_button("Create and play", UiTheme.T_TITLE - 6)
+	_create_button.custom_minimum_size = Vector2(_px(300), _px(60))
+	_create_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_create_button.pressed.connect(_create)
+	row.add_child(_create_button)
+	return bar
+
+## The mode: bigger than the rest, because it decides which of the rest
+## are even asked.
+func _build_mode_field(parent: Control) -> void:
+	var group := _group(parent, "mode", "How are we playing?", "")
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _px(10))
+	group.add_child(row)
+	var buttons: Dictionary = {}
+	for spec: Dictionary in GameSetup.MODES:
+		var key := str(spec["key"])
+		var tile := _tile(str(spec["label"]), str(spec["note"]))
+		tile.pressed.connect(func() -> void: _pick("mode", key))
+		row.add_child(tile)
+		buttons[key] = tile
+	_choices["mode"] = buttons
+
+func _build_map_field(parent: Control) -> void:
+	var options: Array = []
+	for spec: Dictionary in GameSetup.MAPS:
+		options.append({"value": str(spec["key"]), "label": str(spec["label"])})
+	_build_choice_field(parent, "map", "Which world?", options,
+		"Worlds you have imported are still in the world menu, once you are in.")
+
+## A labelled row of one-out-of-several buttons. Every field below the
+## mode is one of these, which is what keeps them all the same size, the
+## same shape and the same distance apart.
+func _build_choice_field(parent: Control, field: String, title: String,
+		options: Array, note: String) -> void:
+	var group := _group(parent, field, title, note)
+	var row := HFlowContainer.new()
+	row.add_theme_constant_override("h_separation", _px(8))
+	row.add_theme_constant_override("v_separation", _px(8))
+	group.add_child(row)
+	var buttons: Dictionary = {}
+	for option: Dictionary in options:
+		var value: Variant = option["value"]
+		var chip := _chip(str(option["label"]))
+		chip.pressed.connect(func() -> void: _pick(field, value))
+		row.add_child(chip)
+		buttons[value] = chip
+	_choices[field] = buttons
+
+func _size_options() -> Array:
+	var out: Array = []
+	for row: Dictionary in GameSetup.SIZES:
+		out.append({"value": int(row["value"]),
+			"label": "%s · %s" % [row["label"], row["note"]]})
+	return out
+
+## Every length either mode offers, in one row. The row is rebuilt when
+## the mode changes — see _refresh_setup — because the two modes do not
+## offer the same lengths and pretending they do would put a button there
+## that quietly means something else.
+func _length_options() -> Array:
+	var seen: Dictionary = {}
+	var out: Array = []
+	for mode: String in ["battle", "holdout"]:
+		for minutes: int in GameSetup.lengths_for(mode):
+			if seen.has(minutes):
+				continue
+			seen[minutes] = true
+			out.append({"value": minutes, "label": GameSetup.length_label(minutes)})
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a["value"]) < int(b["value"]))
+	return out
+
+func _target_options() -> Array:
+	var out: Array = []
+	for target: int in GameSetup.TARGETS:
+		out.append({"value": target, "label": "First to %d" % target})
+	return out
+
+func _bot_options() -> Array:
+	var out: Array = []
+	for count: int in GameSetup.BOT_COUNTS:
+		out.append({"value": count, "label": GameSetup.bots_label(count)})
+	return out
+
+func _revive_options() -> Array:
+	var out: Array = []
+	for rung: int in ReviveRule.choices(true):
+		out.append({"value": rung, "label": ReviveRule.label(rung)})
+	return out
+
+func _drop_options() -> Array:
+	return [{"value": false, "label": "Keep your weapons"},
+		{"value": true, "label": "Drop them where you fell"}]
+
+## Somebody chose something. One place, so every field is remembered the
+## same way and repainted by the same pass.
+func _pick(field: String, value: Variant) -> void:
+	_wanted[field] = value
+	if field == "mode":
+		# A length from the other mode's list is not a length. Snapping
+		# through clean() is what stops "10 min" surviving a switch from
+		# last flag standing into battle royale, where it does not exist.
+		_wanted = GameSetup.clean(_wanted)
+	_refresh_setup()
+	Sfx.play("tick", -8.0)
+
+## Paint what is chosen, and hide what this mode has no use for. Cheap
+## enough to call on every press: it repaints buttons, it never rebuilds
+## them, so nothing you are half way through pressing disappears.
+func _refresh_setup() -> void:
+	var mode := str(_wanted.get("mode", GameSetup.DEFAULT_MODE))
+	for field: String in _choices:
+		var group: Control = _groups.get(field)
+		if group != null:
+			group.visible = GameSetup.uses(field, mode)
+		var buttons: Dictionary = _choices[field]
+		for value: Variant in buttons:
+			_paint_choice(buttons[value], value == _wanted.get(field))
+	# The length row is shared between the two clocked modes, so the
+	# lengths the OTHER one offers are disabled rather than removed: a row
+	# that changes width when you pick a mode is a row that moves the
+	# button under your finger.
+	if _choices.has("minutes"):
+		var allowed := GameSetup.lengths_for(mode)
+		for value: Variant in _choices["minutes"]:
+			var btn: Button = _choices["minutes"][value]
+			btn.disabled = not (int(value) in allowed)
+	if _private_button != null:
+		_private_button.text = "  Private — code only  " if _private \
+			else "  Anyone can join  "
+		_paint_choice(_private_button, _private)
+	if _summary_label != null:
+		_summary_label.text = _describe_wanted(mode)
+
+## The whole game in one line, for the bar at the bottom. Only the parts
+## this mode actually has — a creative world has no round length, and
+## printing one would be describing a setting that is not going to apply.
+func _describe_wanted(mode: String) -> String:
+	var parts: Array = [GameSetup.mode_label(mode),
+		GameSetup.map_label(str(_wanted.get("map", ""))),
+		"%d across" % int(_wanted.get("size", 0))]
+	if GameSetup.uses("minutes", mode):
+		parts.append(GameSetup.length_label(int(_wanted.get("minutes", 0))))
+	if GameSetup.uses("target", mode):
+		parts.append("first to %d" % int(_wanted.get("target", 0)))
+	parts.append(GameSetup.bots_label(int(_wanted.get("bots", 0))))
+	if _private:
+		parts.append("private")
+	return " · ".join(parts)
+
+func _toggle_private() -> void:
+	# Public by default: a game nobody can find is the surprising choice,
+	# and hiding one should be a deliberate act.
+	_private = not _private
+	_refresh_setup()
+	Sfx.play("tick", -8.0)
+
+## Back to the front, from outside. main.gd calls this when somebody
+## leaves a game: the screen may have been left on the setup sheet or on
+## a created game's code, and neither is where they want to arrive.
+func back_to_front() -> void:
+	_show(_home, _play_button)
+
+func _open_setup() -> void:
+	_set_status("")
+	_show(_setup, _create_button)
+
+func _close_setup() -> void:
+	_show(_home, _play_button)
+
+# ------------------------------------------------------------------
+# The code for a private game
+# ------------------------------------------------------------------
+
+## Made a private game — so stop, and say the code.
+##
+## THIS SCREEN EXISTS BECAUSE THE MESSAGE DID NOT WORK. The code used to
+## go into the status line, one call before the screen was swapped for the
+## connecting screen: it was set and then hidden in the same frame, so it
+## drew for exactly zero frames. A private game whose code nobody can read
+## is a game nobody else can ever join, which is the entire feature gone —
+## and it looked completely fine, because the label was definitely there.
+##
+## So the code gets a screen of its own that waits for a press. That is
+## not friction; for a private game the code IS the thing you just made.
+func _build_code_panel() -> Control:
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(_scrim())
+	var centre := CenterContainer.new()
+	centre.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(centre)
+
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiTheme.card_box(_scale))
+	centre.add_child(card)
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", _px(10))
+	for side: String in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
+		inner.add_theme_constant_override(side, _px(26))
+	inner.custom_minimum_size = Vector2(_px(HERO_WIDTH), 0)
+	card.add_child(inner)
+
+	inner.add_child(_eyebrow("Your game is ready"))
+	inner.add_child(_text("Nobody can join unless you give them this:",
+		UiTheme.T_BODY, UiTheme.INK_DIM, true))
+	# The code, as big as the wordmark on the front page. It is meant to
+	# be read out across a room to somebody holding a tablet.
+	_code_label = _display("", UiTheme.T_TITLE + 10, UiTheme.ACCENT)
+	inner.add_child(_code_label)
+
+	# And the same thing as a link, because on the web that is what people
+	# actually send each other. Selectable, so it can be copied — a Label
+	# cannot be, and "copy" is the only thing anyone wants to do with it.
+	# Grouped, so the whole idea can be hidden at once off the web rather
+	# than leaving a caption over an empty box.
+	_link_group = VBoxContainer.new()
+	_link_group.add_theme_constant_override("separation", _px(6))
+	_link_group.add_child(_gap(4))
+	_link_group.add_child(_text("Or send them this link:",
+		UiTheme.T_LABEL, UiTheme.INK_DIM))
+	_link_label = _field("")
+	_link_label.editable = false
+	_link_label.add_theme_color_override("font_uneditable_color", UiTheme.INK)
+	_link_group.add_child(_link_label)
+	inner.add_child(_link_group)
+
+	inner.add_child(_gap(6))
+	_go_button = _primary_button("Start playing", UiTheme.T_TITLE - 4)
+	_go_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_go_button.pressed.connect(func() -> void: _join(_made_code, _made_name))
+	inner.add_child(_go_button)
+	inner.add_child(_text("You can read it again from the world menu (G) at any time.",
+		UiTheme.T_NOTE, UiTheme.INK_FAINT, true))
+	return root
+
+## Swap the screen for the code. Not a dialog on top: there is nothing
+## else to do here now.
+func _show_code(code: String, display_name: String) -> void:
+	_made_code = code
+	_made_name = display_name
+	_code_label.text = code
+	var link := Room.link_for(Game.web_origin(), code)
+	# Off the web there is no address to hand anybody, so the link half of
+	# the card would just be an empty box promising something it has not
+	# got. The code above it still works.
+	_link_label.text = link
+	_link_group.visible = not link.is_empty()
+	# Focus moves HERE, and only now — never while this panel is being
+	# built, which is the same frame Play grabs it and would leave the
+	# front page with its focus on a button inside a hidden panel.
+	_show(_code_panel, _go_button)
+
+# ------------------------------------------------------------------
 # Actions
 # ------------------------------------------------------------------
 
@@ -449,7 +858,8 @@ func _create() -> void:
 	# An unnamed game is not an error: the lobby names it after its code,
 	# which is a perfectly good name and one less thing to demand of a
 	# child who just wants to play.
-	_api.create_room(_name_edit.text.strip_edges(), _public_toggle.button_pressed)
+	_api.create_room(_name_edit.text.strip_edges(), not _private,
+		GameSetup.clean(_wanted))
 
 func _join_typed() -> void:
 	var code := _code_edit.text.strip_edges().to_lower()
@@ -491,6 +901,10 @@ func _on_failed(what: String, message: String) -> void:
 			_games_note.visible = true
 		_set_status("Play still works — it is always there")
 	else:
+		# A create that failed happened on the setup screen, and that is
+		# where whoever pressed the button is still standing.
+		if _setup != null and _setup.visible:
+			_show(_home, _play_button)
 		_set_status(message)
 
 func _set_status(text: String) -> void:
@@ -498,54 +912,144 @@ func _set_status(text: String) -> void:
 		return
 	_status.text = text
 	# An empty label still reserves a line, which left a hole under the
-	# Play card whenever there was nothing to say.
+	# Play button whenever there was nothing to say.
 	_status.visible = not text.is_empty()
+
+## Escape backs out of the setup screen. Without it the only way off is
+## the Back button, which a keyboard has to find first.
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not visible or _setup == null or not _setup.visible:
+		return
+	var key := event as InputEventKey
+	if key != null and key.pressed and key.keycode == KEY_ESCAPE:
+		_close_setup()
+		get_viewport().set_input_as_handled()
 
 # ------------------------------------------------------------------
 # Small builders
 # ------------------------------------------------------------------
 
-## A quiet vertical wash, so the panels have something to sit against.
-func _backdrop() -> TextureRect:
-	var grad := Gradient.new()
-	grad.colors = PackedColorArray([Color("1b2233"), Color("0a0d15")])
-	grad.offsets = PackedFloat32Array([0.0, 1.0])
-	var tex := GradientTexture2D.new()
-	tex.gradient = grad
-	tex.fill_from = Vector2(0, 0)
-	tex.fill_to = Vector2(0, 1)
-	var rect := TextureRect.new()
-	rect.texture = tex
-	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	rect.stretch_mode = TextureRect.STRETCH_SCALE
-	rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return rect
-
 func _px(n: float) -> int:
 	return UiTheme.px(n, _scale)
 
-func _text(body: String, size: int, color: Color, outline := 0) -> Label:
+## WRAPPING IS OFF BY DEFAULT, and that is not a detail.
+##
+## A Label that wraps has no minimum width, so a container asks it how
+## wide it wants to be and is told "one character". Every one of these
+## used to wrap, and the wordmark came out as B / A / T / T / L / E down
+## the left-hand edge with the rest of the page pushed off the bottom.
+## Only the few labels that are really paragraphs ask for it.
+func _text(body: String, size: int, color: Color, wrap := false) -> Label:
 	var label := Label.new()
 	label.text = body
 	label.add_theme_font_size_override("font_size", UiTheme.px(size, _scale))
 	label.add_theme_color_override("font_color", color)
-	if outline > 0:
-		label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.06, 0.9))
-		label.add_theme_constant_override("outline_size", _px(outline))
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if wrap \
+		else TextServer.AUTOWRAP_OFF
 	return label
 
-func _heading(body: String) -> Label:
-	var label := _text(body, UiTheme.T_NOTE, UiTheme.INK_FAINT)
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+## A heading, set in a weight the bundled font does not have. See
+## UiTheme.heavy: everything on every screen used to be one weight, which
+## is why no title on any of them read as a title.
+func _display(body: String, size: int, color: Color) -> Label:
+	var label := _text(body, size, color)
+	label.add_theme_font_override("font", UiTheme.heavy(_scale, 0.7, -1.2))
+	return label
+
+## A small upper-case label. Letterspaced, because upper case at this size
+## sets too tight to read otherwise.
+func _eyebrow(body: String) -> Label:
+	var label := _text(body.to_upper(), UiTheme.T_NOTE, UiTheme.INK_FAINT)
+	label.add_theme_font_override("font", UiTheme.heavy(_scale, 0.25, 1.6))
+	return label
+
+## A label inside a Button's overlay. It must not eat the click, and
+## every one of these forgot to say so at least once.
+func _row_label(body: String, size: int, color: Color) -> Label:
+	var label := _text(body, size, color)
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return label
 
 func _gap(height: int) -> Control:
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0, _px(height))
 	return spacer
+
+## What the games list looks like with nothing in it. A bordered, dashed-
+## feeling box rather than a line of grey text: the panel keeps its shape,
+## so the column does not collapse to a heading and a sentence.
+func _empty_card() -> Control:
+	var card := PanelContainer.new()
+	var box := UiTheme.flat(Color(1, 1, 1, 0.02), UiTheme.R_CARD, _scale, 1.0,
+		UiTheme.LINE)
+	box.set_content_margin_all(_px(20))
+	card.add_theme_stylebox_override("panel", box)
+	card.custom_minimum_size = Vector2(0, _px(110))
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", _px(6))
+	inner.alignment = BoxContainer.ALIGNMENT_CENTER
+	card.add_child(inner)
+	var line := _text("No other games right now", UiTheme.T_BODY, UiTheme.INK_DIM)
+	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(line)
+	var sub := _text("Press New game and this fills up", UiTheme.T_NOTE,
+		UiTheme.INK_FAINT)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	inner.add_child(sub)
+	return card
+
+## A wash over the backdrop, so a screen of text can be read against it.
+func _scrim() -> ColorRect:
+	var dim := ColorRect.new()
+	dim.color = UiTheme.SCRIM
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return dim
+
+func _hairline() -> StyleBoxLine:
+	var rule := StyleBoxLine.new()
+	rule.color = UiTheme.LINE
+	rule.thickness = maxi(1, int(round(_scale)))
+	return rule
+
+## A filled circle. Drawn as a rounded stylebox rather than a glyph: a
+## bullet character depends on a font the machine may not have, and a
+## missing one is a tofu box on the front page.
+func _dot(color: Color) -> Control:
+	var pill := PanelContainer.new()
+	pill.add_theme_stylebox_override("panel", UiTheme.flat(color, 999, _scale))
+	pill.custom_minimum_size = Vector2(_px(9), _px(9))
+	pill.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return pill
+
+## A titled block on the setup screen, remembered so the mode can hide it.
+func _group(parent: Control, field: String, title: String,
+		note: String) -> VBoxContainer:
+	var group := VBoxContainer.new()
+	group.add_theme_constant_override("separation", _px(8))
+	parent.add_child(group)
+	group.add_child(_eyebrow(title))
+	if not note.is_empty():
+		group.add_child(_text(note, UiTheme.T_NOTE, UiTheme.INK_FAINT, true))
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", _px(8))
+	group.add_child(body)
+	# Keyed by the FIELD, which is what _refresh_setup hides it by. Keyed
+	# by its title it looked right and never hid anything, because no mode
+	# has a setting called "How long is a round?".
+	_groups[field] = group
+	return body
+
+func _card(parent: Control) -> VBoxContainer:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiTheme.card_box(_scale))
+	parent.add_child(card)
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", _px(10))
+	card.add_child(inner)
+	return inner
 
 ## A text box a child can actually see and hit. The default LineEdit is
 ## about twelve pixels of text; this is T_BODY in a control tall enough to
@@ -555,30 +1059,123 @@ func _field(placeholder: String) -> LineEdit:
 	edit.placeholder_text = placeholder
 	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	edit.custom_minimum_size = Vector2(0, _px(CONTROL_HEIGHT))
-	edit.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY + 2, _scale))
+	edit.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, _scale))
 	edit.add_theme_color_override("font_color", UiTheme.INK)
 	edit.add_theme_color_override("font_placeholder_color", UiTheme.INK_FAINT)
+	edit.add_theme_color_override("caret_color", UiTheme.ACCENT)
 	edit.add_theme_stylebox_override("normal",
-		UiTheme.flat(UiTheme.SURFACE_2, UiTheme.R_CONTROL, _scale, 1.0, UiTheme.LINE))
+		UiTheme.flat(Color(0, 0, 0, 0.30), UiTheme.R_CONTROL, _scale, 1.0,
+			UiTheme.LINE))
 	edit.add_theme_stylebox_override("focus",
-		UiTheme.flat(UiTheme.SURFACE_3, UiTheme.R_CONTROL, _scale, 2.0, UiTheme.ACCENT))
+		UiTheme.flat(Color(0, 0, 0, 0.30), UiTheme.R_CONTROL, _scale, 2.0,
+			UiTheme.ACCENT))
 	return edit
 
-func _chunky_button(label: String) -> Button:
+## THE ONE BUTTON THE SCREEN IS BUILT AROUND. Ember, filled, dark text on
+## it, and the only thing painted that colour anywhere on the page.
+func _primary_button(label: String, size: int) -> Button:
+	var button := Button.new()
+	button.text = label
+	# WIDE ENOUGH TO BE THE BUTTON. Sized off its own text it came out
+	# barely larger than the ghost button beside it, and a primary action
+	# that is the same size as the secondary one is not a primary action.
+	button.custom_minimum_size = Vector2(_px(280), _px(78))
+	button.add_theme_font_size_override("font_size", UiTheme.px(size, _scale))
+	button.add_theme_font_override("font", UiTheme.heavy(_scale, 0.5, 1.0))
+	# NO GLOW UNDER IT. A StyleBoxFlat shadow is not a blur — it is the
+	# same rounded rectangle drawn larger — so an ember shadow behind an
+	# ember button came out as a hard second rectangle around the first,
+	# and the button looked like it had been pasted on. Ember on
+	# near-black does not need help standing out.
+	var rest := UiTheme.flat(UiTheme.ACCENT, UiTheme.R_CARD, _scale)
+	var hot: StyleBoxFlat = rest.duplicate()
+	hot.bg_color = UiTheme.ACCENT.lightened(0.14)
+	var down: StyleBoxFlat = rest.duplicate()
+	down.bg_color = UiTheme.ACCENT_DEEP
+	button.add_theme_stylebox_override("normal", rest)
+	button.add_theme_stylebox_override("hover", hot)
+	button.add_theme_stylebox_override("focus", hot)
+	button.add_theme_stylebox_override("pressed", down)
+	button.add_theme_stylebox_override("disabled",
+		UiTheme.flat(UiTheme.SURFACE_3, UiTheme.R_CARD, _scale))
+	for state: String in ["font_color", "font_hover_color", "font_pressed_color",
+			"font_focus_color"]:
+		button.add_theme_color_override(state, UiTheme.ON_ACCENT)
+	button.add_theme_color_override("font_disabled_color", UiTheme.INK_FAINT)
+	return button
+
+func _ghost_button(label: String, size: int) -> Button:
 	var button := Button.new()
 	button.text = "  %s  " % label
 	button.custom_minimum_size = Vector2(0, _px(CONTROL_HEIGHT))
-	button.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, _scale))
+	button.add_theme_font_size_override("font_size", UiTheme.px(size, _scale))
 	button.add_theme_color_override("font_color", UiTheme.INK)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
 	button.add_theme_stylebox_override("normal",
-		UiTheme.flat(UiTheme.SURFACE_2, UiTheme.R_CONTROL, _scale, 1.0, UiTheme.LINE))
+		UiTheme.lit_box(UiTheme.SURFACE_2, UiTheme.R_CONTROL, _scale))
 	# "focus" is in this list, and that is the whole point of the list.
 	# Every button on this screen used to be FOCUS_NONE, which meant a
-	# gamepad could do exactly one thing here: press Play. Starting a
-	# game, making it private, picking one out of the list and typing a
-	# code were all mouse-only, on the first screen of a game designed to
-	# be played on controllers by children who cannot read.
+	# gamepad could do exactly one thing here: press Play.
 	for state: String in ["hover", "pressed", "focus"]:
 		button.add_theme_stylebox_override(state,
-			UiTheme.flat(UiTheme.SURFACE_3, UiTheme.R_CONTROL, _scale, 1.0, UiTheme.ACCENT))
+			UiTheme.flat(UiTheme.SURFACE_3, UiTheme.R_CONTROL, _scale, 1.0,
+				UiTheme.ACCENT))
 	return button
+
+## One choice out of a row of them.
+func _chip(label: String) -> Button:
+	var button := _ghost_button(label, UiTheme.T_LABEL)
+	button.custom_minimum_size = Vector2(0, _px(46))
+	return button
+
+## A mode: a name, and one line saying what it is. Bigger than a chip
+## because it is the decision the rest of the screen hangs off.
+func _tile(label: String, note: String) -> Button:
+	var button := Button.new()
+	# TALL ENOUGH FOR THE SECOND LINE. At 96 the note wrapped to two lines
+	# and the second one was drawn outside the tile, over the heading of
+	# the next section — which looked like the layout had given up rather
+	# than like a tile with a description on it.
+	button.custom_minimum_size = Vector2(0, _px(132))
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_paint_choice(button, false)
+
+	var inner := VBoxContainer.new()
+	inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	inner.offset_left = _px(14)
+	inner.offset_right = -_px(14)
+	inner.offset_top = _px(14)
+	inner.offset_bottom = -_px(12)
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inner.add_theme_constant_override("separation", _px(4))
+	var title := _row_label(label, UiTheme.T_LABEL, UiTheme.INK)
+	title.add_theme_font_override("font", UiTheme.heavy(_scale, 0.4, 0.0))
+	inner.add_child(title)
+	var sub := _text(note, UiTheme.T_NOTE, UiTheme.INK_FAINT, true)
+	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inner.add_child(sub)
+	button.add_child(inner)
+	return button
+
+## Paints the chosen entry. Cheap to call every refresh: it only writes
+## styleboxes, so nothing is rebuilt and nothing loses focus.
+##
+## A TINT AND AN OUTLINE, not a solid fill. A row of solid ember buttons
+## with one of them ember is a row with nothing chosen in it, and filling
+## the chosen one solid is what forced the old menu to swap the label's
+## colour too, which is a second thing to get wrong.
+func _paint_choice(button: Button, on: bool) -> void:
+	var fill := UiTheme.ACCENT_SOFT if on else UiTheme.SURFACE_2
+	var edge := UiTheme.ACCENT if on else UiTheme.LINE
+	var rest := UiTheme.flat(fill, UiTheme.R_CONTROL, _scale, 1.0, edge)
+	var hot := UiTheme.flat(UiTheme.SURFACE_3 if not on else fill,
+		UiTheme.R_CONTROL, _scale, 2.0, UiTheme.ACCENT)
+	button.add_theme_stylebox_override("normal", rest)
+	for state: String in ["hover", "pressed", "focus"]:
+		button.add_theme_stylebox_override(state, hot)
+	button.add_theme_stylebox_override("disabled",
+		UiTheme.flat(Color(UiTheme.SURFACE_2.r, UiTheme.SURFACE_2.g,
+			UiTheme.SURFACE_2.b, 0.4), UiTheme.R_CONTROL, _scale))
+	button.add_theme_color_override("font_color",
+		UiTheme.INK if on else UiTheme.INK_DIM)
+	button.add_theme_color_override("font_disabled_color", UiTheme.INK_FAINT)

@@ -55,6 +55,14 @@ be **looked at**, not reasoned about. You do not need a screen for that:
 tools/screenshot.sh /tmp/shots          # the first screen
 ```
 
+The front page has three screens and only one of them is up on arrival,
+so the other two have a hook rather than being unreachable to a camera:
+
+```sh
+WORLD_LOBBY_SCREEN=new  tools/screenshot.sh /tmp/shots   # setting a game up
+WORLD_LOBBY_SCREEN=code tools/screenshot.sh /tmp/shots   # a private game's code
+```
+
 That runs the real client under a virtual X server and saves a PNG every
 1.5 seconds. Then open the PNGs. Skip the first two or three — they catch
 the window mid-build.

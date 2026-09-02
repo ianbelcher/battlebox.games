@@ -317,6 +317,7 @@ func _server_setup() -> void:
 	clock = _random_clock()
 	print("World spawn at %s, clock %.2f" % [spawn_pos, clock])
 	_load_battle_setup()
+	RoomSetup.apply(self)
 	if vehicles != null:
 		vehicles.stock_world()
 	# SOMEBODY TO PLAY AGAINST, without anybody having to go and ask for
@@ -327,7 +328,7 @@ func _server_setup() -> void:
 	# Added here rather than when the first player arrives, so the number
 	# is a property of the world and not of who is looking at it — the
 	# host can add or remove them from the Players tab like any other.
-	for _i in DEFAULT_BOTS:
+	for _i in RoomSetup.wanted_bots(DEFAULT_BOTS):
 		bots.spawn()
 	var trim := Timer.new()
 	trim.wait_time = CACHE_TRIM_SECONDS
@@ -441,6 +442,9 @@ func sv_hello() -> void:
 	# been up all night walks into.
 	cl_match_state.rpc_id(peer, match_phase, battle._timer,
 		match_alive.keys(), downed_ids.keys(), out_ids.keys())
+	# A room created as a battle has been sitting IDLE waiting for the
+	# person who created it. This is them.
+	_open_round_if_waiting()
 	if ctf.active() and not ctf._flags.is_empty():
 		cl_flags.rpc_id(peer, ctf._flag_payload(), ctf_scores, ctf_target,
 			ctf_caps, ctf_lost, ctf_player_caps)
@@ -1537,6 +1541,23 @@ func cl_teams(names: Array) -> void:
 	# team emptied it everywhere but left the column on screen forever.
 	team_count = maxi(names.size(), 1)
 	battle_config_changed.emit()
+
+## START THE ROUND WHEN SOMEBODY ARRIVES, not at boot.
+##
+## A room asked for as battle royale has to actually be playing battle
+## royale — but opening the round in _server_setup means it opens while
+## the room is still empty, and the lobby only hands the code back to its
+## creator once the process is listening. They would arrive a few seconds
+## into a round that started without them, which is the one moment in a
+## battle royale that matters.
+##
+## So the first `sv_hello` opens it. Idempotent, because every client
+## sends one: only an IDLE phase is opened, and only in a mode that has
+## rounds.
+func _open_round_if_waiting() -> void:
+	if game_mode == "creative" or match_phase != "IDLE" or battle == null:
+		return
+	battle.open_lobby()
 
 ## NOTHING IS KEPT ON DISK. Not where players stood, not the team layout,
 ## not the game mode — the world itself is thrown away on every restart

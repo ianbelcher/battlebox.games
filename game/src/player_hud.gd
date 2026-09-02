@@ -172,7 +172,7 @@ func _build_identity_chip() -> void:
 	row.add_child(_name_label)
 	_treasure_label = Label.new()
 	_treasure_label.add_theme_font_size_override("font_size", _us(22))
-	_treasure_label.add_theme_color_override("font_color", Color("ffd166"))
+	_treasure_label.add_theme_color_override("font_color", UiTheme.ACCENT)
 	row.add_child(_treasure_label)
 	_name_label.visible = false
 
@@ -397,7 +397,7 @@ func _build_center_note() -> void:
 	note_bg.set_content_margin_all(_us(14))
 	note_bg.content_margin_left = _us(20)
 	note_bg.content_margin_right = _us(20)
-	note_bg.border_color = Color("ffd166")
+	note_bg.border_color = UiTheme.ACCENT
 	note_bg.set_border_width_all(_us(2))
 	_note_card.add_theme_stylebox_override("panel", note_bg)
 	_note_card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -417,7 +417,7 @@ func _build_center_note() -> void:
 	# is set in _refresh_crosshair_and_layout, which overrides this the
 	# moment the cell has a size — see the note there.
 	_center_note.add_theme_font_size_override("font_size", _us(34))
-	_center_note.add_theme_color_override("font_color", Color("ffd166"))
+	_center_note.add_theme_color_override("font_color", UiTheme.ACCENT)
 	_center_note.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
 	_center_note.add_theme_constant_override("outline_size", _us(6))
 	_center_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -1350,7 +1350,7 @@ func _build_game_tab() -> void:
 	tab.add_theme_constant_override("separation", _us(10))
 	_lobby_countdown = Label.new()
 	_lobby_countdown.add_theme_font_size_override("font_size", _us(22))
-	_lobby_countdown.add_theme_color_override("font_color", Color("ffd166"))
+	_lobby_countdown.add_theme_color_override("font_color", UiTheme.ACCENT)
 	_lobby_countdown.visible = false
 	tab.add_child(_lobby_countdown)
 	var manage_row := HBoxContainer.new()
@@ -1518,7 +1518,7 @@ func _add_section(tab: Control, title: String) -> void:
 	var lbl := Label.new()
 	lbl.text = title
 	lbl.add_theme_font_size_override("font_size", _us(16))
-	lbl.add_theme_color_override("font_color", Color("ffd166"))
+	lbl.add_theme_color_override("font_color", UiTheme.ACCENT)
 	tab.add_child(lbl)
 	tab.add_child(HSeparator.new())
 
@@ -1973,13 +1973,13 @@ func _on_match_changed() -> void:
 	elif _menu.visible and world.match_phase == "SETUP":
 		_close_menu()
 
-## The selected battle options glow gold so everyone can see the setup.
-## Selected choice buttons get a gold BACKGROUND, not just gold text —
-## the text-only version read as "stuck hover".
+## The chosen option is filled with the accent so everyone at the table
+## can see the setup. A FILL, not just coloured text — the text-only
+## version read as "stuck hover".
 func _mark_selected(btn: Button, on: bool) -> void:
 	if on:
 		var sel := StyleBoxFlat.new()
-		sel.bg_color = Color("ffd166")
+		sel.bg_color = UiTheme.ACCENT
 		sel.set_corner_radius_all(9)
 		sel.content_margin_left = _us(14)
 		sel.content_margin_right = _us(14)
@@ -1988,7 +1988,7 @@ func _mark_selected(btn: Button, on: bool) -> void:
 		for state in ["normal", "hover", "pressed"]:
 			btn.add_theme_stylebox_override(state, sel)
 		for state in ["font_color", "font_hover_color", "font_pressed_color"]:
-			btn.add_theme_color_override(state, Color("1c2333"))
+			btn.add_theme_color_override(state, UiTheme.ON_ACCENT)
 	else:
 		for state in ["normal", "hover", "pressed"]:
 			btn.remove_theme_stylebox_override(state)
@@ -3077,7 +3077,7 @@ func _refresh_hotbar_icons(player: Player) -> void:
 			var style := StyleBoxFlat.new()
 			style.bg_color = Color(0.08, 0.09, 0.14, 0.85)
 			style.set_corner_radius_all(8)
-			style.border_color = Color("ffd166") if selected else Color(1, 1, 1, 0.25)
+			style.border_color = UiTheme.ACCENT if selected else Color(1, 1, 1, 0.25)
 			style.set_border_width_all(4 if selected else 2)
 			frame.add_theme_stylebox_override("panel", style)
 			var icon: BlockIcon = frame.get_child(0)

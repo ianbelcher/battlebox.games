@@ -40,13 +40,49 @@ games. `game/src/room.gd` is the watchdog that does the exiting;
 It cost almost nothing to adopt because the server was already configured
 entirely from its environment and already wrote nothing to disk.
 
+### A game is set up before it exists
+
+That last sentence is also what makes the front page work. Mode, map,
+world size, round length, capture target, knockout rules and how many
+computer players are waiting are all chosen on the **New game** screen,
+before any process has started, and travel like this:
+
+```
+lobby_screen.gd  →  lobby_client.gd  →  POST /api/rooms {settings}
+                                             ↓
+                                        lobby.py: clean_settings()
+                                             ↓
+                                        settings_env() → WORLD_* env
+                                             ↓
+                                        a new room process
+                                             ↓
+                                        chunk_store.gd  reads the map and size
+                                        room_setup.gd   reads the rest
+```
+
+`game/src/game_setup.gd` is the table of what can be chosen; `lobby.py`
+holds a second copy of the same rules, deliberately, because **the
+client's copy is not a validator** — anything can POST to that endpoint.
+
+The map and the size are applied a step earlier than everything else, by
+`ChunkStore` at generation time, and that is the whole point of doing it
+this way: the terrain **is** the map that was asked for. Chosen from
+inside a running game instead, the same setting is a world reset
+performed on people who are standing in the world.
+
+Every one of these can still be changed mid-game from the world menu.
+What the front page removes is the need to.
+
 ## The client
 
 | File | What it is |
 | --- | --- |
 | `main.gd` | The shell: screens, the connect/reconnect loop, the server bootstrap |
-| `lobby_screen.gd` | The first screen — which game do you want to be in |
+| `lobby_screen.gd` | The first screen — play, join a running game, or set one up |
+| `title_backdrop.gd` | What is behind it: sky, skyline, drifting blocks |
+| `game_setup.gd` | The table of what a new game can be. Pure; no nodes |
 | `lobby_client.gd` | The lobby's JSON API, with no UI in it |
+| `ui_theme.gd` | Every colour, radius and font size in every menu |
 | `splitscreen.gd` | 1–4 SubViewports sharing one World3D, one camera each |
 | `player.gd` | Movement, aim, actions. Hand-rolled voxel AABB, no physics engine |
 | `player_hud.gd` | Per-player overlay: hotbar, radar, the picker, the menus |
@@ -116,6 +152,7 @@ the game:
 
 | File | Add a row to get |
 | --- | --- |
+| `game_setup.gd` | A new thing to choose when starting a game (add it to `lobby.py` too) |
 | `creatures.gd` | A new animal — height, speed, habitat, animation names |
 | `blocks.gd` | A new block — colour, whether it glows, whether it can be dug |
 | `structures.gd` | A new stampable prefab |

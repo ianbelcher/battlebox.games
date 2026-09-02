@@ -6,9 +6,14 @@ extends Control
 ## built at all; we just start listening.
 
 const TITLE := "BattleBox"
-const BG_TOP := Color("22304a")
-const BG_BOTTOM := Color("10141f")
-const GOLD := Color("ffd166")
+## The reconnect screen's ground, matched to the front page's. It was a
+## blue that nothing else in the game used any more.
+const BG_TOP := Color("17151c")
+const BG_BOTTOM := Color("0a0a0c")
+## The one accent, from the one place that defines it. It was a second
+## copy of the old gold, so a change to the theme re-skinned every menu
+## and left this screen's title, its Play button and every banner behind.
+const GOLD := UiTheme.ACCENT
 
 const LEAVE_HOLD_SECONDS := 1.2
 
@@ -314,6 +319,11 @@ func _back_to_lobby(message: String) -> void:
 	_want_url = ""
 	_show_screen(_lobby_screen)
 	_web_loading_done_soon()
+	# THE FRONT PAGE, not whichever of its screens was last up. Somebody
+	# who made a private game, went in, and then left would otherwise come
+	# back to the panel showing that game's code — a screen whose only
+	# button rejoins the game they just left.
+	_lobby_screen.back_to_front()
 	_lobby_screen.refresh()
 	_lobby_screen.call("_set_status", message)
 
@@ -386,9 +396,9 @@ func _build_connect_screen() -> void:
 	button.add_theme_stylebox_override("normal", play_style)
 	button.add_theme_stylebox_override("hover", play_hover)
 	button.add_theme_stylebox_override("pressed", play_hover)
-	button.add_theme_color_override("font_color", Color("1c2333"))
-	button.add_theme_color_override("font_hover_color", Color("1c2333"))
-	button.add_theme_color_override("font_pressed_color", Color("1c2333"))
+	button.add_theme_color_override("font_color", UiTheme.ON_ACCENT)
+	button.add_theme_color_override("font_hover_color", UiTheme.ON_ACCENT)
+	button.add_theme_color_override("font_pressed_color", UiTheme.ON_ACCENT)
 	button.pressed.connect(_on_connect_pressed)
 	var holder := CenterContainer.new()
 	holder.visible = false
@@ -654,6 +664,10 @@ func _on_connected() -> void:
 		_world_menu = WorldMenu.new()
 		_game_screen.add_child(_world_menu)
 		Game.world_menu = _world_menu
+		# HOPPING BETWEEN GAMES. Connected here rather than in the menu
+		# because main owns the socket: the menu asks, this leaves.
+		_world_menu.leave_requested.connect(func() -> void:
+			_back_to_lobby(""))
 	_world_menu.world = world
 	# Once only — _on_connected runs again on every reconnect.
 	if not Game.video_changed.is_connected(_apply_video):

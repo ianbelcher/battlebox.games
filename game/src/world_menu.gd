@@ -48,6 +48,11 @@ extends Control
 ##    stretched across a 4K screen. Scale comes from the VIEWPORT and is
 ##    re-applied on every resize — see _apply_scale().
 
+## SOMEWHERE ELSE. Emitted when somebody asks to leave this game and go
+## back to the list; main.gd owns the socket and does the leaving. See
+## _build_leaving_card for why this exists at all.
+signal leave_requested
+
 var world: Node = null
 
 var _panel: PanelContainer
@@ -610,6 +615,7 @@ func _build_game_tab() -> void:
 	len_group.add_theme_constant_override("separation", _s(8))
 	box.add_child(len_group)
 	_battle_only.append(len_group)
+	_build_leaving_card(box)
 	var len_card := _section(len_group, "How long a battle lasts")
 	var len_row := _row(len_card)
 	for preset in [[3, "3 min"], [5, "5 min"], [8, "8 min"], [60, "Unlimited"]]:
@@ -620,6 +626,33 @@ func _build_game_tab() -> void:
 		_min(btn, 120, 46)
 		_length_btns[minutes] = btn
 
+
+## THE WAY OUT, and it is at the foot of the tab that changes the game
+## on purpose.
+##
+## Everything above this card changes the game you are IN: a different
+## mode ends the round being played, a different map resets the world
+## under whoever is standing on it. That is a lot of consequence for
+## "actually, let us play capture the flag instead", and it is the reason
+## the front page now sets a game up BEFORE it exists.
+##
+## But the front page was a one-way door: once you were in a game the
+## only way to a different one was to reload the page, which on a tablet
+## handed to a five-year-old is not a route that exists. So this is the
+## other half of that change — the settings above are still here for the
+## game you are in, and this is how you go and play a different one.
+##
+## NOTHING IS LOST BY PRESSING IT. The room keeps running with whoever
+## else is in it, and a room you created is still reachable by its code
+## for as long as somebody is there.
+func _build_leaving_card(box: Control) -> void:
+	var card := _section(box, "Playing something else",
+		"The game carries on without you, and you can come back to it.")
+	var leave := _button("Leave and pick another game", func() -> void:
+		close()
+		leave_requested.emit())
+	_min(leave, 300, 46)
+	card.add_child(leave)
 
 ## HOW THE ROUND IS GOING — its own tab, next to Players.
 ##

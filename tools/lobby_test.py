@@ -107,6 +107,20 @@ def run(argv: list[str] | None = None) -> int:
                     lobby.kill()
 
 
+def _await_line(log_path: Path, needle: str, timeout: float) -> str:
+    """Wait for a line on the lobby's own output. The room prints what it
+    came up as (see game/src/room_setup.gd) and the lobby prefixes it with
+    the room's code, which is the only place the two ends can be compared:
+    the API says what was ASKED for, and this says what was BUILT."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for line in log_path.read_text(errors="replace").splitlines():
+            if line.startswith(needle):
+                return line
+        time.sleep(0.5)
+    return ""
+
+
 def _exercise(args, base: str, port: int, checks: Checks,
               lobby: subprocess.Popen, log_path: Path) -> int:
     print(f"lobby test: on port {port}")
@@ -136,6 +150,32 @@ def _exercise(args, base: str, port: int, checks: Checks,
                               {"name": "Open house", "public": True})
     checks.that(status == 201 and public_room.get("code"),
                 f"a public game is created ({public_room.get('code')})")
+    # A GAME SET UP BEFORE IT EXISTS. The front page sends these with the
+    # create; the lobby turns them into WORLD_* environment and the room
+    # is GENERATED as that map rather than reset into it afterwards. The
+    # check that matters is the last one: not that the lobby echoed the
+    # settings back, but that the process it started actually came up as
+    # the thing that was asked for.
+    status, made = api(base, "/api/rooms",
+                       {"name": "Castle war", "public": True,
+                        "settings": {"mode": "ctf", "map": "castles",
+                                     "size": 100, "bots": 3, "target": 5}})
+    asked = made.get("settings", {})
+    checks.that(status == 201 and asked.get("mode") == "ctf"
+                and asked.get("map") == "castles",
+                f"a game is created as what was asked for ({asked})")
+    checks.that(asked.get("size") == 100 and asked.get("bots") == 3,
+                f"including its size and its computer players ({asked})")
+    _, listing = api(base, "/api/rooms")
+    listed = [r for r in listing.get("rooms", [])
+              if r.get("code") == made.get("code")]
+    checks.that(listed and listed[0].get("settings", {}).get("mode") == "ctf",
+                "and the list says what it is, so it can be chosen")
+    booted = _await_line(log_path, f"[{made.get('code')}] ROOM setup", 60)
+    checks.that("mode=ctf" in booted and "map=castles" in booted
+                and "size=100" in booted and "bots=3" in booted,
+                f"the room process really booted as that game ({booted.strip()})")
+
     status, private_room = api(base, "/api/rooms",
                                {"name": "Just us", "public": False})
     checks.that(status == 201 and private_room.get("code"),
@@ -195,7 +235,12 @@ def _exercise(args, base: str, port: int, checks: Checks,
     # front page still looks perfect. It has gone wrong twice — once on a
     # node that was not in the tree yet, once on a button inside a hidden
     # panel, which would have joined a game with no code.
-    checks.that(back.get("focus", "").endswith("Play"),
+    # STARTS with Play, not ends with it: the button reads "Play now" now.
+    # This still fails on every other control the front page has — New
+    # game, Join, Back, Create and play, Start playing — which is the
+    # whole job. It is matched on the button's TEXT (see
+    # SelfCheck._focused), with spaces as underscores.
+    checks.that(back.get("focus", "").startswith("Play"),
                 f"Play holds focus, so Space and A work (focus={back.get('focus')})")
     checks.that(back.get("room") == "-",
                 f"leaving a game forgets its code (room={back.get('room')})")

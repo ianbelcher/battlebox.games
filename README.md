@@ -7,9 +7,12 @@ A voxel game that runs in a browser. Built for children; playable at
 **[battlebox.games](https://battlebox.games)**, and this repository is the
 whole of it — clone it and run your own.
 
-Anyone can start a game. A public one is listed for everybody; a private
-one gets a two-word code and is shared as a link. When the last player
-leaves, a created game closes itself.
+Anyone can start a game, and sets it up before going in: the mode, the
+map, how big the world is, how long a round lasts, how many computer
+players are waiting in it. A public one is listed for everybody, with
+what it is written under its name; a private one gets a two-word code and
+is shared as a link. When the last player leaves, a created game closes
+itself.
 
 ## Running it
 
@@ -69,8 +72,15 @@ game loads and then dies.
   starts one per game on a private port and proxies `/ws?room=<code>` to
   it. See [`game/src/room.gd`](game/src/room.gd).
 - **Gameplay is data.** New animal → `creatures.gd`. New block →
-  `blocks.gd`. New prefab → `structures.gd`. If you are writing a `match`
-  over a kind, there is a table you should be adding a row to.
+  `blocks.gd`. New prefab → `structures.gd`. Something new to choose when
+  starting a game → `game_setup.gd`, and its twin in `lobby/lobby.py`. If
+  you are writing a `match` over a kind, there is a table you should be
+  adding a row to.
+- **A game is configured before it exists.** What the front page chooses
+  is sent with the create, turned into `WORLD_*` environment by the lobby
+  and applied at boot — so a world is *generated* as the map that was
+  asked for rather than reset into it afterwards. See
+  [`docs/architecture.md`](docs/architecture.md).
 - **Nothing is written to disk.** Not chunks, not players, not scores. A
   world is generated into memory at boot and dies with the process, so a
   restart is a clean table by construction.
