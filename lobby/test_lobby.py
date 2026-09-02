@@ -213,8 +213,9 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(lobby.clean_settings(["ctf"]), lobby.DEFAULT_SETTINGS)
 
     def test_a_whole_game_survives_intact(self):
-        asked = {"mode": "ctf", "map": "castles", "size": 400, "minutes": 8,
-                 "bots": 10, "target": 5, "revive": 1, "drop": True}
+        asked = {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
+                 "bots": 10, "target": 5, "teams": 8, "revive": 1,
+                 "drop": True}
         self.assertEqual(lobby.clean_settings(asked), asked)
 
     def test_a_mode_nobody_has_written_is_not_started(self):
@@ -240,15 +241,19 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(lobby.clean_settings({"size": -1})["size"], 200)
         self.assertEqual(lobby.clean_settings({"size": "big"})["size"], 200)
 
-    def test_round_length_follows_the_mode_that_asked_for_it(self):
-        # The two clocked modes do not offer the same lengths, and a
-        # length from the other one's list is not a length.
-        self.assertEqual(lobby.clean_settings({"mode": "holdout",
-                                               "minutes": 10})["minutes"], 10)
-        self.assertEqual(lobby.clean_settings({"mode": "battle",
-                                               "minutes": 10})["minutes"], 5)
-        self.assertEqual(lobby.clean_settings({"mode": "battle",
-                                               "minutes": 8})["minutes"], 8)
+    def test_a_round_length_means_the_same_thing_in_every_mode(self):
+        # One list, for every mode that has a clock. It was 3/5/8 for
+        # battle royale and 2/5/10 for last flag standing, for no reason
+        # either mode could give.
+        for mode in ("battle", "holdout"):
+            self.assertEqual(
+                lobby.clean_settings({"mode": mode, "minutes": 10})["minutes"],
+                10, mode)
+        self.assertEqual(lobby.clean_settings({"minutes": 8})["minutes"], 5)
+
+    def test_teams_are_part_of_the_game(self):
+        self.assertEqual(lobby.clean_settings({"teams": 8})["teams"], 8)
+        self.assertEqual(lobby.clean_settings({"teams": 7})["teams"], 5)
 
     def test_the_revive_ladder_clamps_to_its_rungs(self):
         # A range rather than a list of choices, so out-of-range lands on
@@ -270,12 +275,13 @@ class SettingsEnvTests(unittest.TestCase):
 
     def test_every_setting_reaches_the_room(self):
         env = lobby.settings_env({"mode": "holdout", "map": "sky", "size": 800,
-                                  "minutes": 2, "bots": 20, "target": 10,
-                                  "revive": 0, "drop": True})
+                                  "minutes": 3, "bots": 20, "target": 10,
+                                  "teams": 8, "revive": 0, "drop": True})
         self.assertEqual(env["WORLD_MODE"], "holdout")
         self.assertEqual(env["WORLD_THEME"], "sky")
         self.assertEqual(env["WORLD_SIZE"], "800")
-        self.assertEqual(env["WORLD_ROUND_MINUTES"], "2")
+        self.assertEqual(env["WORLD_ROUND_MINUTES"], "3")
+        self.assertEqual(env["WORLD_TEAMS"], "8")
         self.assertEqual(env["WORLD_BOTS"], "20")
         self.assertEqual(env["WORLD_CTF_TARGET"], "10")
         self.assertEqual(env["WORLD_REVIVE"], "0")
@@ -301,6 +307,20 @@ class SettingsEnvTests(unittest.TestCase):
         # means "the room inherited whatever this process had", which is
         # not the same at all.
         self.assertEqual(lobby.settings_env({"drop": False})["WORLD_DROP_KO"], "0")
+
+
+class HouseTests(unittest.TestCase):
+    """THE ALWAYS-ON WORLD IS JUST ANOTHER GAME. It used to have a button
+    of its own on the front page — a big "Play now" that dropped you into
+    a world nothing on the screen had described. It is in the list now,
+    saying what it is, so it has to actually BE something."""
+
+    def test_the_always_on_world_is_a_game_somebody_would_join(self):
+        settings = lobby.clean_settings(lobby.HOUSE_SETTINGS)
+        self.assertEqual(settings, lobby.HOUSE_SETTINGS,
+                         "the house settings are valid settings")
+        self.assertEqual(settings["mode"], "battle")
+        self.assertEqual(settings["teams"], 5)
 
 
 class RoomSettingsJsonTests(unittest.TestCase):

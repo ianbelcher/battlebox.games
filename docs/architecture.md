@@ -70,8 +70,17 @@ this way: the terrain **is** the map that was asked for. Chosen from
 inside a running game instead, the same setting is a world reset
 performed on people who are standing in the world.
 
-Every one of these can still be changed mid-game from the world menu.
-What the front page removes is the need to.
+**And they cannot be changed afterwards.** The mode, the map and the
+world's size are gone from both in-game menus: changing the mode ended
+the round everybody was in, and changing the map or the size rebuilt the
+world under whoever was standing on it — one person idly reading a menu,
+everyone else's game over. The world menu keeps what costs nothing to
+change mid-round (the round length, what it takes to win, how you get
+back up) and gains a way out to the front page.
+
+The always-on world is not special either, beyond not closing when the
+last person leaves. It is spawned with settings like any other room,
+listed like any other room, and says what it is like any other room.
 
 ## The client
 
@@ -80,6 +89,7 @@ What the front page removes is the need to.
 | `main.gd` | The shell: screens, the connect/reconnect loop, the server bootstrap |
 | `lobby_screen.gd` | The first screen — play, join a running game, or set one up |
 | `title_backdrop.gd` | What is behind it: sky, skyline, drifting blocks |
+| `neon_wordmark.gd` | BattleBox, drawn as the neon sign the intro ends on |
 | `game_setup.gd` | The table of what a new game can be. Pure; no nodes |
 | `lobby_client.gd` | The lobby's JSON API, with no UI in it |
 | `ui_theme.gd` | Every colour, radius and font size in every menu |

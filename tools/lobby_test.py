@@ -235,13 +235,17 @@ def _exercise(args, base: str, port: int, checks: Checks,
     # front page still looks perfect. It has gone wrong twice — once on a
     # node that was not in the tree yet, once on a button inside a hidden
     # panel, which would have joined a game with no code.
-    # STARTS with Play, not ends with it: the button reads "Play now" now.
-    # This still fails on every other control the front page has — New
-    # game, Join, Back, Create and play, Start playing — which is the
-    # whole job. It is matched on the button's TEXT (see
-    # SelfCheck._focused), with spaces as underscores.
-    checks.that(back.get("focus", "").startswith("Play"),
-                f"Play holds focus, so Space and A work (focus={back.get('focus')})")
+    # The front page's one primary button holds focus, so Space or A does
+    # the obvious thing without anybody reading a word. It reads "Start a
+    # game" now — there were two buttons, and the other one dropped you
+    # into a world nothing on the screen had described.
+    #
+    # Matched on the button's TEXT (see SelfCheck._focused), spaces as
+    # underscores, and it still fails on every other control the screen
+    # has: Join, Back, Create and play, Start playing.
+    checks.that(back.get("focus", "") == "Start_a_game",
+                "the front page's main button holds focus, so Space and A "
+                f"work (focus={back.get('focus')})")
     checks.that(back.get("room") == "-",
                 f"leaving a game forgets its code (room={back.get('room')})")
 

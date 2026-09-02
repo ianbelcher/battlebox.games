@@ -29,8 +29,9 @@ func test_the_screen_opens_on_a_game_and_the_fallback_stays_neutral() -> void:
 		GameSetup.opening_choice(), "and what it opens on is itself valid")
 
 func test_a_whole_game_survives_intact() -> void:
-	var asked := {"mode": "ctf", "map": "castles", "size": 400, "minutes": 8,
-		"bots": 10, "target": 5, "revive": ReviveRule.MATES, "drop": true}
+	var asked := {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
+		"bots": 10, "target": 5, "teams": 8, "revive": ReviveRule.MATES,
+		"drop": true}
 	equal(GameSetup.clean(asked), asked, "nothing chosen is thrown away")
 
 func test_a_mode_nobody_has_written_falls_back() -> void:
@@ -50,17 +51,29 @@ func test_the_revive_ladder_clamps_because_it_is_a_ladder() -> void:
 	equal(GameSetup.clean({"revive": -3})["revive"], ReviveRule.NONE,
 		"below the bottom rung is the bottom rung")
 
-## The two clocked modes do not offer the same lengths, so a length is
-## only a length in the mode it was offered in. Switching from last flag
-## standing to battle royale used to leave "10 min" selected — a value
-## battle royale has no button for, so the row showed nothing chosen.
-func test_a_round_length_belongs_to_the_mode_that_offered_it() -> void:
-	equal(GameSetup.clean({"mode": "holdout", "minutes": 10})["minutes"], 10,
-		"ten minutes is a last flag round")
-	equal(GameSetup.clean({"mode": "battle", "minutes": 10})["minutes"],
-		GameSetup.DEFAULT_MINUTES, "and is not a battle royale round")
-	equal(GameSetup.clean({"mode": "battle", "minutes": 8})["minutes"], 8,
-		"eight minutes is")
+## EVERY CLOCKED MODE OFFERS THE SAME LENGTHS. It used to be 3/5/8 for
+## battle royale and 2/5/10 for last flag standing, which on screen is a
+## row whose buttons move and grey out as you change your mind about the
+## mode — and there was never a reason either mode could give for it.
+func test_a_round_length_means_the_same_thing_in_every_mode() -> void:
+	for mode: String in ["battle", "holdout"]:
+		equal(GameSetup.lengths_for(mode), GameSetup.ROUND_LENGTHS,
+			"%s offers the one list" % mode)
+		equal(GameSetup.clean({"mode": mode, "minutes": 10})["minutes"], 10,
+			"ten minutes is a round of %s" % mode)
+	equal(GameSetup.clean({"minutes": 8})["minutes"], GameSetup.DEFAULT_MINUTES,
+		"and a length nothing offers is the default")
+
+## Teams are a property of the game, chosen with everything else, and
+## applied before a single computer player is spawned — they are spread
+## across whatever teams exist at the moment they are made.
+func test_teams_are_part_of_the_game() -> void:
+	equal(GameSetup.clean({"teams": 8})["teams"], 8, "eight sides")
+	equal(GameSetup.clean({"teams": 7})["teams"], GameSetup.DEFAULT_TEAMS,
+		"seven is not on the list")
+	check(GameSetup.uses("teams", "battle"), "a battle has sides")
+	check(not GameSetup.uses("teams", "creative"),
+		"nobody is on a side in creative")
 
 func test_every_mode_offers_lengths_it_can_actually_run() -> void:
 	for spec: Dictionary in GameSetup.MODES:

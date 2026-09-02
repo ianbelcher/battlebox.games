@@ -55,6 +55,15 @@ static func apply(world: Node) -> void:
 	var target := EnvConfig.number("WORLD_CTF_TARGET", 0)
 	if target > 0:
 		world.ctf_target = clampi(target, 1, 25)
+	# HOW MANY SIDES, set before a single computer player is spawned —
+	# they are spread across whatever teams exist at the moment they are
+	# made, so doing this afterwards would mean redistributing a room full
+	# of them. sv_add_team and sv_remove_team go one at a time and each
+	# broadcasts; there is nobody here to broadcast to yet.
+	var teams := EnvConfig.number("WORLD_TEAMS", 0)
+	if teams > 0:
+		world.team_count = clampi(teams, 2, 24)
+		world.team_names = world.TEAM_NAMES.slice(0, world.team_count)
 	if EnvConfig.has("WORLD_REVIVE"):
 		world.revive_mode = clampi(
 			EnvConfig.number("WORLD_REVIVE", world.revive_mode),
@@ -70,6 +79,6 @@ static func apply(world: Node) -> void:
 static func describe(world: Node) -> String:
 	var minutes: float = world.holdout_minutes if world.game_mode == "holdout" \
 		else world.storm_minutes
-	return "ROOM setup mode=%s map=%s size=%d minutes=%d bots=%d" % [
+	return "ROOM setup mode=%s map=%s size=%d minutes=%d bots=%d teams=%d" % [
 		world.game_mode, world.store.theme, world.store.world_size,
-		int(minutes), wanted_bots(world.DEFAULT_BOTS)]
+		int(minutes), wanted_bots(world.DEFAULT_BOTS), world.team_count]

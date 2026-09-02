@@ -19,12 +19,20 @@ func _initialize() -> void:
 	await process_frame
 	var bad: PackedStringArray = []
 
-	# Three sizes, doubling. Seven near-identical numbers were a row you
-	# could not choose from.
-	var sizes: Array = menu.get("_size_btns").keys()
-	sizes.sort()
-	if sizes != [50, 100, 200, 400, 800]:
-		bad.append("sizes are %s, expected [50, 100, 200, 400, 800]" % str(sizes))
+	# WHAT A GAME IS, IS NOT CHANGED FROM INSIDE IT. The mode row, the map
+	# row and the world size all lived in here, and every one of them
+	# ended the round in progress — the map and the size by rebuilding the
+	# world under whoever was standing on it. They are asked on the front
+	# page now, before the world exists, and this is what stops them
+	# creeping back: they are not "hidden", they are gone.
+	for banned: String in ["_mode_btns", "_size_btns", "_map_row",
+			"_saved_row"]:
+		if menu.get(banned) != null:
+			bad.append("%s is back — the game's own kind is not a setting "
+				% banned + "you change from inside the game")
+	# ...and what replaced them: a line that says what this game IS.
+	if menu.get("_this_game") == null:
+		bad.append("nothing in the menu says what game this is")
 
 	# Four answers for who can fly, and NO world-level on/off switch —
 	# flying is a property of a player, and having it in both places is
@@ -53,12 +61,21 @@ func _initialize() -> void:
 		bad.append("revive rungs are %s, expected %s"
 			% [str(rungs), str(ReviveRule.choices(true))])
 
-	# Last flag standing has its own clock, the way battle royale does.
+	# ONE LIST OF ROUND LENGTHS, for every mode that has a clock. Battle
+	# royale offered 3/5/8 and last flag standing 2/5/10, for no reason
+	# either of them could explain.
 	var lens: Array = menu.get("_hold_len_btns").keys()
 	lens.sort()
-	if lens != HoldoutRules.LENGTHS:
-		bad.append("round lengths are %s, expected %s"
-			% [str(lens), str(HoldoutRules.LENGTHS)])
+	var want_lens: Array = GameSetup.ROUND_LENGTHS.duplicate()
+	want_lens.sort()
+	if lens != want_lens:
+		bad.append("last-flag lengths are %s, expected %s"
+			% [str(lens), str(want_lens)])
+	var battle_lens: Array = menu.get("_length_btns").keys()
+	battle_lens.sort()
+	if battle_lens != want_lens:
+		bad.append("battle lengths are %s, expected the same %s"
+			% [str(battle_lens), str(want_lens)])
 
 	# The score is its own tab now, not a card wedged above the mode
 	# buttons on the settings page.
@@ -68,9 +85,9 @@ func _initialize() -> void:
 	for line: String in bad:
 		print("  FAIL  %s" % line)
 	if bad.is_empty():
-		print("menu_controls: PASS — %d sizes, %d fly answers, "
-			% [sizes.size(), answers.size()]
-			+ "capture and last-flag cards separate, "
+		print("menu_controls: PASS — no mode/map/size in here, "
+			+ "%d fly answers, capture and last-flag cards separate, "
+			% answers.size()
 			+ "%d revive rungs, %d round lengths, score tab present"
 			% [rungs.size(), lens.size()])
 		quit(0)

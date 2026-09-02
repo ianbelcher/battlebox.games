@@ -1278,28 +1278,20 @@ func _scroll_to_character() -> void:
 	if btn != null:
 		_char_scroll.ensure_control_visible(btn)
 
+## WHAT KIND OF GAME THIS IS, IS NOT CHANGED FROM INSIDE IT.
+##
+## There were mode buttons here and another set in the world menu, and
+## pressing either ended the round everybody was playing and — if the map
+## went with it — rebuilt the world under their feet. One person's idle
+## poke, everyone else's game over. A game is what it was made as; the
+## front page asks all of this before the world exists, and leaving to
+## start a different one is two presses away in the world menu.
+##
+## What is left here is the round LENGTH, which changes nothing anybody is
+## standing on.
 func _build_game_tab() -> void:
-	var tab := _scrolled_tab("Mode", _game_tabs)
+	var tab := _scrolled_tab("Round", _game_tabs)
 	tab.add_theme_constant_override("separation", _us(10))
-	var mode_row := HBoxContainer.new()
-	mode_row.add_theme_constant_override("separation", _us(8))
-	tab.add_child(mode_row)
-	var mode_tag := Label.new()
-	mode_tag.text = "Mode:"
-	mode_tag.add_theme_font_size_override("font_size", _us(20))
-	mode_row.add_child(mode_tag)
-	for mode_spec in [["🏆 Battle", "battle"], ["🔨 Creative", "creative"]]:
-		var mode_btn := Button.new()
-		mode_btn.focus_mode = Control.FOCUS_NONE
-		mode_btn.text = str(mode_spec[0])
-		mode_btn.add_theme_font_size_override("font_size", _us(20))
-		var mode_key := str(mode_spec[1])
-		mode_btn.pressed.connect(func() -> void:
-			if Game.world != null:
-				Game.world.sv_set_mode.rpc_id(1, mode_key)
-			Sfx.play("tick", -8.0))
-		mode_row.add_child(mode_btn)
-		_mode_btns[mode_key] = mode_btn
 	_battle_opts = VBoxContainer.new()
 	_battle_opts.add_theme_constant_override("separation", _us(10))
 	tab.add_child(_battle_opts)
@@ -1310,12 +1302,12 @@ func _build_game_tab() -> void:
 	length_label.text = "Game length:"
 	length_label.add_theme_font_size_override("font_size", _us(20))
 	length_row.add_child(length_label)
-	for preset in [[3, "3 min"], [5, "5 min"], [8, "8 min"], [60, "Unlimited"]]:
+	for minutes_v: int in GameSetup.ROUND_LENGTHS:
 		var preset_btn := Button.new()
 		preset_btn.focus_mode = Control.FOCUS_NONE
-		preset_btn.text = str(preset[1])
+		preset_btn.text = GameSetup.length_label(minutes_v)
 		preset_btn.add_theme_font_size_override("font_size", _us(18))
-		var minutes: int = preset[0]
+		var minutes: int = minutes_v
 		preset_btn.pressed.connect(func() -> void:
 			if Game.world != null:
 				Game.world.sv_match_config.rpc_id(1, minutes, -1)
@@ -1327,25 +1319,9 @@ func _build_game_tab() -> void:
 	# world switch in two places at once, and neither knew about the
 	# per-player answers sitting on top of it.
 
-	var size_row := HBoxContainer.new()
-	size_row.add_theme_constant_override("separation", _us(8))
-	_battle_opts.add_child(size_row)
-	var size_label := Label.new()
-	size_label.text = "Arena size:"
-	size_label.add_theme_font_size_override("font_size", _us(20))
-	size_row.add_child(size_label)
-	for arena in [50, 100, 200, 400, 800]:
-		var size_btn := Button.new()
-		size_btn.focus_mode = Control.FOCUS_NONE
-		size_btn.text = str(arena)
-		size_btn.add_theme_font_size_override("font_size", _us(18))
-		var blocks: int = arena
-		size_btn.pressed.connect(func() -> void:
-			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, -1, -1, blocks)
-			Sfx.play("tick", -8.0))
-		size_row.add_child(size_btn)
-		_size_btns[arena] = size_btn
+	# NO ARENA SIZE HERE EITHER. The world's size is baked into the
+	# terrain — it is a square slab cut to that width — so changing it
+	# rebuilds the world, which is the same objection as the map.
 	tab = _scrolled_tab("Players", _game_tabs)
 	tab.add_theme_constant_override("separation", _us(10))
 	_lobby_countdown = Label.new()
@@ -1378,58 +1354,6 @@ func _build_game_tab() -> void:
 	_team_box = VBoxContainer.new()
 	_team_box.add_theme_constant_override("separation", _us(4))
 	tab.add_child(_team_box)
-	tab = _scrolled_tab("Map", _game_tabs)
-	tab.add_theme_constant_override("separation", _us(10))
-	var gen_label := Label.new()
-	gen_label.text = "Generated maps:"
-	gen_label.add_theme_font_size_override("font_size", _us(18))
-	tab.add_child(gen_label)
-	_world_row = HBoxContainer.new()
-	_world_row.add_theme_constant_override("separation", _us(6))
-	tab.add_child(_world_row)
-	_maps_label = Label.new()
-	_maps_label.text = "Designed maps:"
-	_maps_label.add_theme_font_size_override("font_size", _us(18))
-	tab.add_child(_maps_label)
-	_maps_row = HBoxContainer.new()
-	_maps_row.add_theme_constant_override("separation", _us(6))
-	tab.add_child(_maps_row)
-	_rebuild_world_row()
-	if world != null:
-		world.map_list_changed.connect(_rebuild_world_row)
-	_game_tabs.move_child(_game_tabs.get_node("Map"), 0)
-
-## Generated themes on one row; the server's imported map library below.
-func _rebuild_world_row() -> void:
-	if _world_row == null:
-		return
-	for child in _world_row.get_children():
-		child.queue_free()
-	for child in _maps_row.get_children():
-		child.queue_free()
-	for choice in [["classic", "Classic"], ["desert", "Desert"], ["isles", "Isles"],
-			["castles", "Castle"], ["city", "City"], ["sky", "Skylands"]]:
-		_world_row.add_child(_map_button(str(choice[0]), str(choice[1])))
-	var have_maps: bool = world != null and not world.map_list.is_empty()
-	_maps_label.visible = have_maps
-	_maps_row.visible = have_maps
-	if have_maps:
-		for entry in world.map_list:
-			_maps_row.add_child(_map_button(str(entry.key), str(entry.name)))
-
-func _map_button(map_key: String, map_name: String) -> Button:
-	var map_btn := Button.new()
-	map_btn.focus_mode = Control.FOCUS_NONE
-	map_btn.text = map_name
-	map_btn.add_theme_font_size_override("font_size", _us(18))
-	if world != null and map_key == world.client_world:
-		_mark_selected(map_btn, true)
-	map_btn.pressed.connect(func() -> void:
-		if Game.world != null:
-			Game.world.sv_select_world.rpc_id(1, map_key)
-		Sfx.play("tick", -8.0))
-	return map_btn
-
 ## A tab whose content scrolls vertically instead of overflowing.
 func _scrolled_tab(tab_name: String, parent: TabContainer) -> VBoxContainer:
 	var scroll := ScrollContainer.new()
@@ -1931,9 +1855,9 @@ static func _flag_ink(dx: int, dy: int) -> int:
 
 var _team_box: VBoxContainer
 var _length_btns: Dictionary = {}
-var _size_btns: Dictionary = {}
+
 var _lobby_countdown: Label
-var _mode_btns: Dictionary = {}
+
 var _battle_opts: VBoxContainer
 var _battle_start: Button
 var _add_bot_btn: Button
@@ -1956,9 +1880,6 @@ var _damage_arrow: Label
 var _damage_t := 0.0
 var _damage_from := Vector3.ZERO
 var _prev_hp := 8
-var _world_row: HBoxContainer
-var _maps_row: HBoxContainer
-var _maps_label: Label
 
 ## Battle lobby lives in the menu now: when a match opens, EVERYONE's menu
 ## pops open on the Game tab so each player can pick a team with their own
@@ -2000,10 +1921,6 @@ func _refresh_battle_highlights() -> void:
 		return
 	for minutes: int in _length_btns.keys():
 		_mark_selected(_length_btns[minutes], minutes == world.client_minutes)
-	for arena: int in _size_btns.keys():
-		_mark_selected(_size_btns[arena], arena == world.client_size)
-	for mode_key: String in _mode_btns.keys():
-		_mark_selected(_mode_btns[mode_key], mode_key == world.client_mode)
 	if _battle_opts != null:
 		_battle_opts.visible = world.client_mode == "battle"
 	_refresh_team_box()

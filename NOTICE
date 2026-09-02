@@ -40,6 +40,12 @@ game's Credits page.
 | DejaVu Sans | `game/assets/fonts/DejaVuSans.ttf` | DejaVu Fonts Licence (Bitstream Vera derivative) |
 | Noto Emoji | `game/assets/fonts/NotoEmoji-Regular.ttf` | SIL Open Font Licence 1.1 — see `NotoEmoji-OFL.txt` |
 | Noto Sans Symbols | `game/assets/fonts/NotoSansSymbols-Regular.ttf` | SIL Open Font Licence 1.1 — see `NotoSansSymbols-OFL.txt` |
+| Courgette | `game/assets/fonts/Courgette-Regular.ttf` | SIL Open Font Licence 1.1 — see `Courgette-OFL.txt` |
+
+Courgette is by Sorkin Type Co and is used for one thing: the BattleBox
+wordmark on the front page, drawn as the neon sign the intro video ends
+on. See `game/src/neon_wordmark.gd`. Everything else in the game is set
+in the engine's own face.
 
 ## Generated from the above
 

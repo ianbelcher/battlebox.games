@@ -8,11 +8,20 @@ A voxel game that runs in a browser. Built for children; playable at
 whole of it — clone it and run your own.
 
 Anyone can start a game, and sets it up before going in: the mode, the
-map, how big the world is, how long a round lasts, how many computer
-players are waiting in it. A public one is listed for everybody, with
-what it is written under its name; a private one gets a two-word code and
-is shared as a link. When the last player leaves, a created game closes
-itself.
+map, how big the world is, how long a round lasts, how many teams, how
+many computer players are waiting in it. A public one is listed for
+everybody, with what it is written under its name; a private one gets a
+two-word code and is shared as a link. When the last player leaves, a
+created game closes itself.
+
+A game is what it was made as. None of that can be changed from inside a
+running world — changing the mode ends the round everybody is playing,
+and changing the map rebuilds the world under their feet. Leaving to
+start a different one is two presses away in the world menu.
+
+One game never closes: the lobby keeps it up whether or not anybody is
+in it. It is otherwise ordinary — listed like the rest, saying what it
+is, joined the same way.
 
 ## Running it
 
@@ -76,10 +85,12 @@ game loads and then dies.
   starting a game → `game_setup.gd`, and its twin in `lobby/lobby.py`. If
   you are writing a `match` over a kind, there is a table you should be
   adding a row to.
-- **A game is configured before it exists.** What the front page chooses
-  is sent with the create, turned into `WORLD_*` environment by the lobby
-  and applied at boot — so a world is *generated* as the map that was
-  asked for rather than reset into it afterwards. See
+- **A game is configured before it exists, and not after.** What the
+  front page chooses is sent with the create, turned into `WORLD_*`
+  environment by the lobby and applied at boot — so a world is
+  *generated* as the map that was asked for rather than reset into it
+  afterwards. The in-game menus can change what does not throw the round
+  away, and nothing else. See
   [`docs/architecture.md`](docs/architecture.md).
 - **Nothing is written to disk.** Not chunks, not players, not scores. A
   world is generated into memory at boot and dies with the process, so a

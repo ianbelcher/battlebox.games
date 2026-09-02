@@ -116,10 +116,14 @@ def free_port() -> int:
 MODES = ("creative", "battle", "ctf", "holdout")
 MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space")
 SIZES = (50, 100, 200, 400, 800)
-BOT_COUNTS = (0, 3, 5, 10, 20)
+BOT_COUNTS = (0, 3, 5, 10, 20, 40)
 TARGETS = (1, 3, 5, 10)
-BATTLE_LENGTHS = (3, 5, 8, 60)
-HOLDOUT_LENGTHS = (2, 5, 10, 60)
+TEAM_COUNTS = (2, 3, 4, 5, 6, 8)
+# ONE LIST, for every mode that has a clock. It used to be 3/5/8 for
+# battle royale and 2/5/10 for last flag standing, for no reason either
+# mode could explain — and on screen that is a row whose buttons move and
+# grey out as you change your mind about the mode.
+ROUND_LENGTHS = (3, 5, 10, 60)
 
 # The NEUTRAL baseline — what a field becomes when it arrives missing.
 # Creative, because a bare POST with no settings in it is not somebody
@@ -134,14 +138,28 @@ DEFAULT_SETTINGS = {
     "minutes": 5,
     "bots": 5,
     "target": 3,
+    "teams": 5,
     "revive": 2,
     "drop": False,
 }
 
-## What the always-on world is. It is the place to go and build in peace,
-## so it is creative, and it is the biggest of the maps because everybody
-## shares it.
-HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, map="classic", bots=5)
+# THE ALWAYS-ON WORLD IS JUST ANOTHER GAME. It is listed like any other,
+# joined like any other, and says what it is like any other. The one thing
+# that makes it special is that it does not close when the last person
+# leaves — see WORLD_IDLE_EXIT in spawn().
+#
+# It had a button of its own on the front page, which was the confusing
+# part: a big "Play now" that dropped you into a world nothing on the
+# screen had described. So it runs a battle royale across five teams with
+# a crowd of computer players in it, and it says so in the list like
+# everything else — somebody arriving alone walks into a game that is
+# already happening rather than into an empty field.
+#
+# The bot count is `--house-bots` rather than a constant because it is the
+# one number here that costs CPU: every one of them pathfinds on that
+# room's single thread.
+HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, mode="battle", map="classic",
+                      teams=5, minutes=10)
 
 
 def _snap(raw: dict, field: str, allowed, fallback):
@@ -170,8 +188,9 @@ def clean_settings(raw: object) -> dict:
     out["size"] = _snap(raw, "size", SIZES, DEFAULT_SETTINGS["size"])
     out["bots"] = _snap(raw, "bots", BOT_COUNTS, DEFAULT_SETTINGS["bots"])
     out["target"] = _snap(raw, "target", TARGETS, DEFAULT_SETTINGS["target"])
-    lengths = HOLDOUT_LENGTHS if out["mode"] == "holdout" else BATTLE_LENGTHS
-    out["minutes"] = _snap(raw, "minutes", lengths, DEFAULT_SETTINGS["minutes"])
+    out["teams"] = _snap(raw, "teams", TEAM_COUNTS, DEFAULT_SETTINGS["teams"])
+    out["minutes"] = _snap(raw, "minutes", ROUND_LENGTHS,
+                           DEFAULT_SETTINGS["minutes"])
     # The revive ladder is a range (none / team-mates / and your flag),
     # so it clamps rather than snapping.
     try:
@@ -202,6 +221,7 @@ def settings_env(settings: dict) -> dict:
         "WORLD_ROUND_MINUTES": str(clean["minutes"]),
         "WORLD_BOTS": str(clean["bots"]),
         "WORLD_CTF_TARGET": str(clean["target"]),
+        "WORLD_TEAMS": str(clean["teams"]),
         "WORLD_REVIVE": str(clean["revive"]),
         "WORLD_DROP_KO": "1" if clean["drop"] else "0",
     }
@@ -218,19 +238,21 @@ def clean_name(raw: str) -> str:
 
 class Lobby:
     def __init__(self, server_binary: str, max_rooms: int, idle_exit: int,
-                 world_size: int) -> None:
+                 world_size: int, house_bots: int = 20) -> None:
         self.server_binary = server_binary
         self.max_rooms = max_rooms
         self.idle_exit = idle_exit
         self.world_size = world_size
+        self.house_bots = house_bots
         self.rooms: dict[str, Room] = {}
 
     # -- room lifecycle ------------------------------------------------
 
     async def start_house(self) -> None:
-        """The always-on public game. There is always somewhere to play,
-        and its Play button never has to wait for a process to boot."""
-        settings = dict(HOUSE_SETTINGS, size=self.world_size)
+        """The always-on game. There is always somewhere to play, and it
+        is up before anybody asks for it."""
+        settings = dict(HOUSE_SETTINGS, size=self.world_size,
+                        bots=self.house_bots)
         await self.spawn(HOUSE_CODE, "BattleBox", True, house=True,
                          settings=settings)
 
@@ -497,7 +519,8 @@ async def _respond(writer: asyncio.StreamWriter, status: int, payload: dict) -> 
 
 
 async def serve(args: argparse.Namespace) -> None:
-    lobby = Lobby(args.server, args.max_rooms, args.idle_exit, args.world_size)
+    lobby = Lobby(args.server, args.max_rooms, args.idle_exit, args.world_size,
+                  args.house_bots)
     if not args.no_house:
         await lobby.start_house()
     asyncio.create_task(lobby.reap_forever())
@@ -524,6 +547,13 @@ def main(argv: list[str] | None = None) -> int:
                         default=int(os.environ.get("LOBBY_IDLE_EXIT", DEFAULT_IDLE_EXIT)))
     parser.add_argument("--world-size", type=int,
                         default=int(os.environ.get("WORLD_SIZE", "250")))
+    parser.add_argument(
+        "--house-bots", type=int,
+        default=int(os.environ.get("LOBBY_HOUSE_BOTS", "20")),
+        help="computer players in the always-on game. Every one of them "
+             "pathfinds on that room's single thread, so this is the "
+             "number to turn down if the shared world gets choppy",
+    )
     parser.add_argument("--no-house", action="store_true",
                         help="do not start the always-on public game (tests)")
     args = parser.parse_args(argv)

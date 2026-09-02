@@ -58,12 +58,8 @@ var world: Node = null
 var _panel: PanelContainer
 var _tabs: TabContainer
 var _players_box: VBoxContainer
-var _map_row: HBoxContainer
-var _saved_label: Label
-var _saved_row: HBoxContainer
-var _mode_btns: Dictionary = {}
+var _this_game: Label
 var _length_btns: Dictionary = {}
-var _size_btns: Dictionary = {}
 var _fly_answer_btns: Dictionary = {}
 var _battle_only: Array = []
 ## Shown in any mode with knockouts (battle royale AND capture the flag).
@@ -92,9 +88,8 @@ var _pads: Array = []    # [[MarginContainer, base_margin], ...]
 var _repaint: Array = [] # Callables that redraw a control at the new scale
 var _last_scale := 0.0
 
-## What each list was last built from. Rebuild only when these change.
+## What the roster was last built from. Rebuilt only when it changes.
 var _roster_sig := ""
-var _maps_sig := ""
 
 # ------------------------------------------------------------------
 # Scale
@@ -177,10 +172,9 @@ func _apply_scale() -> void:
 				pad.add_theme_constant_override(side, UiTheme.px(int(entry[1]), sc))
 	for job: Callable in _repaint:
 		job.call()
-	# Rows carrying hand-painted styleboxes (team swatches, map buttons)
-	# are rebuilt rather than patched — this runs on window resize only,
-	# never on a timer, so it does not break the "no rebuild" rule.
-	_maps_sig = ""
+	# Rows carrying hand-painted styleboxes (the team swatches) are rebuilt
+	# rather than patched — this runs on window resize only, never on a
+	# timer, so it does not break the "no rebuild" rule.
 	_roster_sig = ""
 
 # ------------------------------------------------------------------
@@ -228,7 +222,6 @@ func _ready() -> void:
 	# and a second copy behind a modal that stops the game was never where
 	# anyone looked.
 	_build_game_tab()
-	_build_map_tab()
 	_build_players_tab()
 	_build_score_tab()
 	_build_audio_tab()
@@ -436,97 +429,28 @@ func _mark(btn: Button, on: bool) -> void:
 		btn.remove_theme_color_override("font_hover_color")
 
 # ------------------------------------------------------------------
-# Map — the world, and how play works in it (both modes)
-# ------------------------------------------------------------------
-
-func _build_map_tab() -> void:
-	var box := _tab("Map")
-	var world_card := _section(box, "World")
-	_map_row = _row(world_card)
-	_saved_label = Label.new()
-	_saved_label.text = "Your own worlds"
-	_saved_label.add_theme_color_override("font_color", UiTheme.INK_FAINT)
-	world_card.add_child(_font(_saved_label, UiTheme.T_NOTE))
-	_saved_row = _row(world_card)
-
-	# Size belongs to the MAP: it describes how play works here, in
-	# whatever mode. It used to live under Battle, which is why changing
-	# it looked like it did nothing while just building.
-	#
-	# THREE SIZES, NOT SEVEN. Fifty to three-fifty in steps of fifty is a
-	# row of near-identical numbers to choose between and no way to tell
-	# what any of them means. Doubling each time gives three that are
-	# obviously different from each other: a garden, a park, and further
-	# than anyone is going to walk.
-	var size_card := _section(box, "Size of the world")
-	var size_row := _row(size_card)
-	for arena in [50, 100, 200, 400, 800]:
-		var blocks: int = arena
-		var btn := _choice(size_row, str(arena), func() -> void:
-			if Game.world != null:
-				Game.world.sv_match_config.rpc_id(1, -1, -1, blocks))
-		_min(btn, 88, 42)
-		_size_btns[arena] = btn
-
-	# NO SERVER BOX. Typing an address into the game you reached BY its
-	# address is a question with one answer: you are already there.
-	# It was a text field a child could edit into a dead link and then
-	# be unable to get back from.
-
-func _refresh_maps() -> void:
-	if _map_row == null:
-		return
-	var current: String = str(world.client_world) if world != null else ""
-	var listed := ""
-	if world != null:
-		for entry in world.map_list:
-			listed += str(entry.key) + ","
-	var sig := current + "|" + listed
-	if sig == _maps_sig:
-		return
-	_maps_sig = sig
-	for child in _map_row.get_children():
-		child.queue_free()
-	for child in _saved_row.get_children():
-		child.queue_free()
-	for choice in [["classic", "Island"], ["desert", "Desert"], ["isles", "Isles"],
-			["castles", "Castles"], ["city", "City"], ["sky", "Skylands"],
-			["space", "Space"]]:
-		_map_row.add_child(_map_button(str(choice[0]), str(choice[1])))
-	var have: bool = world != null and not world.map_list.is_empty()
-	_saved_label.visible = have
-	_saved_row.visible = have
-	if have:
-		for entry in world.map_list:
-			_saved_row.add_child(_map_button(str(entry.key), str(entry.name)))
-
-func _map_button(key: String, label: String) -> Button:
-	var btn := _button(label, func() -> void:
-		if Game.world != null:
-			Game.world.sv_select_world.rpc_id(1, key))
-	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_min(btn, 90, 46)
-	if world != null and key == world.client_world:
-		_mark(btn, true)
-	return btn
-
-# ------------------------------------------------------------------
 # Game — what kind of game this is
 # ------------------------------------------------------------------
 
+## WHAT KIND OF GAME THIS IS, IS NOT CHANGED FROM INSIDE IT.
+##
+## There was a row of mode buttons at the top of this tab and a Map tab
+## beside it, and pressing anything in either ended the round everybody
+## was playing — and, for the map or the size, rebuilt the world under
+## their feet while they were standing on it. One person idly reading the
+## menu, everyone else's game gone.
+##
+## A game is what it was made as. The front page asks all of it before
+## the world exists (see game_setup.gd), which is the only moment any of
+## those answers is free — and going to play a different one is the card
+## at the foot of this tab.
+##
+## What is left here is everything that can be changed WITHOUT throwing
+## the round away: how you get back up, what happens when you are knocked
+## out, what it takes to win, and how long a round runs.
 func _build_game_tab() -> void:
 	var box := _tab("Game")
-	var mode_card := _section(box, "How are we playing?")
-	var mode_row := _row(mode_card)
-	for spec in [["creative", "🔨  Just building"], ["battle", "🏆  Battle royale"],
-			["ctf", "⚑  Capture the flag"],
-			["holdout", "🛡  Last flag"]]:
-		var key := str(spec[0])
-		var btn := _choice(mode_row, str(spec[1]), func() -> void:
-			if Game.world != null:
-				Game.world.sv_set_mode.rpc_id(1, key), UiTheme.T_TITLE - 8)
-		_min(btn, 150, 62)
-		_mode_btns[key] = btn
+	_build_this_game_card(box)
 
 	# Knockouts work the same way in every mode that HAS them, so these sit
 	# above the per-mode settings and show for all of them.
@@ -591,7 +515,7 @@ func _build_game_tab() -> void:
 	# constant: ten minutes, every round, with no way to say otherwise.
 	var hold_len := _section(hold_group, "How long a round lasts")
 	var hold_len_row := _row(hold_len)
-	for mins_v: int in HoldoutRules.LENGTHS:
+	for mins_v: int in GameSetup.ROUND_LENGTHS:
 		var hold_mins: int = mins_v
 		var btn6 := _choice(hold_len_row, HoldoutRules.length_label(hold_mins),
 			func() -> void:
@@ -618,14 +542,42 @@ func _build_game_tab() -> void:
 	_build_leaving_card(box)
 	var len_card := _section(len_group, "How long a battle lasts")
 	var len_row := _row(len_card)
-	for preset in [[3, "3 min"], [5, "5 min"], [8, "8 min"], [60, "Unlimited"]]:
-		var minutes: int = preset[0]
-		var btn := _choice(len_row, str(preset[1]), func() -> void:
+	for minutes_v: int in GameSetup.ROUND_LENGTHS:
+		var minutes: int = minutes_v
+		var btn := _choice(len_row, GameSetup.length_label(minutes), func() -> void:
 			if Game.world != null:
 				Game.world.sv_match_config.rpc_id(1, minutes, -1))
 		_min(btn, 120, 46)
 		_length_btns[minutes] = btn
 
+
+## WHAT THIS GAME IS, as a sentence rather than as a row of buttons.
+##
+## The mode and the map are still worth KNOWING from in here — somebody
+## who joined by a link has no idea what they walked into — they are just
+## not worth being able to change.
+func _build_this_game_card(box: Control) -> void:
+	var card := _section(box, "This game")
+	_this_game = Label.new()
+	_this_game.add_theme_color_override("font_color", UiTheme.INK)
+	_this_game.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card.add_child(_font(_this_game, UiTheme.T_BODY))
+	var note := Label.new()
+	note.text = "Chosen when the game was made."
+	note.add_theme_color_override("font_color", UiTheme.INK_FAINT)
+	card.add_child(_font(note, UiTheme.T_NOTE))
+
+func _refresh_this_game() -> void:
+	if _this_game == null or world == null:
+		return
+	var mode := str(world.client_mode)
+	var parts: Array = [GameSetup.mode_label(mode)]
+	var map_key := str(world.client_world)
+	if not map_key.is_empty():
+		parts.append(GameSetup.map_label(map_key))
+	if world.client_size > 0:
+		parts.append("%d across" % int(world.client_size))
+	_this_game.text = " · ".join(parts)
 
 ## THE WAY OUT, and it is at the foot of the tab that changes the game
 ## on purpose.
@@ -1349,19 +1301,14 @@ func _refresh(force := false) -> void:
 	if not visible:
 		return
 	if force:
-		_maps_sig = ""
 		_roster_sig = ""
-	_refresh_maps()
 	_refresh_players()
 	_refresh_live_score()
 	if world == null:
 		return
-	for key: String in _mode_btns:
-		_mark(_mode_btns[key], key == world.client_mode)
+	_refresh_this_game()
 	for minutes: int in _length_btns:
 		_mark(_length_btns[minutes], minutes == world.client_minutes)
-	for arena: int in _size_btns:
-		_mark(_size_btns[arena], arena == world.client_size)
 	for answer: String in _fly_answer_btns:
 		_mark(_fly_answer_btns[answer], answer == world.fly_answer())
 	var battling: bool = world.client_mode == "battle"

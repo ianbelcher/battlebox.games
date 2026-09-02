@@ -49,6 +49,16 @@ const HERO_WIDTH := 620
 const LIST_WIDTH := 560
 ## The setup screen's panel.
 const SETUP_WIDTH := 940
+## The bar pinned to the bottom of the setup screen: the button in it, and
+## the air above and below. Its HEIGHT is these added up rather than a
+## number of its own — it was 96, which is not 60 plus 18 twice, so the
+## button sat two pixels nearer the top than the bottom. Two pixels is
+## invisible until you look at it, and then it is all you can see.
+const BAR_PAD := 18
+const BAR_BUTTON := 60
+
+func _bar_height() -> int:
+	return _px(BAR_BUTTON) + _px(BAR_PAD) * 2 + maxi(1, int(round(_scale)))
 ## Room around the columns, and between them. Design pixels.
 const PAGE_MARGIN := 40
 const COLUMN_GAP := 56
@@ -65,7 +75,6 @@ var _code_panel: Control
 var _games_box: VBoxContainer
 var _games_note: Label
 var _status: Label
-var _house_players: Label
 var _play_button: Button
 var _code_edit: LineEdit
 var _split_row: BoxContainer
@@ -75,11 +84,8 @@ var _list_offset: Control
 
 # --- new game ---
 var _name_edit: LineEdit
-var _private_button: Button
 var _create_button: Button
-var _summary_label: Label
 var _wanted: Dictionary = {}
-var _private := false
 ## field name -> {value: Button}. Repainted, never rebuilt.
 var _choices: Dictionary = {}
 ## field name -> the whole labelled group, hidden when the mode has no
@@ -101,6 +107,12 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_scale = UiTheme.scale_for(get_viewport_rect().size)
 	_wanted = GameSetup.opening_choice()
+	# The screen's own answer, alongside the game's. Public by default: a
+	# game nobody can find is the surprising choice. Set HERE rather than
+	# left absent, because an absent value matches neither chip and the
+	# row opens with nothing lit — which reads as a question you have not
+	# answered yet rather than one that has an answer.
+	_wanted["private"] = false
 	_api = LobbyClient.new()
 	add_child(_api)
 	_api.rooms_listed.connect(_show_rooms)
@@ -228,16 +240,7 @@ func _build_hero() -> Control:
 	# that has come apart rather than as two columns.
 	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 
-	# THE WORDMARK, in two colours and one word. Two labels rather than
-	# rich text: the split has to land between the same two syllables at
-	# every scale, and a BBCode parse is a thing that can go wrong on a
-	# screen whose whole job is a first impression.
-	var mark := HBoxContainer.new()
-	mark.add_theme_constant_override("separation", 0)
-	mark.add_child(_display("BATTLE", UiTheme.T_DISPLAY, UiTheme.INK))
-	mark.add_child(_display("BOX", UiTheme.T_DISPLAY, UiTheme.ACCENT))
-	column.add_child(mark)
-
+	column.add_child(_wordmark())
 	column.add_child(_text("Build. Battle. Be the last one standing.",
 		UiTheme.T_BODY + 2, UiTheme.INK_DIM))
 	column.add_child(_gap(18))
@@ -246,8 +249,17 @@ func _build_hero() -> Control:
 	buttons.add_theme_constant_override("separation", _px(12))
 	column.add_child(buttons)
 
-	_play_button = _primary_button("Play now", UiTheme.T_TITLE)
-	_play_button.pressed.connect(func() -> void: _join(Room.HOUSE_CODE, "BattleBox"))
+	# ONE BUTTON, and it starts a game.
+	#
+	# There were two: "Play now", which dropped you into the always-on
+	# world, and "New game" beside it. The first was the confusing one —
+	# a big primary button that made you a world nothing on the screen had
+	# described, so on a quiet evening the front page's main action was
+	# "here is a random game". The always-on world is in the list now,
+	# saying what it is like every other game, and this button does the
+	# thing the screen is for.
+	_play_button = _primary_button("Start a game", UiTheme.T_TITLE)
+	_play_button.pressed.connect(_open_setup)
 	buttons.add_child(_play_button)
 	# DEFERRED, because this column is not in the tree yet — it is being
 	# built and gets added by the caller. grab_focus() on a node outside
@@ -256,16 +268,7 @@ func _build_hero() -> Control:
 	# or Ⓐ doing the obvious thing without anyone reading a word.
 	_play_button.call_deferred("grab_focus")
 
-	var new_game := _ghost_button("New game", UiTheme.T_BODY + 2)
-	new_game.custom_minimum_size = Vector2(_px(180), _px(78))
-	new_game.pressed.connect(_open_setup)
-	buttons.add_child(new_game)
-
 	column.add_child(_gap(10))
-	_house_players = _text("the world everyone shares", UiTheme.T_NOTE,
-		UiTheme.INK_FAINT)
-	column.add_child(_house_players)
-
 	_status = _text("", UiTheme.T_NOTE, UiTheme.ACCENT)
 	_status.visible = false
 	column.add_child(_status)
@@ -273,6 +276,13 @@ func _build_hero() -> Control:
 	column.add_child(_gap(22))
 	column.add_child(_build_join_row())
 	return column
+
+## THE NAME OF THE GAME, as the neon sign the intro ends on. See
+## neon_wordmark.gd — the front page used to say it in the same plain sans
+## as the settings underneath, which is the game introducing itself in a
+## voice it does not have anywhere else.
+func _wordmark() -> Control:
+	return NeonWordmark.new("BattleBox").setup(UiTheme.T_DISPLAY, _scale)
 
 ## Somebody read you a code. Small, because it is the least common way in
 ## and it used to be a full-width form field with a heading over it.
@@ -336,14 +346,10 @@ func _build_games_panel() -> Control:
 func _show_rooms(rooms: Array) -> void:
 	for child in _games_box.get_children():
 		child.queue_free()
-	var others: Array = []
-	for entry: Dictionary in rooms:
-		if str(entry.get("code", "")) == Room.HOUSE_CODE:
-			if _house_players != null:
-				var who := _people_in(entry)
-				_house_players.text = _crowd(who[0], who[1])
-		else:
-			others.append(entry)
+	# THE ALWAYS-ON WORLD IS IN THE LIST. It used to be lifted out and
+	# given a button of its own, which meant the one game guaranteed to be
+	# running was the one game the screen never described.
+	var others: Array = rooms
 	if others.is_empty():
 		# A titled hole reads as something that failed to load. An empty
 		# list is a normal state and gets a box of its own saying so.
@@ -398,9 +404,15 @@ func _room_row(entry: Dictionary) -> Button:
 	# none of the questions somebody choosing between two games is asking.
 	# A room that did not report its settings — an older one — gets its
 	# code instead of a made-up description.
+	# WHAT THE GAME IS, and not how many computer players are in it. That
+	# ran the line past the end of the card and into an ellipsis — and it
+	# is not why anybody picks a game anyway. How many PEOPLE are in there
+	# is, and that is on the right of this row in mint.
 	var what := GameSetup.summary(entry.get("settings", {}))
-	if bots > 0 and not what.is_empty():
-		what += " · %s" % GameSetup.bots_label(bots)
+	# The one game that is always there says so, because "why is this one
+	# always at the top" is otherwise a question with no answer on screen.
+	if bool(entry.get("house", false)):
+		what = "Always open · " + what if not what.is_empty() else "Always open"
 	names.add_child(_row_label(what if not what.is_empty() else code,
 		UiTheme.T_NOTE, UiTheme.INK_FAINT))
 
@@ -484,7 +496,7 @@ func _build_setup() -> Control:
 
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	scroll.offset_bottom = -_px(96)
+	scroll.offset_bottom = -_bar_height()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root.add_child(scroll)
 
@@ -514,8 +526,6 @@ func _build_setup() -> Control:
 	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(titles)
 	titles.add_child(_display("New game", UiTheme.T_TITLE + 6, UiTheme.INK))
-	titles.add_child(_text("Set it up here, then you are in it.",
-		UiTheme.T_LABEL, UiTheme.INK_DIM))
 	var back := _ghost_button("Back", UiTheme.T_LABEL)
 	back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	back.pressed.connect(_close_setup)
@@ -530,13 +540,16 @@ func _build_setup() -> Control:
 	_name_edit.max_length = 32
 	_name_edit.text_submitted.connect(func(_t: String) -> void: _create())
 	name_row.add_child(_name_edit)
-	# A BUTTON, NOT A CHECKBOX. The old one was a ☐ glyph the size of a
-	# full stop with a sentence beside it that changed when you clicked
-	# it, so there was no way to tell the two states apart across a room.
-	_private_button = _ghost_button("Anyone can join", UiTheme.T_LABEL)
-	_private_button.custom_minimum_size = Vector2(_px(230), _px(CONTROL_HEIGHT))
-	_private_button.pressed.connect(_toggle_private)
-	name_row.add_child(_private_button)
+	name_card.add_child(_gap(2))
+	# TWO CHOICES SIDE BY SIDE, like every other setting on this screen.
+	#
+	# It was one button with the current state written on it, which is a
+	# control nobody can read: "Anyone can join" is equally plausibly what
+	# is true now and what pressing it will do. Every other answer on this
+	# page is a row you pick from, and this is an answer like any other.
+	_build_choice_field(name_card, "private", "Who can join?", [
+		{"value": false, "label": "Anyone can join"},
+		{"value": true, "label": "Private — only with the code"}], "")
 
 	# --- the mode, and then everything the mode implies ---------------
 	_build_mode_field(column)
@@ -547,8 +560,9 @@ func _build_setup() -> Control:
 		_length_options(), "")
 	_build_choice_field(column, "target", "Captures to win",
 		_target_options(), "")
+	_build_choice_field(column, "teams", "How many teams?", _team_options(), "")
 	_build_choice_field(column, "bots", "Computer players",
-		_bot_options(), "They are in the world before anybody arrives.")
+		_bot_options(), "")
 	_build_choice_field(column, "revive", "Getting back up",
 		_revive_options(), "")
 	_build_choice_field(column, "drop", "When you are knocked out",
@@ -564,36 +578,42 @@ func _build_setup() -> Control:
 func _build_action_bar() -> Control:
 	var bar := PanelContainer.new()
 	bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	bar.offset_top = -_px(96)
+	bar.offset_top = -_bar_height()
 	var box := UiTheme.flat(UiTheme.SURFACE, 0, _scale)
-	box.border_width_top = maxi(1, int(round(_scale)))
+	var rule := maxi(1, int(round(_scale)))
+	box.border_width_top = rule
 	box.border_color = UiTheme.LINE
-	box.content_margin_left = _px(40)
-	box.content_margin_right = _px(40)
-	box.content_margin_top = _px(18)
-	box.content_margin_bottom = _px(18)
+	box.content_margin_left = _px(PAGE_MARGIN)
+	box.content_margin_right = _px(PAGE_MARGIN)
+	# THE SAME ABOVE AND BELOW. The bar is a fixed height with one button
+	# centred in it, and unequal margins tipped the button off centre by a
+	# few pixels — which is exactly the sort of thing that reads as
+	# "slightly wrong" without anybody being able to say why.
+	# The hairline along the top is drawn INSIDE the box, over the content
+	# area, so the top margin has to step past it or the button sits one
+	# pixel higher than it sits low.
+	box.content_margin_top = _px(BAR_PAD) + rule
+	box.content_margin_bottom = _px(BAR_PAD)
 	bar.add_theme_stylebox_override("panel", box)
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", _px(20))
 	bar.add_child(row)
 
-	var words := VBoxContainer.new()
-	words.add_theme_constant_override("separation", _px(2))
-	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(words)
-	words.add_child(_eyebrow("You are about to start"))
-	# READ BACK WHAT WAS CHOSEN. Half these settings are two screens of
-	# scrolling apart by the time you reach the button, and a sentence
-	# saying what you actually picked is the difference between pressing
-	# it and scrolling back up to check.
-	_summary_label = _text("", UiTheme.T_BODY, UiTheme.INK)
-	words.add_child(_summary_label)
+	# NO SUMMARY LINE. It read back the settings you had just chosen —
+	# "Battle royale · Island · 200 across · 5 min" — three centimetres
+	# under the buttons that say the same thing, highlighted. Nobody
+	# checks a sentence when the answers themselves are on screen.
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
 
 	_create_button = _primary_button("Create and play", UiTheme.T_TITLE - 6)
-	_create_button.custom_minimum_size = Vector2(_px(300), _px(60))
-	_create_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_create_button.custom_minimum_size = Vector2(_px(300), _px(BAR_BUTTON))
+	# FILL, not shrink-centre: the bar is exactly the button plus its
+	# padding, so filling the space IS being centred in it, and there is
+	# no rounding left over to land on one side.
+	_create_button.size_flags_vertical = Control.SIZE_FILL
 	_create_button.pressed.connect(_create)
 	row.add_child(_create_button)
 	return bar
@@ -618,8 +638,7 @@ func _build_map_field(parent: Control) -> void:
 	var options: Array = []
 	for spec: Dictionary in GameSetup.MAPS:
 		options.append({"value": str(spec["key"]), "label": str(spec["label"])})
-	_build_choice_field(parent, "map", "Which world?", options,
-		"Worlds you have imported are still in the world menu, once you are in.")
+	_build_choice_field(parent, "map", "Which world?", options, "")
 
 ## A labelled row of one-out-of-several buttons. Every field below the
 ## mode is one of these, which is what keeps them all the same size, the
@@ -670,6 +689,12 @@ func _target_options() -> Array:
 		out.append({"value": target, "label": "First to %d" % target})
 	return out
 
+func _team_options() -> Array:
+	var out: Array = []
+	for count: int in GameSetup.TEAM_COUNTS:
+		out.append({"value": count, "label": GameSetup.teams_label(count)})
+	return out
+
 func _bot_options() -> Array:
 	var out: Array = []
 	for count: int in GameSetup.BOT_COUNTS:
@@ -691,10 +716,12 @@ func _drop_options() -> Array:
 func _pick(field: String, value: Variant) -> void:
 	_wanted[field] = value
 	if field == "mode":
-		# A length from the other mode's list is not a length. Snapping
-		# through clean() is what stops "10 min" surviving a switch from
-		# last flag standing into battle royale, where it does not exist.
+		# Snapped back onto the table, so nothing survives a mode change
+		# that the new mode has no button for. `private` is the screen's
+		# own and is carried across by hand.
+		var mine: bool = bool(_wanted.get("private", false))
 		_wanted = GameSetup.clean(_wanted)
+		_wanted["private"] = mine
 	_refresh_setup()
 	Sfx.play("tick", -8.0)
 
@@ -706,7 +733,10 @@ func _refresh_setup() -> void:
 	for field: String in _choices:
 		var group: Control = _groups.get(field)
 		if group != null:
-			group.visible = GameSetup.uses(field, mode)
+			# `private` is the screen's own answer rather than one of the
+			# game's, so GameSetup has no opinion about it and it is
+			# always asked.
+			group.visible = field == "private" or GameSetup.uses(field, mode)
 		var buttons: Dictionary = _choices[field]
 		for value: Variant in buttons:
 			_paint_choice(buttons[value], value == _wanted.get(field))
@@ -719,35 +749,7 @@ func _refresh_setup() -> void:
 		for value: Variant in _choices["minutes"]:
 			var btn: Button = _choices["minutes"][value]
 			btn.disabled = not (int(value) in allowed)
-	if _private_button != null:
-		_private_button.text = "  Private — code only  " if _private \
-			else "  Anyone can join  "
-		_paint_choice(_private_button, _private)
-	if _summary_label != null:
-		_summary_label.text = _describe_wanted(mode)
 
-## The whole game in one line, for the bar at the bottom. Only the parts
-## this mode actually has — a creative world has no round length, and
-## printing one would be describing a setting that is not going to apply.
-func _describe_wanted(mode: String) -> String:
-	var parts: Array = [GameSetup.mode_label(mode),
-		GameSetup.map_label(str(_wanted.get("map", ""))),
-		"%d across" % int(_wanted.get("size", 0))]
-	if GameSetup.uses("minutes", mode):
-		parts.append(GameSetup.length_label(int(_wanted.get("minutes", 0))))
-	if GameSetup.uses("target", mode):
-		parts.append("first to %d" % int(_wanted.get("target", 0)))
-	parts.append(GameSetup.bots_label(int(_wanted.get("bots", 0))))
-	if _private:
-		parts.append("private")
-	return " · ".join(parts)
-
-func _toggle_private() -> void:
-	# Public by default: a game nobody can find is the surprising choice,
-	# and hiding one should be a deliberate act.
-	_private = not _private
-	_refresh_setup()
-	Sfx.play("tick", -8.0)
 
 ## Back to the front, from outside. main.gd calls this when somebody
 ## leaves a game: the screen may have been left on the setup sheet or on
@@ -858,8 +860,10 @@ func _create() -> void:
 	# An unnamed game is not an error: the lobby names it after its code,
 	# which is a perfectly good name and one less thing to demand of a
 	# child who just wants to play.
-	_api.create_room(_name_edit.text.strip_edges(), not _private,
-		GameSetup.clean(_wanted))
+	# Public by default: a game nobody can find is the surprising choice,
+	# and hiding one should be a deliberate act.
+	_api.create_room(_name_edit.text.strip_edges(),
+		not bool(_wanted.get("private", false)), GameSetup.clean(_wanted))
 
 func _join_typed() -> void:
 	var code := _code_edit.text.strip_edges().to_lower()
@@ -1063,13 +1067,27 @@ func _field(placeholder: String) -> LineEdit:
 	edit.add_theme_color_override("font_color", UiTheme.INK)
 	edit.add_theme_color_override("font_placeholder_color", UiTheme.INK_FAINT)
 	edit.add_theme_color_override("caret_color", UiTheme.ACCENT)
+	# ROOM INSIDE THE BOX. UiTheme.flat() has no content margins, so text
+	# and placeholder alike started hard against the left border — "name
+	# your game (optional)" with its first letter touching the edge. The
+	# theme's own LineEdit box has always had padding; these overrides
+	# threw it away.
 	edit.add_theme_stylebox_override("normal",
-		UiTheme.flat(Color(0, 0, 0, 0.30), UiTheme.R_CONTROL, _scale, 1.0,
-			UiTheme.LINE))
+		_field_box(1.0, UiTheme.LINE))
 	edit.add_theme_stylebox_override("focus",
-		UiTheme.flat(Color(0, 0, 0, 0.30), UiTheme.R_CONTROL, _scale, 2.0,
-			UiTheme.ACCENT))
+		_field_box(2.0, UiTheme.ACCENT))
+	edit.add_theme_stylebox_override("read_only",
+		_field_box(1.0, UiTheme.LINE))
 	return edit
+
+func _field_box(border: float, edge: Color) -> StyleBoxFlat:
+	var box := UiTheme.flat(Color(0, 0, 0, 0.30), UiTheme.R_CONTROL, _scale,
+		border, edge)
+	box.content_margin_left = _px(14)
+	box.content_margin_right = _px(14)
+	box.content_margin_top = _px(8)
+	box.content_margin_bottom = _px(8)
+	return box
 
 ## THE ONE BUTTON THE SCREEN IS BUILT AROUND. Ember, filled, dark text on
 ## it, and the only thing painted that colour anywhere on the page.

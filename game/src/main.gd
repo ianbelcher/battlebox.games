@@ -119,9 +119,15 @@ func _ready() -> void:
 	# stays — this machine is still watching the world, it just has
 	# nobody in it.
 	Game.all_local_left.connect(func() -> void:
+		# NO BANNER. This used to raise a sticky one across the middle of
+		# the screen at 40px times the UI scale — on a 4K television, most
+		# of a hand's width of gold text — saying the same thing the empty
+		# split-screen cell behind it already says in its own prompt (see
+		# SplitScreen: "Press SPACE or a gamepad's A button to jump in!").
+		# Two copies of one instruction, the louder one covering the view
+		# you would be jumping into.
 		if _split != null:
-			_split.update_layout()
-		_show_banner("You left the game — press Ⓐ or Space to join again", true))
+			_split.update_layout())
 	# A room named on the way in — a shared link, or a test harness — skips
 	# the lobby entirely and goes straight to that game. Otherwise the
 	# lobby is the first screen, with Play focused so that Space, Enter or

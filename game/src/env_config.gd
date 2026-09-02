@@ -43,6 +43,7 @@ const KNOWN := {
 	"WORLD_ROUND_MINUTES": "how long a round of battle royale or last flag standing runs",
 	"WORLD_BOTS": "computer players waiting in the world at boot",
 	"WORLD_CTF_TARGET": "captures needed to win capture the flag",
+	"WORLD_TEAMS": "how many sides the game is played across",
 	"WORLD_REVIVE": "0 nobody · 1 team-mates · 2 team-mates and your own flag",
 	"WORLD_DROP_KO": "1 drops your weapons where you fell",
 

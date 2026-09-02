@@ -34,12 +34,12 @@ const ROUND_POINTS := 6
 ## WorldNode.holdout_minutes — and this is what a fresh world starts on.
 const ROUND_MINUTES := 10.0
 
-## What the grown-up can choose, in minutes. "Unlimited" is an hour: long
-## enough that no round of this reaches it, and a real number so the clock
-## on screen, the scoring at the whistle and the last push all keep
-## working rather than needing a special case each.
-const LENGTHS := [2, 5, 10, 60]
-const UNLIMITED := 60
+## What the grown-up can choose, in minutes — and it is the same list
+## every clocked mode offers, because there was never a reason for last
+## flag standing and battle royale to disagree about how long a round is.
+## GameSetup owns it; this is the name the mode's own code reads it by.
+const LENGTHS := GameSetup.ROUND_LENGTHS
+const UNLIMITED := GameSetup.UNLIMITED
 
 static func length_label(minutes: int) -> String:
 	return "Unlimited" if minutes >= UNLIMITED else "%d min" % minutes

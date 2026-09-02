@@ -76,7 +76,9 @@ const DANGER     := Color("ff5c5c")
 
 ## Type scale, design px. Anything that puts a number in a font size
 ## override should take it from here instead of making one up.
-const T_DISPLAY := 58
+## The wordmark, and nothing else. Big, because it is the only thing on
+## the front page that is allowed to be.
+const T_DISPLAY := 104
 const T_TITLE   := 30
 const T_TAB     := 21
 const T_HEADING := 17

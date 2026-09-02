@@ -28,7 +28,7 @@ class_name GameSetup
 
 ## The keys a settings dictionary holds. Anything else is dropped.
 const FIELDS := ["mode", "map", "size", "minutes", "bots", "target",
-	"revive", "drop"]
+	"teams", "revive", "drop"]
 
 ## HOW ARE WE PLAYING. `note` is the one line under the name on the tile —
 ## what the mode IS, in the words a child would use, not its rules.
@@ -68,17 +68,29 @@ const SIZES := [
 ## SOMEBODY TO PLAY AGAINST from the first second. A world with nobody in
 ## it is a field, and the first child in is alone in it until a grown-up
 ## finds the Players tab.
-const BOT_COUNTS := [0, 3, 5, 10, 20]
+const BOT_COUNTS := [0, 3, 5, 10, 20, 40]
 
 ## Captures to win, in capture the flag.
 const TARGETS := [1, 3, 5, 10]
 
-## Round lengths per mode, in minutes. Battle royale and last flag
-## standing each already had their own list and they are NOT the same
-## list — this keeps them apart rather than averaging them into one that
-## suits neither.
-const BATTLE_LENGTHS := [3, 5, 8, 60]
+## HOW LONG A ROUND RUNS, in minutes. ONE LIST, for every mode that has a
+## clock.
+##
+## It used to be two — 3/5/8 for battle royale and 2/5/10 for last flag
+## standing — for no reason either mode could explain. On screen that is a
+## row whose buttons move and grey out as you change your mind about the
+## mode, which reads as a fault. "Why do we have different timers for
+## battle royale and last flag?" — no reason, and now we do not.
+const ROUND_LENGTHS := [3, 5, 10, 60]
+## An hour, which is longer than any round of this ever runs. A real
+## number rather than a special case, so the clock on screen, the scoring
+## at the whistle and the last push all keep working.
 const UNLIMITED := 60
+
+## HOW MANY SIDES. A property of the game rather than of the room it is
+## played in, so it is chosen here with everything else — and computer
+## players are spread across them at boot.
+const TEAM_COUNTS := [2, 3, 4, 5, 6, 8]
 
 ## THE NEUTRAL BASELINE, not what the New game screen opens on — see
 ## opening_choice(). It is creative because that is what a room created
@@ -92,6 +104,9 @@ const DEFAULT_SIZE := 200
 const DEFAULT_MINUTES := 5
 const DEFAULT_BOTS := 5
 const DEFAULT_TARGET := 3
+## Five is enough colours for a table of children to each want a
+## different one, and with a cap of a hundred players it is twenty a side.
+const DEFAULT_TEAMS := 5
 
 ## What a game is when nothing has been said about it. This is the
 ## FALLBACK — the value every field takes when it arrives missing or
@@ -104,6 +119,7 @@ static func defaults() -> Dictionary:
 		"minutes": DEFAULT_MINUTES,
 		"bots": DEFAULT_BOTS,
 		"target": DEFAULT_TARGET,
+		"teams": DEFAULT_TEAMS,
 		"revive": ReviveRule.MATES_AND_FLAG,
 		"drop": false,
 	}
@@ -160,12 +176,17 @@ static func uses(field: String, mode: String) -> bool:
 			return has_target(mode)
 		"revive", "drop":
 			return has_knockouts(mode)
+		"teams":
+			# Nobody is on a side in creative: there is nothing to be on a
+			# side FOR, and the colours are just colours.
+			return mode != "creative"
 		_:
 			return true
 
-## The round lengths this mode offers.
-static func lengths_for(mode: String) -> Array:
-	return HoldoutRules.LENGTHS if mode == "holdout" else BATTLE_LENGTHS
+## The round lengths this mode offers. Every clocked mode offers the
+## same ones — see ROUND_LENGTHS.
+static func lengths_for(_mode: String) -> Array:
+	return ROUND_LENGTHS
 
 # ------------------------------------------------------------------
 # Labels
@@ -194,6 +215,9 @@ static func bots_label(count: int) -> String:
 	if count == 1:
 		return "1 computer player"
 	return "%d computer players" % count
+
+static func teams_label(count: int) -> String:
+	return "%d teams" % count
 
 static func _label_in(table: Array, key_name: String, wanted: String,
 		fallback: String) -> String:
@@ -244,6 +268,7 @@ static func clean(raw: Dictionary) -> Dictionary:
 	out["size"] = _snap_int(raw, "size", _values_of(SIZES), DEFAULT_SIZE)
 	out["bots"] = _snap_int(raw, "bots", BOT_COUNTS, DEFAULT_BOTS)
 	out["target"] = _snap_int(raw, "target", TARGETS, DEFAULT_TARGET)
+	out["teams"] = _snap_int(raw, "teams", TEAM_COUNTS, DEFAULT_TEAMS)
 	out["minutes"] = _snap_int(raw, "minutes", lengths_for(str(out["mode"])),
 		DEFAULT_MINUTES)
 	# The revive ladder is a range rather than a list, so it clamps.
