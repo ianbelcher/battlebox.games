@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import socket
 import sys
 import time
@@ -88,6 +89,30 @@ class Room:
 
     def alive(self) -> bool:
         return self.process is not None and self.process.returncode is None
+
+
+# ROOMS TALK THROUGH THEIR STDOUT, so their stdout has to actually come
+# out. Godot's print() goes through C stdio, which is block-buffered the
+# moment it is a pipe rather than a terminal — and a headless room with
+# nobody in it prints almost nothing, so its player count sat in a 4K
+# buffer that never filled. The room was fine; it was simply never heard.
+#
+# It only showed in production, which is what made it hard to see: run
+# from source the editor build spews warnings and other output that fill
+# the buffer for it, so the count arrives and everything looks right. The
+# exported server is quiet, and quiet is what breaks it.
+#
+# stdbuf -oL puts the child back to line buffering. It is in coreutils and
+# so is on every image this runs on, but it is looked up rather than
+# assumed: without it rooms still work, they just go back to reporting
+# late.
+_STDBUF = shutil.which("stdbuf")
+
+
+def room_argv(server_binary: str) -> list[str]:
+    """How to start one room, line-buffered where that is possible."""
+    argv = server_binary.split()
+    return ([_STDBUF, "-oL"] + argv) if _STDBUF else argv
 
 
 def free_port() -> int:
@@ -281,7 +306,7 @@ class Lobby:
             **settings_env(clean),
         )
         process = await asyncio.create_subprocess_exec(
-            *self.server_binary.split(),
+            *room_argv(self.server_binary),
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,

@@ -38,9 +38,15 @@ GAME = Path(os.environ.get("BATTLEBOX_GAME", REPO / "game"))
 LOBBY = Path(os.environ.get("BATTLEBOX_LOBBY", REPO / "lobby" / "lobby.py"))
 
 # Short enough that the reaping test does not dominate the run, long
-# enough that a room is not reaped between being created and being joined.
-IDLE_EXIT = 12
-# A small world so five rooms at once do not need a big machine.
+# enough that a room is not reaped between being created and being JOINED
+# — and joining is a whole second Godot booting from source, connecting,
+# and streaming a world, which is comfortably more than twelve seconds on
+# a machine already running three servers. At twelve the room the client
+# had been sent to reaped itself while that client was still starting up,
+# and the failure read as a broken proxy: "0 chunks".
+IDLE_EXIT = 25
+# A small world so five rooms at once do not need a big machine. This is
+# the ALWAYS-ON room's size; every other room here asks for its own.
 WORLD_SIZE = 96
 
 
@@ -92,9 +98,17 @@ def run(argv: list[str] | None = None) -> int:
         log_path = Path(scratch) / "lobby.log"
         with log_path.open("w") as sink:
             lobby = subprocess.Popen(
+                # A NEARLY EMPTY ALWAYS-ON WORLD. It runs a hundred
+                # computer players in production, and this test starts
+                # three more servers beside it on one machine — a hundred
+                # bots pathfinding on the house room's thread starved the
+                # rest of them, and what that looks like from here is a
+                # room that never appears on the list and a client that
+                # cannot get in. Nothing here is testing how busy the
+                # house is.
                 [sys.executable, str(LOBBY), "--port", str(port),
                  "--server", f"{args.godot} --headless --path {GAME}",
-                 "--idle-exit", str(IDLE_EXIT),
+                 "--idle-exit", str(IDLE_EXIT), "--house-bots", "3",
                  "--world-size", str(WORLD_SIZE)],
                 env=env, stdout=sink, stderr=subprocess.STDOUT, text=True)
             try:
@@ -146,38 +160,26 @@ def _exercise(args, base: str, port: int, checks: Checks,
     checks.that(status == 200 and len(house) == 1,
                 "the always-on public game is listed")
 
+    # A SMALL WORLD, because a real client joins this one and is asked
+    # what it can see fourteen seconds later. A new game now defaults to
+    # 400 blocks across, which is a good default and a slow one to
+    # generate and stream on a machine already running three servers —
+    # the client reported no chunks at all, which reads as a broken proxy
+    # and was a stopwatch. The private room below is left bare on purpose,
+    # so the defaults are still exercised.
     status, public_room = api(base, "/api/rooms",
-                              {"name": "Open house", "public": True})
+                              {"name": "Open house", "public": True,
+                               "settings": {"size": 100}})
     checks.that(status == 201 and public_room.get("code"),
                 f"a public game is created ({public_room.get('code')})")
-    # A GAME SET UP BEFORE IT EXISTS. The front page sends these with the
-    # create; the lobby turns them into WORLD_* environment and the room
-    # is GENERATED as that map rather than reset into it afterwards. The
-    # check that matters is the last one: not that the lobby echoed the
-    # settings back, but that the process it started actually came up as
-    # the thing that was asked for.
-    status, made = api(base, "/api/rooms",
-                       {"name": "Castle war", "public": True,
-                        "settings": {"mode": "ctf", "map": "castles",
-                                     "size": 100, "bots": 3, "target": 5}})
-    asked = made.get("settings", {})
-    checks.that(status == 201 and asked.get("mode") == "ctf"
-                and asked.get("map") == "castles",
-                f"a game is created as what was asked for ({asked})")
-    checks.that(asked.get("size") == 100 and asked.get("bots") == 3,
-                f"including its size and its computer players ({asked})")
-    _, listing = api(base, "/api/rooms")
-    listed = [r for r in listing.get("rooms", [])
-              if r.get("code") == made.get("code")]
-    checks.that(listed and listed[0].get("settings", {}).get("mode") == "ctf",
-                "and the list says what it is, so it can be chosen")
-    booted = _await_line(log_path, f"[{made.get('code')}] ROOM setup", 60)
-    checks.that("mode=ctf" in booted and "map=castles" in booted
-                and "size=100" in booted and "bots=3" in booted,
-                f"the room process really booted as that game ({booted.strip()})")
-
+    # SMALL TOO. This one is never joined, but it is generated while the
+    # client above is trying to connect, and four hundred blocks of world
+    # on a shared machine is enough CPU to push that past the twelve
+    # seconds a room waits before reaping itself. That the DEFAULT size is
+    # 400 is checked in lobby/test_lobby.py, where it costs nothing.
     status, private_room = api(base, "/api/rooms",
-                               {"name": "Just us", "public": False})
+                               {"name": "Just us", "public": False,
+                                "settings": {"size": 100}})
     checks.that(status == 201 and private_room.get("code"),
                 f"a private game is created ({private_room.get('code')})")
     checks.that(public_room.get("code") != private_room.get("code"),
@@ -208,6 +210,14 @@ def _exercise(args, base: str, port: int, checks: Checks,
                  WORLD_SELFCHECK="14"),
         capture_output=True, text=True, timeout=180)
     report = _last_selfcheck(client.stdout + client.stderr)
+    if not report:
+        # WHAT THE CLIENT ACTUALLY SAID. Without this the three checks
+        # below all fail as "None", which says only that no report was
+        # found and nothing at all about why — and the lobby log printed
+        # at the end is the wrong end of the wire.
+        print("  the client never reported. Its last words:")
+        for line in (client.stdout + client.stderr).splitlines()[-14:]:
+            print("    " + line)
     checks.that(report.get("screen") == "world",
                 "the client got into the world (not stuck on the lobby)")
     checks.that(int(report.get("chunks", 0)) >= 40,
@@ -248,6 +258,39 @@ def _exercise(args, base: str, port: int, checks: Checks,
                 f"work (focus={back.get('focus')})")
     checks.that(back.get("room") == "-",
                 f"leaving a game forgets its code (room={back.get('room')})")
+
+    # LAST, and that ordering is load-bearing. This starts a whole extra
+    # room, which is ten seconds of world generation — and a created room
+    # closes itself after IDLE_EXIT seconds of never being joined. Run
+    # before the client above, it spent the public room's entire idle
+    # window, so the room the client was sent to had already reaped itself
+    # and the failure read as a broken proxy.
+    # A GAME SET UP BEFORE IT EXISTS. The front page sends these with the
+    # create; the lobby turns them into WORLD_* environment and the room
+    # is GENERATED as that map rather than reset into it afterwards. The
+    # check that matters is the last one: not that the lobby echoed the
+    # settings back, but that the process it started actually came up as
+    # the thing that was asked for.
+    status, made = api(base, "/api/rooms",
+                       {"name": "Castle war", "public": True,
+                        "settings": {"mode": "ctf", "map": "castles",
+                                     "size": 100, "bots": 3, "target": 5}})
+    asked = made.get("settings", {})
+    checks.that(status == 201 and asked.get("mode") == "ctf"
+                and asked.get("map") == "castles",
+                f"a game is created as what was asked for ({asked})")
+    checks.that(asked.get("size") == 100 and asked.get("bots") == 3,
+                f"including its size and its computer players ({asked})")
+    _, listing = api(base, "/api/rooms")
+    listed = [r for r in listing.get("rooms", [])
+              if r.get("code") == made.get("code")]
+    checks.that(listed and listed[0].get("settings", {}).get("mode") == "ctf",
+                "and the list says what it is, so it can be chosen")
+    booted = _await_line(log_path, f"[{made.get('code')}] ROOM setup", 60)
+    checks.that("mode=ctf" in booted and "map=castles" in booted
+                and "size=100" in booted and "bots=3" in booted,
+                f"the room process really booted as that game ({booted.strip()})")
+
 
     print(f"  waiting {IDLE_EXIT + 20}s for the empty games to close...")
     time.sleep(IDLE_EXIT + 20)

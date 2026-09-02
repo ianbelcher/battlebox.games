@@ -314,6 +314,32 @@ class SettingsEnvTests(unittest.TestCase):
         self.assertEqual(lobby.settings_env({"drop": False})["WORLD_DROP_KO"], "0")
 
 
+class RoomArgvTests(unittest.TestCase):
+    """A room only reaches the lobby through its stdout, so its stdout has
+    to be line-buffered. Godot's print() is block-buffered the moment it
+    is a pipe, and an idle exported server prints so little that its
+    player count sat in the buffer forever — which is why the front page
+    showed a game with a hundred computer players in it as empty, in
+    production only."""
+
+    def test_a_room_is_started_line_buffered(self):
+        argv = lobby.room_argv("/opt/x/server.x86_64 --headless")
+        if lobby._STDBUF:
+            self.assertEqual(argv[1:3], ["-oL", "/opt/x/server.x86_64"])
+            self.assertTrue(argv[0].endswith("stdbuf"))
+        self.assertEqual(argv[-2:], ["/opt/x/server.x86_64", "--headless"])
+
+    def test_without_stdbuf_the_room_still_starts(self):
+        # Rooms report late rather than not at all, which is the right way
+        # round for something that is only ever a courtesy.
+        was = lobby._STDBUF
+        lobby._STDBUF = None
+        try:
+            self.assertEqual(lobby.room_argv("a b c"), ["a", "b", "c"])
+        finally:
+            lobby._STDBUF = was
+
+
 class HouseTests(unittest.TestCase):
     """THE ALWAYS-ON WORLD IS JUST ANOTHER GAME. It used to have a button
     of its own on the front page — a big "Play now" that dropped you into
