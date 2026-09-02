@@ -34,7 +34,8 @@ const WIDTH := 520
 func _init() -> void:
 	texture = load(ART)
 	expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
+	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 ## `menu_scale` is the scale every other control on the screen is built
@@ -45,4 +46,5 @@ func setup(menu_scale: float) -> NeonWordmark:
 	if texture != null and texture.get_width() > 0:
 		ratio = float(texture.get_height()) / float(texture.get_width())
 	custom_minimum_size = Vector2(wide, wide * ratio)
+	size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	return self
