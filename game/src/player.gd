@@ -44,6 +44,28 @@ const RIDE_SEND_HZ := 15.0
 ## short enough that walking off still feels immediate.
 const RIDE_GRACE_SECONDS := 0.2
 var _ride_grace := RIDE_GRACE_SECONDS
+## ...AND ONE MISSED FRAME IS NOT LETTING GO OF THE WHEEL.
+##
+## The same crossing of messages that HELM_RETRY_SECONDS below exists to
+## recover from — a vehicle list built before the helm was granted,
+## arriving after it, rebuilding every vehicle from a payload that says
+## nobody is driving — has a second consequence nothing covered. While
+## the list says you are not the driver, `driving()` is false, so
+## _local_move stops treating your stick as a helm and starts treating it
+## as legs: you WALK, at running pace, across the deck of the boat you are
+## steering. A few frames of that is most of a block, and then the helm
+## comes back and everything looks fine again.
+##
+## It showed up as the boat probe sliding 0.4 to 0.7 blocks, only ever on
+## a loaded server, about two runs in five — and it survived the ride
+## getting its own grace, because the ride was never what was lost.
+##
+## Longer than the ride's grace because this one waits on a round trip
+## rather than on a box test. Somebody else genuinely taking the helm
+## still takes it; they just get the wheel a third of a second before you
+## get your legs back.
+const HELM_GRACE_SECONDS := 0.35
+var _helm_grace := 0.0
 ## HOW FAR ABOVE THE FEET "room above" IS TESTED, and therefore how far a
 ## top-out has to lift you. Named because it is load-bearing in two places
 ## that have to agree: the probe below decides when a climb has reached
@@ -864,6 +886,7 @@ func _ride(delta: float) -> void:
 			world.sv_vehicle_board.rpc_id(1, ride_id, slot)
 	if ride_id.is_empty():
 		_ride_was = ""
+		_helm_grace = 0.0
 		return
 	# ASK AGAIN IF NOBODY IS DRIVING THE THING YOU ARE STANDING ON.
 	#
@@ -885,6 +908,13 @@ func _ride(delta: float) -> void:
 			world.sv_vehicle_board.rpc_id(1, ride_id, slot)
 	else:
 		_helm_ask = 0.0
+	# Fed while the list agrees we are at the wheel, and run down when it
+	# does not. Never STARTED by the grace — a helm we never held cannot
+	# be held over.
+	if view.driver_of(ride_id) == player_id:
+		_helm_grace = HELM_GRACE_SECONDS
+	else:
+		_helm_grace = maxf(0.0, _helm_grace - delta)
 	var v: Dictionary = view.at(ride_id)
 	if v.is_empty():
 		ride_id = ""
@@ -897,10 +927,17 @@ func _ride(delta: float) -> void:
 	_ride_was_yaw = v.yaw
 
 ## At the helm of the thing we are standing on.
+##
+## Held over a gap in the vehicle list — see HELM_GRACE_SECONDS. Without
+## that, a single broadcast that has not caught up with the helm grant
+## turns the driver's stick back into legs for a few frames and walks them
+## across their own deck.
 func driving() -> bool:
 	if ride_id.is_empty() or world == null or world.vehicle_view == null:
 		return false
-	return world.vehicle_view.driver_of(ride_id) == player_id
+	if world.vehicle_view.driver_of(ride_id) == player_id:
+		return true
+	return _helm_grace > 0.0
 
 func _collides(at: Vector3) -> bool:
 	var min_x := floori(at.x - HALF_WIDTH)
