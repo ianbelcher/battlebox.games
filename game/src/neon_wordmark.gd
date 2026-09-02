@@ -41,7 +41,7 @@ func _init() -> void:
 ## at; WIDTH is what it multiplies.
 func setup(menu_scale: float) -> NeonWordmark:
 	var wide := UiTheme.px(WIDTH, menu_scale)
-	var ratio := 0.25
+	var ratio := 438.0 / 2016.0
 	if texture != null and texture.get_width() > 0:
 		ratio = float(texture.get_height()) / float(texture.get_width())
 	custom_minimum_size = Vector2(wide, wide * ratio)
