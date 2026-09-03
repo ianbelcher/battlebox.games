@@ -2263,13 +2263,15 @@ func cl_downed_state(id: String, is_down: bool) -> void:
 				# be able to see that you did.
 				if fx != null:
 					fx.knockout(child.position + Vector3(0, 0.9, 0))
-				Sfx.play("pop", -4.0)
-				# ...and the floor goes with it. Somebody going out is the
-				# biggest thing that happens in a round and it sounded
-				# like a bubble popping. The same explosion everything
-				# else uses, a little louder — the separate deep rumble
-				# that used to be here is gone with the rest of them.
-				Sfx.play("boom", -5.0)
+				var ko_dist := _nearest_local_dist(child.position)
+				if ko_dist < 80.0:
+					Sfx.play("pop", -4.0 - ko_dist * 0.4)
+					# ...and the floor goes with it. Somebody going out is the
+					# biggest thing that happens in a round and it sounded
+					# like a bubble popping. The same explosion everything
+					# else uses, a little louder — the separate deep rumble
+					# that used to be here is gone with the rest of them.
+					Sfx.play("boom", -5.0 - ko_dist * 0.35)
 			if child.is_local and is_down:
 				# UP AND OUT OF IT. Ten blocks over three seconds — the
 				# same rise elimination used to give, moved to the moment
@@ -2334,7 +2336,10 @@ func cl_eliminated(id: String) -> void:
 			if not was_down:
 				if fx != null:
 					fx.knockout(child.position + Vector3(0, 0.9, 0))
-				Sfx.play("pop", -2.0)
+				var ko_dist := _nearest_local_dist(child.position)
+				if ko_dist < 80.0:
+					Sfx.play("pop", -2.0 - ko_dist * 0.4)
+					Sfx.play("boom", -5.0 - ko_dist * 0.35)
 			if child.is_local:
 				# Already down and already ten blocks up? Then the rise
 				# has been had. Doing it twice sends somebody already up there

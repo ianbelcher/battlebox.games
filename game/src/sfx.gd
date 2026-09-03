@@ -26,6 +26,12 @@ var _ambient_player: AudioStreamPlayer
 var _current_ambient := ""
 var _chirps: Array = []
 var _bird_timer: Timer
+var _cricket_chirps: Array = []
+var _cricket_timer: Timer
+var _cricket_players: Array[AudioStreamPlayer] = []
+var _cricket_next := 0
+var _cricket_phrase_left := 0
+var _cricket_cadence := 0.35
 
 func _ready() -> void:
 	for i in PLAYER_POOL:
@@ -119,6 +125,17 @@ func _ready() -> void:
 	_bird_timer.one_shot = true
 	_bird_timer.timeout.connect(_on_bird_timer)
 	add_child(_bird_timer)
+	for i in 6:
+		_cricket_chirps.append(_cricket_chirp())
+	for i in 2:
+		var cp := AudioStreamPlayer.new()
+		cp.volume_db = AMBIENT_DB
+		add_child(cp)
+		_cricket_players.append(cp)
+	_cricket_timer = Timer.new()
+	_cricket_timer.one_shot = true
+	_cricket_timer.timeout.connect(_on_cricket_timer)
+	add_child(_cricket_timer)
 
 const STABLE_PITCH := ["join", "collect", "pet", "cheer", "warp"]
 
@@ -253,8 +270,9 @@ func play(clip: String, volume_db := 0.0, pitch := 0.0) -> void:
 		player.pitch_scale = 1.0 if clip in STABLE_PITCH else randf_range(0.9, 1.1)
 	player.play()
 
-## "birds" is a scheduler, not a loop: one-shot chirps at random intervals
-## and pitches, so the forest never sings in time.
+## Ambience is a scheduler rather than a loop: birds by day, crickets by
+## night, each with variable cadence, phrases, and intervals so neither
+## ever repeats.
 func play_ambient(clip: String) -> void:
 	if clip == _current_ambient:
 		return
@@ -262,9 +280,18 @@ func play_ambient(clip: String) -> void:
 	if _ambient_player == null:
 		return
 	_bird_timer.stop()
+	if _cricket_timer != null:
+		_cricket_timer.stop()
+	for cp in _cricket_players:
+		cp.stop()
 	if clip == "birds":
 		_ambient_player.stop()
 		_on_bird_timer()
+		return
+	if clip == "crickets":
+		_ambient_player.stop()
+		_cricket_phrase_left = 0
+		_on_cricket_timer()
 		return
 	if clip.is_empty() or not _ambients.has(clip):
 		_ambient_player.stop()
@@ -282,6 +309,34 @@ func _on_bird_timer() -> void:
 	player.pitch_scale = randf_range(0.8, 1.3)
 	player.play()
 	_bird_timer.start(randf_range(0.8, 5.5))
+
+func _play_cricket_chirp() -> void:
+	if _cricket_chirps.is_empty() or _cricket_players.is_empty():
+		return
+	var player := _cricket_players[_cricket_next]
+	_cricket_next = (_cricket_next + 1) % _cricket_players.size()
+	player.stream = _cricket_chirps[randi() % _cricket_chirps.size()]
+	player.volume_db = AMBIENT_DB + randf_range(-3.0, 2.0)
+	player.pitch_scale = randf_range(0.94, 1.06)
+	player.play()
+
+func _on_cricket_timer() -> void:
+	if _current_ambient != "crickets":
+		return
+	if _cricket_phrase_left > 0:
+		_play_cricket_chirp()
+		_cricket_phrase_left -= 1
+		if _cricket_phrase_left > 0:
+			_cricket_timer.start(maxf(0.18, _cricket_cadence + randf_range(-0.025, 0.025)))
+		else:
+			var pause := randf_range(0.8, 2.4) if randf() < 0.75 else randf_range(2.4, 4.0)
+			_cricket_timer.start(pause)
+	else:
+		_cricket_phrase_left = randi_range(2, 6)
+		_cricket_cadence = randf_range(0.28, 0.50)
+		_play_cricket_chirp()
+		_cricket_phrase_left -= 1
+		_cricket_timer.start(maxf(0.18, _cricket_cadence + randf_range(-0.025, 0.025)))
 
 func _notes(notes: Array, volume: float, timbre := "bell") -> AudioStreamWAV:
 	var spec: Dictionary = TIMBRES[timbre]
@@ -340,6 +395,24 @@ func _render_note(buf: PackedFloat32Array, start_s: float, freq: float, spec: Di
 				+ h2 * sin(w * 2.0 * t) * exp(-t * decay * 0.8) \
 				+ h3 * sin(w * 3.01 * t) * exp(-t * decay * 1.6)
 		buf[start_i + s] += value * env
+
+## One randomized cricket chirp (2-4 quick pulses of high sine).
+func _cricket_chirp() -> AudioStreamWAV:
+	var pulses := randi_range(2, 4)
+	var seconds := 0.065 * (pulses - 1) + 0.04
+	var count := int(seconds * RATE)
+	var buf := PackedFloat32Array()
+	buf.resize(count)
+	var freq := randf_range(4100.0, 4800.0)
+	for pulse in pulses:
+		var pulse_start := int(pulse * 0.065 * RATE)
+		var pulse_len := int(0.032 * RATE)
+		for i in pulse_len:
+			var t := float(i) / RATE
+			var env := sin(PI * i / pulse_len)
+			if pulse_start + i < count:
+				buf[pulse_start + i] += sin(TAU * freq * t) * env * 0.4
+	return _to_wav(buf, 0.5)
 
 func _crickets(chirp_count: int) -> AudioStreamWAV:
 	var seconds := 4.0
