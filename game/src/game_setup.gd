@@ -2,8 +2,8 @@ class_name GameSetup
 ## WHAT A NEW GAME CAN BE, in one table.
 ##
 ## Everything you could once only change from inside a running world — the
-## mode, the map, how big it is, how long a round lasts, how many computer
-## players are waiting in it — is chosen HERE, before the world exists.
+## mode, the map, how big it is, how long a round lasts, how many players
+## it has seats for — is chosen HERE, before the world exists.
 ##
 ## WHY THAT IS NOT THE SAME FEATURE MOVED SIDEWAYS. A world is generated
 ## at boot from its environment and never written to disk (see
@@ -27,7 +27,7 @@ class_name GameSetup
 ## front page is not the only thing that can send one.
 
 ## The keys a settings dictionary holds. Anything else is dropped.
-const FIELDS := ["mode", "map", "size", "minutes", "bots", "target",
+const FIELDS := ["mode", "map", "size", "minutes", "players", "target",
 	"teams", "fly", "revive", "drop"]
 
 ## HOW ARE WE PLAYING. `note` is the one line under the name on the tile —
@@ -61,12 +61,19 @@ const MAPS := [
 ## what tiny meant; "50 × 50" is the world, written down.
 const SIZES := [50, 100, 200, 400, 800]
 
-## SOMEBODY TO PLAY AGAINST from the first second. A world with nobody in
-## it is a field, and the first child in is alone in it until a grown-up
-## finds the Players tab.
-## A hundred is Game.MAX_PLAYERS — a full house, and what the
-## always-on world runs with.
-const BOT_COUNTS := [0, 3, 5, 10, 20, 40, 100]
+## HOW MANY PLAYERS, counting everybody. A room has this many seats;
+## computer players fill the ones people are not sitting in, so the game
+## is the size it was made whether one child is in it or six.
+##
+## It was a count of computer players next to a count of teams — "3
+## computer players · 1 a side" — and nobody could say what that meant
+## for the game they were about to get. Now the row says how many will
+## be playing, and the teams row says how they are split.
+##
+## Zero is "just us": nobody but the people who join. A hundred is
+## Game.MAX_PLAYERS — a full house, and what the always-on world runs
+## with.
+const PLAYER_LIMITS := [0, 4, 6, 8, 10, 16, 20, 30, 50, 100]
 
 ## Captures to win, in capture the flag.
 const TARGETS := [1, 3, 5, 10]
@@ -92,9 +99,10 @@ const ROUND_LENGTHS := [3, 5, 10, 60]
 const UNLIMITED := 60
 
 ## HOW MANY SIDES. A property of the game rather than of the room it is
-## played in, so it is chosen here with everything else — and computer
-## players are spread across them at boot.
-const TEAM_COUNTS := [2, 3, 4, 5, 6, 8]
+## played in, so it is chosen here with everything else — and the seats
+## are dealt across them at boot. Up to ten: the world has twenty-four
+## colours, but a row of buttons has to end somewhere a child can read.
+const TEAM_COUNTS := [2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 ## THE NEUTRAL BASELINE, not what the New game screen opens on — see
 ## opening_choice(). It is creative because that is what a room created
@@ -108,7 +116,9 @@ const DEFAULT_MAP := "classic"
 ## somewhere to go in it.
 const DEFAULT_SIZE := 400
 const DEFAULT_MINUTES := 5
-const DEFAULT_BOTS := 5
+## Ten seats over five teams: two a side, and somebody to play against
+## from the first second.
+const DEFAULT_PLAYERS := 10
 const DEFAULT_TARGET := 3
 ## Five is enough colours for a table of children to each want a
 ## different one, and with a cap of a hundred players it is twenty a side.
@@ -123,7 +133,7 @@ static func defaults() -> Dictionary:
 		"map": DEFAULT_MAP,
 		"size": DEFAULT_SIZE,
 		"minutes": DEFAULT_MINUTES,
-		"bots": DEFAULT_BOTS,
+		"players": DEFAULT_PLAYERS,
 		"target": DEFAULT_TARGET,
 		"teams": DEFAULT_TEAMS,
 		"fly": "nobody",
@@ -213,25 +223,41 @@ static func size_label(value: int) -> String:
 static func length_label(minutes: int) -> String:
 	return "No clock" if minutes >= UNLIMITED else "%d min" % minutes
 
-## "5 computer players", and "Just us" rather than "0 computer players" —
-## a zero reads as something failing to load.
-## HOW MANY COMPUTER PLAYERS, and — because the two settings only make
-## sense together — what that works out at per side.
-##
-## "5 teams" and "100 computer players" are two numbers on two rows, and
-## reading them as one game is arithmetic somebody should not have to do:
-## the report was "I said five teams but a hundred players, so that should
-## be 20 players per team, but when I jump in it seems like there are only
-## five". Now the row says it.
-static func bots_label(count: int, teams := 0) -> String:
-	if count <= 0:
+## HOW MANY SEATS THAT COMES TO, dealt evenly across the sides: a hundred
+## over nine teams is ninety-nine, eleven a side. Never fewer than one a
+## side — four seats over eight teams is eight, or two of the teams are
+## nobody. Zero stays zero: "just us" is a room with no computer players
+## in it, however many sides it has.
+static func seats_for(limit: int, teams: int) -> int:
+	if limit <= 0:
+		return 0
+	if teams <= 1:
+		return limit
+	return maxi(1, limit / teams) * teams
+
+## "10 players  ·  2 a side", and "Just us" rather than "0 players" — a
+## zero reads as something failing to load. With a team count, what the
+## two rows add up to; without one, the number on the button.
+static func players_label(limit: int, teams := 0) -> String:
+	if limit <= 0:
 		return "Just us"
-	var each := ""
-	if teams > 1 and count >= teams:
-		each = "  ·  %d a side" % (count / teams)
-	if count == 1:
-		return "1 computer player"
-	return "%d computer players%s" % [count, each]
+	if teams > 1:
+		var seats := seats_for(limit, teams)
+		return "%d players  ·  %d a side" % [seats, seats / teams]
+	return "%d players" % limit
+
+## THE LINE UNDER THE PLAYERS ROW, which is where the two rows meet. The
+## buttons say the number you picked; this says what it comes to once it
+## is dealt across the sides — "10 players over 5 teams: 2 a side" — so
+## the arithmetic is done once, here, and not by whoever is reading.
+static func seats_note(limit: int, teams := 0) -> String:
+	if limit <= 0:
+		return "Nobody but the people who join."
+	var fill := "Computer players fill the seats people are not in."
+	if teams > 1:
+		var seats := seats_for(limit, teams)
+		return "%d players over %d teams: %d a side. %s" % [seats, teams, seats / teams, fill]
+	return fill
 
 static func teams_label(count: int) -> String:
 	return "%d teams" % count
@@ -294,7 +320,7 @@ static func clean(raw: Dictionary) -> Dictionary:
 	if _has_key(raw, MAPS, "map"):
 		out["map"] = str(raw["map"])
 	out["size"] = _snap_int(raw, "size", SIZES, DEFAULT_SIZE)
-	out["bots"] = _snap_int(raw, "bots", BOT_COUNTS, DEFAULT_BOTS)
+	out["players"] = _snap_int(raw, "players", PLAYER_LIMITS, DEFAULT_PLAYERS)
 	out["target"] = _snap_int(raw, "target", TARGETS, DEFAULT_TARGET)
 	out["teams"] = _snap_int(raw, "teams", TEAM_COUNTS, DEFAULT_TEAMS)
 	out["fly"] = str(raw.get("fly", "nobody"))

@@ -43,8 +43,8 @@ entirely from its environment and already wrote nothing to disk.
 ### A game is set up before it exists
 
 That last sentence is also what makes the front page work. Mode, map,
-world size, round length, capture target, knockout rules and how many
-computer players are waiting are all chosen on the **New game** screen,
+world size, round length, capture target, knockout rules, how many teams
+and how many players there are seats for are all chosen on the **New game** screen,
 before any process has started, and travel like this:
 
 ```

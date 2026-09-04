@@ -27,6 +27,14 @@ extends Node
 const MAX_PLAYERS := 100
 const MAX_LOCAL := 4
 
+## HOW MANY SEATS THIS ROOM HAS. Chosen before the room existed (the
+## "How many players?" row), dealt evenly across the sides at boot, and
+## moved by the host from the Players tab. Computer players fill the seats
+## people are not in — BotDirector.fill — so this, and not a bot count, is
+## the number that says how big the game is. People always get in: a
+## full room gives a person a computer player's seat, up to MAX_PLAYERS.
+var player_limit := MAX_PLAYERS
+
 ## People get animals, computers get the phonetic alphabet. Two name
 ## pools, so you can tell at a glance who is real without reading the
 ## little robot face.
@@ -443,6 +451,10 @@ func sv_register_player(slot: int, pname: String, style: Dictionary, bot := fals
 		host_peer = peer
 	print("Player joined: %s (%s), %d in world" % [pname, id, roster.size()])
 	_broadcast_roster()
+	# Somebody sat down, so a computer player stands up (if the room was
+	# full). fill() rebalances and broadcasts the roster itself.
+	if world != null and world.bots != null:
+		world.bots.fill()
 	if not bot and world != null:
 		world.auto_team(id)
 
@@ -692,6 +704,9 @@ func _on_peer_disconnected(peer: int) -> void:
 				host_peer = int(roster[id].peer)
 				break
 	_broadcast_roster()
+	# Their seat goes back to the computer players.
+	if world != null and world.bots != null:
+		world.bots.fill()
 
 ## All saved characters (sections in characters.cfg), for the picker.
 func list_profiles() -> Array:

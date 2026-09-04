@@ -214,7 +214,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_a_whole_game_survives_intact(self):
         asked = {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
-                 "bots": 10, "target": 5, "teams": 8, "fly": "humans",
+                 "players": 10, "target": 5, "teams": 8, "fly": "humans",
                  "revive": 1, "drop": True}
         self.assertEqual(lobby.clean_settings(asked), asked)
 
@@ -256,7 +256,9 @@ class SettingsTests(unittest.TestCase):
 
     def test_teams_are_part_of_the_game(self):
         self.assertEqual(lobby.clean_settings({"teams": 8})["teams"], 8)
-        self.assertEqual(lobby.clean_settings({"teams": 7})["teams"], 5)
+        self.assertEqual(lobby.clean_settings({"teams": 10})["teams"], 10)
+        self.assertEqual(lobby.clean_settings({"teams": 11})["teams"], 5)
+        self.assertEqual(lobby.clean_settings({"teams": 1})["teams"], 5)
 
     def test_the_revive_ladder_clamps_to_its_rungs(self):
         # A range rather than a list of choices, so out-of-range lands on
@@ -266,10 +268,14 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(lobby.clean_settings({"revive": -4})["revive"], 0)
         self.assertEqual(lobby.clean_settings({"revive": "yes"})["revive"], 2)
 
-    def test_bots_are_a_choice_and_none_is_one_of_them(self):
-        self.assertEqual(lobby.clean_settings({"bots": 0})["bots"], 0)
-        self.assertEqual(lobby.clean_settings({"bots": 20})["bots"], 20)
-        self.assertEqual(lobby.clean_settings({"bots": 400})["bots"], 5)
+    def test_how_many_players_is_a_choice_and_just_us_is_one_of_them(self):
+        # Seats, counting everybody: computer players fill the ones people
+        # are not in. Zero is a room with nobody but the people who join.
+        self.assertEqual(lobby.clean_settings({"players": 0})["players"], 0)
+        self.assertEqual(lobby.clean_settings({"players": 20})["players"], 20)
+        self.assertEqual(lobby.clean_settings({"players": 400})["players"], 10)
+        # The old name is not read any more: a bot count is not a size.
+        self.assertEqual(lobby.clean_settings({"bots": 40})["players"], 10)
 
 
 class SettingsEnvTests(unittest.TestCase):
@@ -278,7 +284,7 @@ class SettingsEnvTests(unittest.TestCase):
 
     def test_every_setting_reaches_the_room(self):
         env = lobby.settings_env({"mode": "holdout", "map": "sky", "size": 800,
-                                  "minutes": 3, "bots": 20, "target": 10,
+                                  "minutes": 3, "players": 20, "target": 10,
                                   "teams": 8, "fly": "everyone", "revive": 0,
                                   "drop": True})
         self.assertEqual(env["WORLD_MODE"], "holdout")
@@ -287,7 +293,7 @@ class SettingsEnvTests(unittest.TestCase):
         self.assertEqual(env["WORLD_ROUND_MINUTES"], "3")
         self.assertEqual(env["WORLD_TEAMS"], "8")
         self.assertEqual(env["WORLD_FLY"], "everyone")
-        self.assertEqual(env["WORLD_BOTS"], "20")
+        self.assertEqual(env["WORLD_PLAYERS"], "20")
         self.assertEqual(env["WORLD_CTF_TARGET"], "10")
         self.assertEqual(env["WORLD_REVIVE"], "0")
         self.assertEqual(env["WORLD_DROP_KO"], "1")
@@ -354,11 +360,11 @@ class HouseTests(unittest.TestCase):
         self.assertEqual(settings["teams"], 5)
 
     def test_the_always_on_world_can_hold_a_full_house(self):
-        # Five teams of twenty. The bot count is a flag, and 100 has to be
+        # Five teams of twenty. The seat count is a flag, and 100 has to be
         # a value clean_settings will actually accept or the always-on
         # world quietly snaps back to the default handful.
         self.assertEqual(lobby.clean_settings(
-            dict(lobby.HOUSE_SETTINGS, bots=100))["bots"], 100)
+            dict(lobby.HOUSE_SETTINGS, players=100))["players"], 100)
 
 
 class RoomSettingsJsonTests(unittest.TestCase):

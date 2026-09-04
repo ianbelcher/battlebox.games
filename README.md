@@ -9,7 +9,9 @@ whole of it — clone it and run your own.
 
 Anyone can start a game, and sets it up before going in: the mode, the
 map, how big the world is, how long a round lasts, how many teams, how
-many computer players are waiting in it, and who is allowed to fly. A public one is listed for
+many players it has seats for, and who is allowed to fly. Computer
+players fill the seats people are not in, so the game is the size it was
+made whether one child is in it or six. A public one is listed for
 everybody, with what it is written under its name; a private one gets a
 two-word code and is shared as a link. When the last player leaves, a
 created game closes itself.
@@ -23,7 +25,10 @@ friend in, and the way out to a different game.
 
 One game never closes: the lobby keeps it up whether or not anybody is
 in it. It is otherwise ordinary — listed like the rest, saying what it
-is, joined the same way.
+is, joined the same way. When the last person has been gone a couple of
+minutes it finishes its round and puts the world back the way it was
+made, so whoever comes next starts a game rather than joining the end
+of one they never saw.
 
 ## Running it
 

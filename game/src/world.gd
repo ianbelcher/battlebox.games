@@ -176,12 +176,12 @@ const TEAM_COLORS := [Color("ff5a5a"), Color("4a9df8"), Color("51c979"),
 	Color("e040e0"), Color("909020"), Color("7ec8ff"), Color("ff8a70"),
 	Color("8858d8"), Color("90e8b8"), Color("708098"), Color("ffc8a0"),
 	Color("484858")]
-## FIVE. With a cap of 50 that is ten a side, and five is also enough
-## colours for a table of children to each want a different one.
+## FIVE. Enough colours for a table of children to each want a different
+## one.
 const DEFAULT_TEAMS := 5
-## How many computer players a new world starts with. Enough for a game
-## to be a game the moment somebody walks in.
-const DEFAULT_BOTS := 5
+## How many seats a room has when nobody said. Computer players fill the
+## seats people are not sitting in — see BotDirector.fill.
+const DEFAULT_PLAYERS := GameSetup.DEFAULT_PLAYERS
 var team_count := DEFAULT_TEAMS
 var selected_map := ""
 ## "battle" = matches loop continuously · "creative" = free build/play.
@@ -216,6 +216,8 @@ func world_half() -> float:
 	return maxf(8.0, float(int(client_size) / 2))
 var match_seconds := 0.0
 var storm_radius := 0.0
+## Until the storm next changes what it is doing (see cl_storm).
+var storm_seconds := 0.0
 var storm_center := Vector3.ZERO
 
 # Client
@@ -321,15 +323,13 @@ func _server_setup() -> void:
 	if vehicles != null:
 		vehicles.stock_world()
 	# SOMEBODY TO PLAY AGAINST, without anybody having to go and ask for
-	# them. A fresh world had nobody in it at all, so the first child in
-	# is alone in a field until an adult opens the world menu and presses
-	# a button five times.
-	#
-	# Added here rather than when the first player arrives, so the number
-	# is a property of the world and not of who is looking at it — the
-	# host can add or remove them from the Players tab like any other.
-	for _i in RoomSetup.wanted_bots(DEFAULT_BOTS):
-		bots.spawn()
+	# them. A room has a number of seats, chosen with everything else
+	# before it existed, and the computer players fill whichever seats
+	# people are not sitting in — so the game is the size it was made
+	# whether one person is in it or twenty. RoomSetup dealt the seats
+	# evenly across the sides: a hundred over nine teams is ninety-nine,
+	# eleven a side.
+	bots.fill()
 	var trim := Timer.new()
 	trim.wait_time = CACHE_TRIM_SECONDS
 	trim.timeout.connect(_server_trim_cache)
@@ -373,13 +373,9 @@ func _process(delta: float) -> void:
 		terrain.tick_bombs()
 		terrain.tick_smoke()
 		probes.tick(delta)
-		# Checked on the tick rather than hung off `roster_changed`: that
-		# signal is emitted by the roster BROADCAST, which is a client RPC,
-		# so on the server it does not reliably fire at all. The call is a
-		# single boolean test once the opening move has been made.
-		bots.ensure_opening()
 		terrain.tick_boom_traps()
 		battle.tick(delta)
+		battle.watch_for_nobody(delta)
 		bots.tick(delta)
 		terrain._water_accum += delta
 		if terrain._water_accum > 0.3:
@@ -575,6 +571,13 @@ func sv_where(slot: int) -> void:
 		var seat := maxi(seats.find(id), 0)
 		var spot := ctf.home_spot(team, seat) if ctf.active() \
 			else battle.team_start_spot(team, seat)
+		# INSIDE THE WALL, if there is one. The team's site is where the
+		# round started, and by now the storm may have closed a hundred
+		# blocks past it: somebody dropped there burnt down in three
+		# seconds in a world that was red to every horizon, which is
+		# what a newcomer to a busy game used to get.
+		if match_phase == "BATTLE" and storm_radius >= 0.0 and not ctf.active():
+			spot = store.safe_stand(storm_center, maxf(storm_radius * 0.5, 1.0))
 		player_state[id] = {"pos": spot, "treasures": 0,
 			"name": str(entry.name), "hp": MATCH_HP}
 		match_alive[id] = true
@@ -1339,13 +1342,19 @@ func _do_world_reset(map_name := "", new_size := 0) -> void:
 	_resetting = false
 	if game_mode != "creative":
 		match_loop = true
-		battle.open_lobby()
+		# A fresh world with nobody in it WAITS. The round opens when the
+		# first person arrives (_open_round_if_waiting), so they get the
+		# lobby and the drop rather than the middle of a round the
+		# computer players started without them.
+		if battle.people_present():
+			battle.open_lobby()
+		else:
+			print("World reset with nobody here: waiting for somebody")
 
 # ------------------------------------------------------------------
 # Battle royale match
 # ------------------------------------------------------------------
 const LOBBY_SECONDS := 6.0
-const STORM_START := 360.0
 
 ## Battle square side in blocks (the storm starts at its edge).
 var battle_size := 250.0
@@ -1353,50 +1362,31 @@ var battle_size := 250.0
 var match_loop := true
 
 
-## ENOUGH COMPUTER PLAYERS TO HAVE A GAME, added once, when the first
-## person arrives.
-##
-## A fresh server has nobody on it, so whoever came first got four empty
-## teams and a field — and capture the flag with one player is not a game,
-## it is a walk to an undefended flag. Three makes it one-a-side across the
-## four default teams the moment they arrive.
-##
-## Only ever on an EMPTY bot list, so it is an opening move and not a rule:
-## remove them from the Players tab and they stay removed, and a server
-## that has been running all night is not topped up behind your back.
-const OPENING_BOTS := 3
 
 
+## THE PLAYERS TAB'S THREE BUTTONS all move the same number: how many
+## seats the room has. Computer players fill the seats people are not in
+## (BotDirector.fill), so "add a computer player" is one more seat and
+## "remove" is one fewer — and they stay that way as people come and go,
+## rather than a bot count that a person joining silently took one off.
 @rpc("any_peer", "call_local", "reliable")
 func sv_add_bot() -> void:
 	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
 		return
-	if Game.roster.size() >= Game.MAX_PLAYERS:
-		return
-	bots.spawn()
+	Game.player_limit = mini(maxi(Game.player_limit, Game.roster.size()) + 1, Game.MAX_PLAYERS)
+	bots.fill()
 	_save_battle_setup()
 
 ## FILL THE ROOM. Adding computer players one at a time is a button press
 ## each, and the ceiling is a hundred — so getting a full game meant
 ## clicking the same button ninety-odd times.
-##
-## Server side, in one call, because it is also ninety-odd round trips
-## otherwise and the roster is broadcast after every one of them.
 @rpc("any_peer", "reliable")
 func sv_fill_bots() -> void:
 	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
 		return
-	var added := 0
-	while Game.roster.size() < Game.MAX_PLAYERS:
-		bots.spawn()
-		added += 1
-		# A guard, not a limit: spawn() refusing for any reason would
-		# otherwise turn this into a loop that never ends.
-		if added > Game.MAX_PLAYERS:
-			break
-	print("ROSTER: filled with %d computer players (%d of %d)"
-		% [added, Game.roster.size(), Game.MAX_PLAYERS])
-	bots.redistribute()
+	Game.player_limit = Game.MAX_PLAYERS
+	bots.fill()
+	print("ROSTER: filled (%d of %d)" % [Game.roster.size(), Game.MAX_PLAYERS])
 	_save_battle_setup()
 
 ## Roster-full eviction path (a human needs the seat).
@@ -1410,9 +1400,7 @@ func forget_player(id: String) -> void:
 	cl_eliminated.rpc(id)
 
 func drop_bot(id: String) -> void:
-	bots.roster.erase(id)
-	player_state.erase(id)
-	match_alive.erase(id)
+	bots.remove(id)
 	_save_battle_setup()
 
 @rpc("any_peer", "call_local", "reliable")
@@ -1421,12 +1409,12 @@ func sv_remove_bot(target_id: String = "") -> void:
 		return
 	if bots.roster.is_empty():
 		return
-	var id := target_id if bots.roster.has(target_id) else str(bots.roster.keys().back())
-	bots.roster.erase(id)
-	player_state.erase(id)
-	match_alive.erase(id)
-	Game.roster.erase(id)
-	Game.cl_roster.rpc(Game.roster)
+	Game.player_limit = maxi(mini(Game.player_limit, Game.roster.size()) - 1, 0)
+	# The one they pointed at goes, if they pointed; fill() then keeps the
+	# count where the new seat number says.
+	if bots.roster.has(target_id):
+		bots.remove(target_id)
+	bots.fill()
 	_save_battle_setup()
 
 ## The host flips between Battle and Creative. Creative immediately and
@@ -1499,7 +1487,7 @@ func sv_add_team() -> void:
 	team_count += 1
 	team_names.append(TEAM_NAMES[(team_count - 1) % TEAM_NAMES.size()])
 	bots.unpin()
-	bots.redistribute()
+	bots.fill()
 	cl_teams.rpc(team_names)
 	_save_battle_setup()
 
@@ -1519,7 +1507,7 @@ func sv_remove_team(index: int = -1) -> void:
 		elif team > gone:
 			Game.roster[id].team = team - 1
 	bots.unpin()
-	bots.redistribute()
+	bots.fill()
 	cl_teams.rpc(team_names)
 	_save_battle_setup()
 
@@ -1582,7 +1570,6 @@ func sv_set_loop(on: bool) -> void:
 		return
 	match_loop = on
 
-const STORM_END := 20.0
 var storm_minutes := 5.0
 var loot_only := false
 ## Flying allowed at all, in EVERY mode — it describes how play works in
@@ -2139,10 +2126,13 @@ func cl_match(phase: String, seconds: float) -> void:
 	elif phase == "BATTLE":
 		Sfx.play("boom", -8.0)
 
+## `seconds` is until the wall next changes what it is doing — starts,
+## stops at the last-stand arena, or shuts — so the HUD can count it.
 @rpc("authority", "reliable")
-func cl_storm(radius: float, center: Vector3 = Vector3.ZERO) -> void:
+func cl_storm(radius: float, center: Vector3 = Vector3.ZERO, seconds := 0.0) -> void:
 	storm_radius = radius
 	storm_center = center
+	storm_seconds = seconds
 	storm_changed.emit()
 
 @rpc("authority", "reliable")

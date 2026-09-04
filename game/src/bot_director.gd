@@ -32,7 +32,6 @@ var _next_slot := 100
 ## round to the roster-changed handler that called this. Without the flag
 ## the `roster.is_empty()` test stops it after the FIRST bot.
 
-var _opening_done := false
 
 ## Bot shots in flight, read by the world when it draws them. They travel
 ## exactly like a player's orb — straight
@@ -271,27 +270,49 @@ func round_reset() -> void:
 		bot.target_ms = 0
 		bot.shield_left = SHIELD_BUDGET
 
-func ensure_opening() -> void:
-	if not multiplayer.is_server() or _opening_done:
+## THE SEATS PEOPLE ARE NOT IN. A room has Game.player_limit seats, chosen
+## with everything else before it existed; the computer players fill
+## whichever of them nobody has sat in. Called whenever that could have
+## changed — boot, a person arriving or leaving, the host moving the
+## number from the Players tab — and it puts the count right in both
+## directions: a person arriving in a full room takes a computer's seat,
+## and a person leaving hands it back.
+##
+## Every seat that is not one of OURS counts as taken: a person, a
+## computer player driven from somebody's client, anyone. What this owns
+## is only the ones it spawned.
+func fill() -> void:
+	if not multiplayer.is_server():
 		return
-	if not roster.is_empty():
-		_opening_done = true      # somebody added their own; leave it
-		return
-	# Only once somebody real is here. Bots on an empty server would be a
-	# match nobody is watching, played to keep a field warm.
-	var humans := false
+	var others := 0
 	for id: String in Game.roster.keys():
-		if not bool(Game.roster[id].get("bot", false)):
-			humans = true
+		if not roster.has(id):
+			others += 1
+	var wanted := clampi(Game.player_limit - others, 0, Game.MAX_PLAYERS - others)
+	var before := roster.size()
+	while roster.size() < wanted:
+		if not _place():
 			break
-	if not humans:
-		return
-	_opening_done = true
-	for i in world.OPENING_BOTS:
-		if Game.roster.size() >= Game.MAX_PLAYERS:
-			break
-		spawn()
-	print("Opening computer players added: %d in world" % Game.roster.size())
+	# The last-named go first, so removing seats takes Zulu before Alpha.
+	while roster.size() > wanted:
+		var ids: Array = roster.keys()
+		ids.sort_custom(func(a: String, b: String) -> bool:
+			return str(Game.roster[a].name) < str(Game.roster[b].name))
+		remove(str(ids.back()))
+	if roster.size() != before:
+		print("Computer players: %d -> %d (%d seats, %d others)"
+			% [before, roster.size(), Game.player_limit, others])
+	redistribute()
+
+## One computer player, out of the room for good: its body, its place in
+## the round, its name on the roster.
+func remove(id: String) -> void:
+	roster.erase(id)
+	world.player_state.erase(id)
+	world.match_alive.erase(id)
+	world.downed_ids.erase(id)
+	world.hearts.erase(id)
+	Game.roster.erase(id)
 
 ## The first phonetic name nobody is using. Taking the FIRST free one
 ## rather than the next in sequence means removing Bravo and adding a
@@ -306,8 +327,14 @@ func _next_name() -> String:
 	return "Robot %d" % (Game.roster.size() + 1)
 
 func spawn() -> void:
+	if _place():
+		redistribute()
+
+## One more computer player in the roster, on no team yet. False when
+## the room is full.
+func _place() -> bool:
 	if Game.roster.size() >= Game.MAX_PLAYERS:
-		return
+		return false
 	var slot := _next_slot
 	_next_slot += 1
 	var id := Game.player_id(1, slot)
@@ -318,7 +345,7 @@ func spawn() -> void:
 		"weapon": 13, "shoot_cd": 0.0, "goal": start}
 	_apply_skill(roster[id])
 	world.player_state[id] = {"pos": start, "treasures": 0, "name": Game.roster[id].name, "hp": 5}
-	redistribute()
+	return true
 
 ## Computer players fill up the emptiest team, in name order.
 ##

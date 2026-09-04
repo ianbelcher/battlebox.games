@@ -450,7 +450,7 @@ func _mark(btn: Button, on: bool) -> void:
 ## game_setup.gd). What is left in here is the three things you actually
 ## want from a menu while a game is running:
 ##
-##   how it is going     the score
+##   games won           the score, across every round played here
 ##   who else            the code and the link that get a friend in
 ##   somewhere else      leaving, to go and play a different game
 func _build_game_tab() -> void:
@@ -537,11 +537,14 @@ var _score_sig := ""
 var _score_empty: Label
 
 func _build_score_card(box: Control) -> void:
-	var card := _section(box, "How it is going")
+	var card := _section(box, "Games won")
 	_score_empty = Label.new()
-	_score_empty.text = "No round is running yet."
+	_score_empty.text = "No rounds in this game."
 	_score_empty.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	card.add_child(_font(_score_empty, UiTheme.T_LABEL))
+	_score_played = Label.new()
+	_score_played.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	card.add_child(_font(_score_played, UiTheme.T_NOTE))
 	_score_rows = VBoxContainer.new()
 	_score_rows.add_theme_constant_override("separation", _s(2))
 	card.add_child(_score_rows)
@@ -561,63 +564,55 @@ func _score_row(cells: Array, tint: Color, head := false) -> void:
 		_font(lbl, UiTheme.T_NOTE if head else UiTheme.T_LABEL)
 		row.add_child(lbl)
 
+## THE LEAGUE TABLE, not the round. This card used to show who was still
+## standing in the round being played, which is the one thing the screen
+## behind the menu already says at the top and down the side. What it
+## could not tell you was the thing you open a menu to find out: how many
+## games each team has WON since this world was made. That is the score,
+## in every mode that has rounds — battle royale, capture the flag, last
+## flag standing — and it is what is here now. The server keeps the tally
+## (world.team_wins) and it survives people coming and going; it is wiped
+## with the world, and with it only.
+var _score_played: Label
+
 func _refresh_live_score() -> void:
 	if _score_rows == null or world == null:
 		return
-	var running: bool = world.match_phase != "IDLE" and world.client_mode != "creative"
-	_score_empty.visible = not running
-	if not running:
+	var has_rounds: bool = world.client_mode != "creative"
+	_score_empty.visible = not has_rounds
+	_score_played.visible = has_rounds
+	if not has_rounds:
 		if _score_sig != "":
 			_score_sig = ""
 			for stale in _score_rows.get_children():
 				stale.queue_free()
 		return
-	var flags: bool = world.flag_mode()
-	var sig := "%s|%s|%s|%s|%d" % [world.match_phase, str(world.ctf_scores),
-		str(world.ctf_caps), str(world.alive_ids), int(world.team_count)]
+	var sig := "%s|%d|%d" % [str(world.team_wins), int(world.matches_played),
+		int(world.team_count)]
 	if sig == _score_sig:
 		return
 	_score_sig = sig
 	for stale in _score_rows.get_children():
 		stale.queue_free()
+	var played := int(world.matches_played)
+	_score_played.text = "Nobody has won a game yet" if played == 0 \
+		else ("1 game played" if played == 1 else "%d games played" % played)
 	var order: Array = []
 	for team_i in int(world.team_count):
 		order.append(team_i)
-	if flags:
-		order.sort_custom(func(a: int, b: int) -> bool:
-			return int(world.ctf_scores.get(a, 0)) > int(world.ctf_scores.get(b, 0)))
-	var head: Array = [["TEAM", 130], ["STILL UP", 80]]
-	if flags:
-		head.append(["FLAG", 80])
-		head.append(["TOOK", 60])
-		head.append(["LOST", 60])
-		# Last flag standing is settled once, at the whistle — a running
-		# score would be a number that means nothing until then.
-		if world.client_mode != "holdout":
-			head.append(["SCORE", 60])
-	_score_row(head, UiTheme.INK_FAINT, true)
+	# Most wins first; a tie keeps the team order, so the table does not
+	# reshuffle itself between two teams on the same number.
+	order.sort_custom(func(a: int, b: int) -> bool:
+		var wa := int(world.team_wins.get(a, 0))
+		var wb := int(world.team_wins.get(b, 0))
+		return wa > wb if wa != wb else a < b)
+	_score_row([["TEAM", 130], ["WON", 80]], UiTheme.INK_FAINT, true)
 	for team_v: Variant in order:
 		var t := int(team_v)
-		var standing := 0
-		var total := 0
-		for rid: String in Game.roster.keys():
-			if int(Game.roster[rid].get("team", -1)) != t:
-				continue
-			total += 1
-			if world.alive_ids.has(rid) and not world.client_downed.has(rid):
-				standing += 1
-		if total == 0:
-			continue
-		var cells: Array = [[_team_name(t), 130], ["%d of %d" % [standing, total], 80]]
-		if flags:
-			cells.append(["gone" if _flag_gone(t) else "up", 80])
-			cells.append([str(int(world.ctf_caps.get(t, 0))), 60])
-			cells.append([str(int(world.ctf_lost.get(t, 0))), 60])
-			if world.client_mode != "holdout":
-				cells.append([str(int(world.ctf_scores.get(t, 0))), 60])
-		_score_row(cells, WorldNode.TEAM_COLORS[t % WorldNode.TEAM_COLORS.size()] \
-			if standing > 0 else Color(0.55, 0.55, 0.6))
-
+		var wins := int(world.team_wins.get(t, 0))
+		_score_row([[_team_name(t), 130], [str(wins), 80]],
+			WorldNode.TEAM_COLORS[t % WorldNode.TEAM_COLORS.size()] \
+			if wins > 0 else Color(0.55, 0.55, 0.6))
 
 ## Has this team's flag been taken for good? Client-side, off the flag
 ## list the server broadcasts.
@@ -635,7 +630,8 @@ func _flag_gone(team: int) -> bool:
 func _build_players_tab() -> void:
 	var box := _tab("Players")
 
-	var manage_card := _section(box, "Teams and computer players")
+	var manage_card := _section(box, "Teams and computer players",
+		"Computer players fill the seats people are not in. Adding one adds a seat; removing one takes a seat away.")
 	# Two per row, not four: at four across, "Add a computer player" was
 	# wider than its column and lost its last word. Plain ASCII +/− on
 	# purpose too — the full-width ＋／－ glyphs are missing from the

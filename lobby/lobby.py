@@ -142,9 +142,11 @@ MODES = ("creative", "battle", "ctf", "holdout")
 MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space")
 SIZES = (50, 100, 200, 400, 800)
 FLY_ANSWERS = ("everyone", "nobody", "computers", "humans")
-BOT_COUNTS = (0, 3, 5, 10, 20, 40, 100)
+# How many players the room has seats for; computer players fill the
+# seats people are not in. Zero is "just us".
+PLAYER_LIMITS = (0, 4, 6, 8, 10, 16, 20, 30, 50, 100)
 TARGETS = (1, 3, 5, 10)
-TEAM_COUNTS = (2, 3, 4, 5, 6, 8)
+TEAM_COUNTS = (2, 3, 4, 5, 6, 7, 8, 9, 10)
 # ONE LIST, for every mode that has a clock. It used to be 3/5/8 for
 # battle royale and 2/5/10 for last flag standing, for no reason either
 # mode could explain — and on screen that is a row whose buttons move and
@@ -162,7 +164,7 @@ DEFAULT_SETTINGS = {
     "map": "classic",
     "size": 400,
     "minutes": 5,
-    "bots": 5,
+    "players": 10,
     "target": 3,
     "teams": 5,
     "fly": "nobody",
@@ -182,9 +184,9 @@ DEFAULT_SETTINGS = {
 # everything else — somebody arriving alone walks into a game that is
 # already happening rather than into an empty field.
 #
-# The bot count is `--house-bots` rather than a constant because it is the
-# one number here that costs CPU: every one of them pathfinds on that
-# room's single thread.
+# The seat count is `--house-players` rather than a constant because it is
+# the one number here that costs CPU: every seat a person is not in is a
+# computer player pathfinding on that room's single thread.
 HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, mode="battle", map="classic",
                       teams=5, minutes=10, size=400)
 
@@ -213,7 +215,8 @@ def clean_settings(raw: object) -> dict:
     if raw.get("map") in MAPS:
         out["map"] = raw["map"]
     out["size"] = _snap(raw, "size", SIZES, DEFAULT_SETTINGS["size"])
-    out["bots"] = _snap(raw, "bots", BOT_COUNTS, DEFAULT_SETTINGS["bots"])
+    out["players"] = _snap(raw, "players", PLAYER_LIMITS,
+                           DEFAULT_SETTINGS["players"])
     out["target"] = _snap(raw, "target", TARGETS, DEFAULT_SETTINGS["target"])
     out["teams"] = _snap(raw, "teams", TEAM_COUNTS, DEFAULT_SETTINGS["teams"])
     out["fly"] = (raw.get("fly") if raw.get("fly") in FLY_ANSWERS
@@ -248,7 +251,7 @@ def settings_env(settings: dict) -> dict:
         "WORLD_THEME": str(clean["map"]),
         "WORLD_SIZE": str(clean["size"]),
         "WORLD_ROUND_MINUTES": str(clean["minutes"]),
-        "WORLD_BOTS": str(clean["bots"]),
+        "WORLD_PLAYERS": str(clean["players"]),
         "WORLD_CTF_TARGET": str(clean["target"]),
         "WORLD_TEAMS": str(clean["teams"]),
         "WORLD_FLY": str(clean["fly"]),
@@ -268,12 +271,12 @@ def clean_name(raw: str) -> str:
 
 class Lobby:
     def __init__(self, server_binary: str, max_rooms: int, idle_exit: int,
-                 world_size: int, house_bots: int = 100) -> None:
+                 world_size: int, house_players: int = 100) -> None:
         self.server_binary = server_binary
         self.max_rooms = max_rooms
         self.idle_exit = idle_exit
         self.world_size = world_size
-        self.house_bots = house_bots
+        self.house_players = house_players
         self.rooms: dict[str, Room] = {}
 
     # -- room lifecycle ------------------------------------------------
@@ -282,7 +285,7 @@ class Lobby:
         """The always-on game. There is always somewhere to play, and it
         is up before anybody asks for it."""
         settings = dict(HOUSE_SETTINGS, size=self.world_size,
-                        bots=self.house_bots)
+                        players=self.house_players)
         await self.spawn(HOUSE_CODE, "BattleBox", True, house=True,
                          settings=settings)
 
@@ -550,7 +553,7 @@ async def _respond(writer: asyncio.StreamWriter, status: int, payload: dict) -> 
 
 async def serve(args: argparse.Namespace) -> None:
     lobby = Lobby(args.server, args.max_rooms, args.idle_exit, args.world_size,
-                  args.house_bots)
+                  args.house_players)
     if not args.no_house:
         await lobby.start_house()
     asyncio.create_task(lobby.reap_forever())
@@ -578,11 +581,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--world-size", type=int,
                         default=int(os.environ.get("WORLD_SIZE", "250")))
     parser.add_argument(
-        "--house-bots", type=int,
-        default=int(os.environ.get("LOBBY_HOUSE_BOTS", "100")),
-        help="computer players in the always-on game. Every one of them "
-             "pathfinds on that room's single thread, so this is the "
-             "number to turn down if the shared world gets choppy",
+        "--house-players", type=int,
+        default=int(os.environ.get("LOBBY_HOUSE_PLAYERS", "100")),
+        help="seats in the always-on game. Computer players fill the ones "
+             "people are not in, and every one of them pathfinds on that "
+             "room's single thread, so this is the number to turn down if "
+             "the shared world gets choppy",
     )
     parser.add_argument("--no-house", action="store_true",
                         help="do not start the always-on public game (tests)")

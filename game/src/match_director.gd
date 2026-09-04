@@ -56,10 +56,79 @@ var _burn_ms: Dictionary = {}
 
 var _result_recorded := false
 
-func storm_start_seconds() -> float:
+func storm_start_radius() -> float:
 	# Big enough that the wall starts beyond every corner of the arena
 	# from wherever this battle's center landed.
 	return world.battle_size * 0.75 + Vector2(world.storm_center.x, world.storm_center.z).length()
+
+## One line on the server's stdout as the wall changes what it is doing,
+## so a log says when the last stand began and when the round was shut —
+## the two moments that were missing for an hour of "18 still standing".
+var _storm_stage := ""
+
+func _say_storm_stage() -> void:
+	var stage := "none"
+	if world.storm_radius < 0.0:
+		stage = "none"
+	elif world.storm_radius == 0.0:
+		stage = "shut"
+	elif world.storm_radius <= StormClock.HOLD_RADIUS:
+		stage = "last stand"
+	else:
+		stage = "closing"
+	if stage == _storm_stage:
+		return
+	_storm_stage = stage
+	match stage:
+		"closing":
+			print("STORM: closing in, %d still in it" % world.match_alive.size())
+		"last stand":
+			print("STORM: last stand — the wall holds at %d for %ds, %d still in it"
+				% [int(StormClock.HOLD_RADIUS), int(StormClock.HOLD_SECONDS),
+					world.match_alive.size()])
+		"shut":
+			print("STORM: shut, %d still in it and burning" % world.match_alive.size())
+
+func what_this_is() -> String:
+	if world.ctf.elimination():
+		return "Last flag standing"
+	if world.ctf.active():
+		return "Capture the flag"
+	return "Battle royale"
+
+## Is there a PERSON in the room? Computer players are in the roster too,
+## and for most purposes they are players like anybody else — but not for
+## deciding whether anybody is watching.
+func people_present() -> bool:
+	for id: String in Game.roster.keys():
+		if not bool(Game.roster[id].get("bot", false)):
+			return true
+	return false
+
+## NOBODY HOME. When the last person has been gone a while the world is
+## put back the way it was made — fresh terrain, no scars, no scores — and
+## left waiting, so whoever comes next starts a game rather than joining
+## the end of one they never saw. Once per absence: a room that sits empty
+## all night is reset once, not every two minutes.
+const EMPTY_RESET_SECONDS := 120.0
+var _empty_for := 0.0
+var _had_people := false
+var _fresh_for_arrivals := false
+
+func watch_for_nobody(delta: float) -> void:
+	if people_present():
+		_had_people = true
+		_empty_for = 0.0
+		_fresh_for_arrivals = false
+		return
+	if not _had_people or _fresh_for_arrivals:
+		return
+	_empty_for += delta
+	if _empty_for < EMPTY_RESET_SECONDS:
+		return
+	_fresh_for_arrivals = true
+	print("ROOM empty for %.0fs: fresh world for the next arrival" % _empty_for)
+	world._do_world_reset()
 
 ## The single 20-second pre-battle period: the map resets fresh,
 ## everyone lands together at the middle so it streams in around them,
@@ -164,20 +233,11 @@ func tick(delta: float) -> void:
 				# Unlimited: the storm never closes and the match only ends
 				# when one team is left standing.
 				_timer = 9999.0
-			var elapsed := 1.0 - clampf(_timer / (world.storm_minutes * 60.0), 0.0, 1.0)
-			if elapsed < 0.5:
-				# First half: fight freely, no storm anywhere.
-				world.storm_radius = -1.0
-				world.cl_storm.rpc(-1.0, world.storm_center)
-			else:
-				var frac := (elapsed - 0.5) * 2.0
-				world.storm_radius = lerpf(storm_start_seconds(), world.STORM_END, frac)
-				if _timer <= 0.0:
-					# Overtime: close on down to a 30-block-wide arena and
-					# hold — the battle only ends when one team is left
-					# standing (dig fights welcome), never on a countback.
-					world.storm_radius = maxf(world.STORM_END + _timer * 0.35, 15.0)
-				world.cl_storm.rpc(world.storm_radius, world.storm_center)
+			var storm := StormClock.at(_timer, world.storm_minutes * 60.0, storm_start_radius())
+			world.storm_radius = float(storm.radius)
+			world.cl_storm.rpc(world.storm_radius, world.storm_center, float(storm.seconds))
+			_say_storm_stage()
+			if world.storm_radius >= 0.0:
 				_storm_damage()
 				_storm_bite()
 			_tick_regen()
@@ -189,21 +249,29 @@ func tick(delta: float) -> void:
 			check_win()
 		"END":
 			if _timer <= 0.0:
-				# Anybody at all, computer players included. A server with
-				# bots on it and nobody watching keeps playing rounds, so
-				# the next person through the door finds a live game.
-				if world.match_loop and not Game.roster.is_empty():
+				# Only while somebody is HERE. It used to chain rounds with
+				# nobody watching, so the next person through the door
+				# found a live game — and what a live game looks like
+				# after an hour of computer players is a wrecked map, a
+				# storm closed to nothing, and eighteen bots dug in where
+				# you cannot see them. Now an empty room finishes its
+				# round and waits; the next arrival opens a fresh one
+				# (see _open_round_if_waiting).
+				if world.match_loop and people_present():
 					open_lobby()
 					print("%s loop: fresh lobby open" % ("Capture the flag" if world.ctf.active() else "Battle royale"))
 				else:
 					world.match_phase = "IDLE"
 					world.cl_match.rpc("IDLE", 0.0)
+					if not people_present():
+						print("%s over and nobody here: waiting for somebody" % what_this_is())
 
 ## Everyone gets a team (auto-balanced if unpicked), full hearts, and a drop
 ## point high above a spread ring. Gliding down is automatic.
 func drop_everyone() -> void:
 	world.match_phase = "SETUP"
 	_timer = 6.0
+	_storm_stage = ""
 	world.match_alive.clear()
 	world.downed_ids.clear()
 	revive_progress.clear()
@@ -381,7 +449,7 @@ func drop_everyone() -> void:
 	print("Battle loot: %d/%d crates placed (%d attempts)" % [placed, crate_count, attempts])
 	world.survival.broadcast_crates()
 	Game.cl_roster.rpc(Game.roster)
-	world.storm_radius = storm_start_seconds()
+	world.storm_radius = storm_start_radius()
 	# The circle closes on a RANDOM spot each battle, and the wall starts
 	# beyond the arena edge so no red is visible at the drop.
 	var storm_angle := randf() * TAU
@@ -426,19 +494,31 @@ func _storm_damage() -> void:
 		# get round to it.
 		var out := Vector2(pos.x - world.storm_center.x,
 			pos.z - world.storm_center.z).length() - world.storm_radius
-		if out > 2.0:
+		# A short grace band outside the wall — until the wall has closed
+		# to nothing, when there is no inside left to be graced by.
+		var grace := 2.0 if world.storm_radius > 0.0 else -1.0
+		if out > grace:
 			# 1.1s a heart at the edge, down to 0.3s deep out — eight
 			# hearts is about nine seconds at the rim, under three if you
 			# ignore it completely.
 			var bite := clampf(1.1 - out / 40.0, 0.3, 1.1)
 			_storm_hurt_ms[id] = now + int(bite * 1000.0)
 			state.hp = int(state.get("hp", world.MATCH_HP)) - 1
-			world.cl_hearts.rpc(id, state.hp)
+			world.cl_hearts.rpc(id, maxi(state.hp, 0))
 			# No knockback from the storm: pushing players while they're
 			# already outside fed back into more storm damage and once
 			# launched a player 142 km off the map.
-			if state.hp <= 0:
+			if state.hp > 0:
+				continue
+			if not world.downed_ids.has(id):
 				eliminate(id)
+			elif state.hp <= -world.MATCH_HP:
+				# ON THE FLOOR IN THE STORM. Being knocked out is not a
+				# countdown anywhere else — you wait for a team-mate —
+				# but nobody is coming out here, and a downed player the
+				# storm could not finish was a round that could not end.
+				# Another eight hearts' worth of it and you are out.
+				put_out(id)
 
 ## The storm chews the world: surface blocks just outside the wall pop
 ## away, so the losing ground visibly crumbles.
@@ -638,6 +718,28 @@ func _tick_regen() -> void:
 		state.hp = int(state.get("hp", world.MATCH_HP)) + 1
 		world.cl_hearts.rpc(id, state.hp)
 
+## A downed player leaves the round for good: nobody left to lift them,
+## or the storm got there first.
+func put_out(id: String) -> void:
+	world.downed_ids.erase(id)
+	revive_progress.erase(id)
+	world.ctf._flag_progress.erase(id)
+	world.ctf._revive_pulse_t.erase(id)
+	world.match_alive.erase(id)
+	# BEING OUT IS WRITTEN HERE, ON THE SERVER. `cl_eliminated` is an
+	# authority RPC, so it never runs on the server itself — `eliminate`
+	# knows that and sets `out_ids` directly, but this path, the one you
+	# take when there is nobody to come for you, did not. So anyone who
+	# went out that way was in no set at all: not alive, not downed, not
+	# out. They could never tag in at their own flag (that rule reads
+	# `out_ids`), a bot in that state never walked home, and they were
+	# missing from the state a joining client is sent — which is a
+	# roster of nine showing four alive and five nowhere.
+	world.out_ids[id] = true
+	world.cl_revive_progress.rpc(id, 0.0)
+	world.cl_eliminated.rpc(id)
+	check_win()
+
 func tick_revives(delta: float) -> void:
 	for id: String in world.downed_ids.keys().duplicate():
 		# THERE IS NO BLEEDING OUT. Being knocked out is not a countdown:
@@ -658,25 +760,7 @@ func tick_revives(delta: float) -> void:
 				rescuer = true
 				break
 		if not rescuer:
-			world.downed_ids.erase(id)
-			revive_progress.erase(id)
-			world.ctf._flag_progress.erase(id)
-			world.ctf._revive_pulse_t.erase(id)
-			world.match_alive.erase(id)
-			# BEING OUT IS WRITTEN HERE, ON THE SERVER. `cl_eliminated` is
-			# an authority RPC, so it never runs on the server itself —
-			# `_match_eliminate` knows that and sets `out_ids` directly,
-			# but this path, the one you take when you BLEED OUT, did not.
-			# So anyone who ran out of time on the floor was in no set at
-			# all: not alive, not downed, not out. They could never tag
-			# in at their own flag (that rule reads `out_ids`), a bot in
-			# that state never walked home, and they were missing from the
-			# state a joining client is sent — which is a roster of nine
-			# showing four alive and five nowhere.
-			world.out_ids[id] = true
-			world.cl_revive_progress.rpc(id, 0.0)
-			world.cl_eliminated.rpc(id)
-			check_win()
+			put_out(id)
 			continue
 		var pos: Vector3 = world.player_state.get(id, {}).get("pos", Vector3.ZERO)
 		var mate_close := false

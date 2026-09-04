@@ -108,7 +108,7 @@ def run(argv: list[str] | None = None) -> int:
                 # house is.
                 [sys.executable, str(LOBBY), "--port", str(port),
                  "--server", f"{args.godot} --headless --path {GAME}",
-                 "--idle-exit", str(IDLE_EXIT), "--house-bots", "3",
+                 "--idle-exit", str(IDLE_EXIT), "--house-players", "3",
                  "--world-size", str(WORLD_SIZE)],
                 env=env, stdout=sink, stderr=subprocess.STDOUT, text=True)
             try:
@@ -274,13 +274,13 @@ def _exercise(args, base: str, port: int, checks: Checks,
     status, made = api(base, "/api/rooms",
                        {"name": "Castle war", "public": True,
                         "settings": {"mode": "ctf", "map": "castles",
-                                     "size": 100, "bots": 3, "target": 5}})
+                                     "size": 100, "players": 10, "target": 5}})
     asked = made.get("settings", {})
     checks.that(status == 201 and asked.get("mode") == "ctf"
                 and asked.get("map") == "castles",
                 f"a game is created as what was asked for ({asked})")
-    checks.that(asked.get("size") == 100 and asked.get("bots") == 3,
-                f"including its size and its computer players ({asked})")
+    checks.that(asked.get("size") == 100 and asked.get("players") == 10,
+                f"including its size and how many players ({asked})")
     _, listing = api(base, "/api/rooms")
     listed = [r for r in listing.get("rooms", [])
               if r.get("code") == made.get("code")]
@@ -288,7 +288,7 @@ def _exercise(args, base: str, port: int, checks: Checks,
                 "and the list says what it is, so it can be chosen")
     booted = _await_line(log_path, f"[{made.get('code')}] ROOM setup", 60)
     checks.that("mode=ctf" in booted and "map=castles" in booted
-                and "size=100" in booted and "bots=3" in booted,
+                and "size=100" in booted and "seats=10" in booted,
                 f"the room process really booted as that game ({booted.strip()})")
 
 

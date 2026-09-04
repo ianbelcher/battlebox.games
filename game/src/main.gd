@@ -166,6 +166,18 @@ func _ready() -> void:
 	# heads drawn only for the seats that can actually see them?
 	if OS.get_environment("WORLD_SIGHT_TEST") == "1":
 		add_child(load("res://tests/sight_probe.gd").new())
+	# WORLD_MENU_SHOT=1: open the world menu once the world is up, so
+	# tools/screenshot.sh can photograph it. The menu probe drives it
+	# with real input, which a software-rendered run is too slow for.
+	if OS.get_environment("WORLD_MENU_SHOT") == "1":
+		var poke := Timer.new()
+		poke.wait_time = 2.0
+		poke.timeout.connect(func() -> void:
+			if _world_menu != null and _in_world and Game.world != null:
+				_world_menu.open()
+				poke.stop())
+		add_child(poke)
+		poke.start()
 	# WORLD_DOWNED_TINTS=1: knock this player out and report what is red.
 	if OS.get_environment("WORLD_DOWNED_TINTS") == "1":
 		add_child(load("res://tests/downed_tints.gd").new())

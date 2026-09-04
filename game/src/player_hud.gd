@@ -2610,14 +2610,22 @@ func _refresh_notices(player: Player, delta: float) -> void:
 		if _note_card != null:
 			_note_card.visible = showing
 	if _storm_label != null and world != null:
-		var storm_on: bool = world.match_phase == "BATTLE" and world.storm_radius > 0.0
-		# Silent until the storm is actually live — then a real countdown
-		# to its minimum size (the storm bottoms out when the timer does).
+		var storm_on: bool = world.match_phase == "BATTLE" and world.storm_radius >= 0.0
+		# Silent until the storm is actually live. Then the number is
+		# whatever it is counting down to next: the wall reaching the
+		# last-stand arena, the minute it holds there, and then the close
+		# — see StormClock. Zero radius is the wall SHUT: no
+		# inside left, and the label says so.
 		_storm_label.visible = storm_on
 		if storm_on:
-			var storm_secs := int(ceil(world.match_seconds))
-			_storm_label.text = ("⛈  STORM!  %d" % storm_secs) if storm_secs > 0 \
-				else "⛈  STORM!"
+			var storm_secs := int(ceil(world.storm_seconds))
+			if world.storm_radius <= 0.0:
+				_storm_label.text = "⛈  STORM!  no way out"
+			elif world.storm_radius <= StormClock.HOLD_RADIUS + 0.5:
+				_storm_label.text = "⛈  LAST STAND  %d" % storm_secs
+			else:
+				_storm_label.text = ("⛈  STORM!  %d" % storm_secs) if storm_secs > 0 \
+					else "⛈  STORM!"
 	if _death_note != null and world != null:
 		var my_pid := Game.player_id(multiplayer.get_unique_id(), slot)
 		var down_now: bool = bool(world.client_downed.get(my_pid, false))
@@ -2898,7 +2906,7 @@ func _refresh_tints(player: Player) -> void:
 	if _storm_tint != null and world != null:
 		var danger := 0.0
 		if not _out_of_it() and world.match_phase == "BATTLE" \
-				and world.storm_radius > 0.0 \
+				and world.storm_radius >= 0.0 \
 				and Vector2(player.position.x - world.storm_center.x,
 					player.position.z - world.storm_center.z).length() > world.storm_radius:
 			danger = 0.25
@@ -2906,6 +2914,7 @@ func _refresh_tints(player: Player) -> void:
 	# Caught outside the storm: a big arrow home plus the distance.
 	if world != null and not _out_of_it() and world.match_phase == "BATTLE" \
 			and world.storm_radius > 0.0:
+		# (> 0, not >= : once the wall has shut there is nowhere to run TO.)
 		var flat := Vector2(player.position.x - world.storm_center.x,
 			player.position.z - world.storm_center.z)
 		var outside: float = flat.length() - world.storm_radius

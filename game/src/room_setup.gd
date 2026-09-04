@@ -3,8 +3,7 @@ class_name RoomSetup
 ## to the world before anybody can connect.
 ##
 ## The front page sets a game up BEFORE it exists — mode, map, size, round
-## length, how many computer players are waiting in it (see
-## game_setup.gd). The lobby hands those over as environment when it
+## length, how many players it has seats for (see game_setup.gd). The lobby hands those over as environment when it
 ## starts this process (lobby/lobby.py's settings_env), and this is the
 ## end of that wire.
 ##
@@ -30,9 +29,10 @@ class_name RoomSetup
 
 const MODES := ["creative", "battle", "ctf", "holdout"]
 
-## How many computer players a room boots with, when nobody said.
-static func wanted_bots(fallback: int) -> int:
-	return maxi(0, EnvConfig.number("WORLD_BOTS", fallback))
+## How many seats a room has, when nobody said. Computer players fill
+## the ones people are not in, so this is the size of the game.
+static func wanted_players(fallback: int) -> int:
+	return clampi(EnvConfig.number("WORLD_PLAYERS", fallback), 0, Game.MAX_PLAYERS)
 
 ## Apply everything the environment asked for. `world` is the WorldNode;
 ## untyped because this is a plain helper and typing it would make the two
@@ -64,6 +64,12 @@ static func apply(world: Node) -> void:
 	if teams > 0:
 		world.team_count = clampi(teams, 2, 24)
 		world.team_names = world.TEAM_NAMES.slice(0, world.team_count)
+	# HOW MANY SEATS, dealt evenly across those sides: a hundred over nine
+	# teams is ninety-nine, eleven a side. Computer players fill whichever
+	# seats people are not in (BotDirector.fill), so this is the size of
+	# the game rather than a count of anybody in particular.
+	Game.player_limit = GameSetup.seats_for(
+		wanted_players(world.DEFAULT_PLAYERS), world.team_count)
 	if EnvConfig.has("WORLD_REVIVE"):
 		world.revive_mode = clampi(
 			EnvConfig.number("WORLD_REVIVE", world.revive_mode),
@@ -87,6 +93,6 @@ static func apply(world: Node) -> void:
 static func describe(world: Node) -> String:
 	var minutes: float = world.holdout_minutes if world.game_mode == "holdout" \
 		else world.storm_minutes
-	return "ROOM setup mode=%s map=%s size=%d minutes=%d bots=%d teams=%d" % [
+	return "ROOM setup mode=%s map=%s size=%d minutes=%d seats=%d teams=%d" % [
 		world.game_mode, world.store.theme, world.store.world_size,
-		int(minutes), wanted_bots(world.DEFAULT_BOTS), world.team_count]
+		int(minutes), Game.player_limit, world.team_count]

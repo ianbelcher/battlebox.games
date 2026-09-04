@@ -91,6 +91,8 @@ var _choices: Dictionary = {}
 ## field name -> the whole labelled group, hidden when the mode has no
 ## use for it.
 var _groups: Dictionary = {}
+## The note under a row, for the rows whose note changes with the answer.
+var _notes: Dictionary = {}
 
 # --- code ---
 var _code_label: Label
@@ -564,8 +566,8 @@ func _build_setup() -> Control:
 	_build_choice_field(column, "target", "Captures to win",
 		_target_options(), "")
 	_build_choice_field(column, "teams", "How many teams?", _team_options(), "")
-	_build_choice_field(column, "bots", "Computer players",
-		_bot_options(), "")
+	_build_choice_field(column, "players", "How many players?",
+		_player_options(), GameSetup.seats_note(GameSetup.DEFAULT_PLAYERS))
 	_build_choice_field(column, "fly", "Who can fly?", _fly_options(), "")
 	_build_choice_field(column, "revive", "Getting back up",
 		_revive_options(), "")
@@ -704,10 +706,10 @@ func _team_options() -> Array:
 		out.append({"value": count, "label": GameSetup.teams_label(count)})
 	return out
 
-func _bot_options() -> Array:
+func _player_options() -> Array:
 	var out: Array = []
-	for count: int in GameSetup.BOT_COUNTS:
-		out.append({"value": count, "label": GameSetup.bots_label(count)})
+	for limit: int in GameSetup.PLAYER_LIMITS:
+		out.append({"value": limit, "label": GameSetup.players_label(limit)})
 	return out
 
 func _revive_options() -> Array:
@@ -758,16 +760,16 @@ func _refresh_setup() -> void:
 		for value: Variant in _choices["minutes"]:
 			var btn: Button = _choices["minutes"][value]
 			btn.disabled = not (int(value) in allowed)
-	# HOW MANY EACH SIDE GETS. The number of computer players and the
-	# number of teams are two rows apart and only mean anything together,
-	# so the bots row is re-labelled whenever the teams change rather than
+	# HOW MANY EACH SIDE GETS. The number of players and the number of
+	# teams are two rows apart and only mean anything together, so the
+	# players row is re-labelled whenever the teams change rather than
 	# leaving somebody to divide one by the other.
-	if _choices.has("bots"):
+	if _choices.has("players"):
 		var teams := int(_wanted.get("teams", GameSetup.DEFAULT_TEAMS))
 		var split := teams if GameSetup.uses("teams", mode) else 0
-		for value: Variant in _choices["bots"]:
-			var bot_btn: Button = _choices["bots"][value]
-			bot_btn.text = "  %s  " % GameSetup.bots_label(int(value), split)
+		var note: Label = _notes.get("players")
+		if note != null:
+			note.text = GameSetup.seats_note(int(_wanted.get("players", 0)), split)
 
 
 ## Back to the front, from outside. main.gd calls this when somebody
@@ -1060,7 +1062,9 @@ func _group(parent: Control, field: String, title: String,
 	parent.add_child(group)
 	group.add_child(_eyebrow(title))
 	if not note.is_empty():
-		group.add_child(_text(note, UiTheme.T_NOTE, UiTheme.INK_FAINT, true))
+		var note_label := _text(note, UiTheme.T_NOTE, UiTheme.INK_FAINT, true)
+		group.add_child(note_label)
+		_notes[field] = note_label
 	var body := VBoxContainer.new()
 	body.add_theme_constant_override("separation", _px(8))
 	group.add_child(body)

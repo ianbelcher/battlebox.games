@@ -30,7 +30,7 @@ func test_the_screen_opens_on_a_game_and_the_fallback_stays_neutral() -> void:
 
 func test_a_whole_game_survives_intact() -> void:
 	var asked := {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
-		"bots": 10, "target": 5, "teams": 8, "fly": "humans",
+		"players": 10, "target": 5, "teams": 8, "fly": "humans",
 		"revive": ReviveRule.MATES, "drop": true}
 	equal(GameSetup.clean(asked), asked, "nothing chosen is thrown away")
 
@@ -88,8 +88,11 @@ func test_a_world_is_said_as_the_square_it_is() -> void:
 
 func test_teams_are_part_of_the_game() -> void:
 	equal(GameSetup.clean({"teams": 8})["teams"], 8, "eight sides")
-	equal(GameSetup.clean({"teams": 7})["teams"], GameSetup.DEFAULT_TEAMS,
-		"seven is not on the list")
+	equal(GameSetup.clean({"teams": 10})["teams"], 10, "up to ten")
+	equal(GameSetup.clean({"teams": 11})["teams"], GameSetup.DEFAULT_TEAMS,
+		"eleven is not on the list")
+	equal(GameSetup.clean({"teams": 1})["teams"], GameSetup.DEFAULT_TEAMS,
+		"and one side is not a game")
 	check(GameSetup.uses("teams", "battle"), "a battle has sides")
 	check(not GameSetup.uses("teams", "creative"),
 		"nobody is on a side in creative")
@@ -137,11 +140,37 @@ func test_a_room_that_said_nothing_is_not_described() -> void:
 	equal(GameSetup.summary({"map": "sky"}), "",
 		"a map with no mode is not a game")
 
-func test_nobody_is_zero_computer_players() -> void:
-	# "0 computer players" reads as something that failed to load.
-	equal(GameSetup.bots_label(0), "Just us", "none of them")
-	equal(GameSetup.bots_label(1), "1 computer player", "one, singular")
-	equal(GameSetup.bots_label(20), "20 computer players", "and the rest")
+func test_nobody_is_zero_players() -> void:
+	# "0 players" reads as something that failed to load.
+	equal(GameSetup.players_label(0), "Just us", "none of them")
+	equal(GameSetup.players_label(0, 5), "Just us", "however many sides")
+	equal(GameSetup.players_label(20), "20 players", "with no sides to split over")
+	equal(GameSetup.players_label(20, 5), "20 players  ·  4 a side",
+		"the row says what the two rows add up to")
+
+## A HUNDRED OVER NINE TEAMS IS NINETY-NINE. The seats are dealt evenly
+## across the sides, so "how many players" and "how many teams" together
+## say exactly what the game will be — eleven a side — rather than a
+## number that one team gets one more of.
+func test_seats_are_dealt_evenly_across_the_sides() -> void:
+	equal(GameSetup.seats_for(100, 9), 99, "eleven a side, one seat unused")
+	equal(GameSetup.seats_for(100, 5), 100, "twenty a side")
+	equal(GameSetup.seats_for(10, 3), 9, "three a side")
+	equal(GameSetup.seats_for(4, 8), 8,
+		"never fewer than one a side, or some teams are nobody")
+	equal(GameSetup.seats_for(0, 5), 0, "just us stays just us")
+	equal(GameSetup.seats_for(20, 0), 20, "no sides: every seat is a seat")
+	equal(GameSetup.players_label(100, 9), "99 players  ·  11 a side",
+		"and the label says the dealt number, not the one on the button")
+	equal(GameSetup.seats_note(100, 9),
+		"99 players over 9 teams: 11 a side. Computer players fill the seats people are not in.",
+		"the line under the row does the arithmetic")
+	equal(GameSetup.seats_note(0, 9), "Nobody but the people who join.", "just us")
+	equal(GameSetup.clean({"players": 20})["players"], 20, "twenty is a choice")
+	equal(GameSetup.clean({"players": 7})["players"], GameSetup.DEFAULT_PLAYERS,
+		"seven is not")
+	equal(GameSetup.clean({"bots": 40})["players"], GameSetup.DEFAULT_PLAYERS,
+		"the old bot count is not read: a bot count is not a size")
 
 func test_an_hour_is_how_this_game_spells_unlimited() -> void:
 	equal(GameSetup.length_label(GameSetup.UNLIMITED), "No clock",
@@ -157,7 +186,7 @@ func test_an_hour_is_how_this_game_spells_unlimited() -> void:
 ## that the dictionary survives the round trip it is going to make.
 func test_the_settings_survive_being_sent() -> void:
 	var wanted := GameSetup.clean({"mode": "holdout", "map": "sky",
-		"size": 800, "minutes": 2, "bots": 20, "target": 10,
+		"size": 800, "minutes": 2, "players": 20, "target": 10,
 		"revive": ReviveRule.NONE, "drop": true})
 	var wire: Variant = JSON.parse_string(JSON.stringify(wanted))
 	check(wire is Dictionary, "the settings come back as an object")

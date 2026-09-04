@@ -41,7 +41,7 @@ const KNOWN := {
 	# that resets itself into one while somebody is standing in it.
 	"WORLD_MODE": "creative | battle | ctf | holdout — the mode a room starts in",
 	"WORLD_ROUND_MINUTES": "how long a round of battle royale or last flag standing runs",
-	"WORLD_BOTS": "computer players waiting in the world at boot",
+	"WORLD_PLAYERS": "how many seats the room has; computer players fill the ones people are not in",
 	"WORLD_CTF_TARGET": "captures needed to win capture the flag",
 	"WORLD_TEAMS": "how many sides the game is played across",
 	"WORLD_FLY": "everyone | nobody | computers | humans — who may fly",
@@ -113,6 +113,7 @@ const KNOWN := {
 	"WORLD_POLE_TEST": "1 turns reviving off and checks no flag channel starts with no way back",
 	"WORLD_GHOST_TEST": "1 reports whether a knocked-out team is actually hidden, or drawn and moving",
 	"WORLD_SIGHT_TEST": "1 reports which seats the names and hearts over each head are drawn for",
+	"WORLD_MENU_SHOT": "1 opens the world menu as soon as the world is up, for a screenshot",
 	"WORLD_SIEGE_TEST": "1 reports how close anybody actually gets to an enemy flag, against the touch radius",
 	"WORLD_SNIPE_TEST": "1 shoots a computer player from out of its sight and reports its reaction",
 	"WORLD_SPREAD_TEST": "1 reports how far apart a team's defenders stand and which sides they cover",
