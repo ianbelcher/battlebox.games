@@ -183,6 +183,9 @@ const DEFAULT_TEAMS := 5
 ## seats people are not sitting in — see BotDirector.fill.
 const DEFAULT_PLAYERS := GameSetup.DEFAULT_PLAYERS
 var team_count := DEFAULT_TEAMS
+## SOLO: everyone for themselves. A side each, so team_count follows the
+## roster (BotDirector.fill) and the Players tab cannot add or remove one.
+var solo := false
 var selected_map := ""
 ## "battle" = matches loop continuously · "creative" = free build/play.
 var game_mode := "creative"
@@ -1482,7 +1485,7 @@ func auto_team(id: String) -> void:
 func sv_add_team() -> void:
 	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
 		return
-	if team_count >= 24:
+	if team_count >= 24 or solo:
 		return
 	team_count += 1
 	team_names.append(TEAM_NAMES[(team_count - 1) % TEAM_NAMES.size()])
@@ -1495,7 +1498,7 @@ func sv_add_team() -> void:
 func sv_remove_team(index: int = -1) -> void:
 	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
 		return
-	if team_count <= 2:
+	if team_count <= 2 or solo:
 		return
 	var gone := index if index >= 0 and index < team_count else team_count - 1
 	team_names.remove_at(gone)

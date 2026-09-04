@@ -8,8 +8,9 @@ A voxel game that runs in a browser. Built for children; playable at
 whole of it — clone it and run your own.
 
 Anyone can start a game, and sets it up before going in: the mode, the
-map, how big the world is, how long a round lasts, how many teams, how
-many players it has seats for, and who is allowed to fly. Computer
+map, how big the world is, how long a round lasts, how many teams (or
+solo, everyone for themselves), how many players it has seats for, and
+who is allowed to fly. Computer
 players fill the seats people are not in, so the game is the size it was
 made whether one child is in it or six. A public one is listed for
 everybody, with what it is written under its name; a private one gets a

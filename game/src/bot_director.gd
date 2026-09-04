@@ -302,7 +302,24 @@ func fill() -> void:
 	if roster.size() != before:
 		print("Computer players: %d -> %d (%d seats, %d others)"
 			% [before, roster.size(), Game.player_limit, others])
+	if world.solo:
+		_sides_for_everyone()
 	redistribute()
+
+## SOLO: as many sides as there are players, so redistribute() — which
+## hands each computer player the emptiest side — puts one on each, and
+## a person arriving finds a side of their own free (their seat came
+## from a computer player, whose side went with it).
+func _sides_for_everyone() -> void:
+	var want := clampi(Game.roster.size(), 2, world.TEAM_NAMES.size())
+	if want == world.team_count:
+		return
+	world.team_count = want
+	world.team_names = world.TEAM_NAMES.slice(0, want)
+	for id: String in Game.roster.keys():
+		if int(Game.roster[id].get("team", -1)) >= want:
+			Game.roster[id].team = -1
+	world.cl_teams.rpc(world.team_names)
 
 ## One computer player, out of the room for good: its body, its place in
 ## the round, its name on the roster.

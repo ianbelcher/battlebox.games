@@ -102,7 +102,17 @@ const UNLIMITED := 60
 ## played in, so it is chosen here with everything else — and the seats
 ## are dealt across them at boot. Up to ten: the world has twenty-four
 ## colours, but a row of buttons has to end somewhere a child can read.
-const TEAM_COUNTS := [2, 3, 4, 5, 6, 7, 8, 9, 10]
+##
+## ONE IS SOLO. A free-for-all is not "no teams", it is teams of one:
+## every seat is its own side, with its own colour, and the sides follow
+## the roster as people come and go (BotDirector.fill). Everything that
+## thinks in sides — where you start, who can pick you up, who won —
+## keeps working, because there ARE sides; you are just alone on yours.
+const SOLO := 1
+const TEAM_COUNTS := [SOLO, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+## Twenty-four colours, so twenty-four is as many people as can each
+## have one — the most a solo game seats.
+const SOLO_MAX_PLAYERS := 24
 
 ## THE NEUTRAL BASELINE, not what the New game screen opens on — see
 ## opening_choice(). It is creative because that is what a room created
@@ -231,7 +241,9 @@ static func length_label(minutes: int) -> String:
 static func seats_for(limit: int, teams: int) -> int:
 	if limit <= 0:
 		return 0
-	if teams <= 1:
+	if teams == SOLO:
+		return mini(limit, SOLO_MAX_PLAYERS)
+	if teams <= 0:
 		return limit
 	return maxi(1, limit / teams) * teams
 
@@ -244,6 +256,8 @@ static func players_label(limit: int, teams := 0) -> String:
 	if teams > 1:
 		var seats := seats_for(limit, teams)
 		return "%d players  ·  %d a side" % [seats, seats / teams]
+	if teams == SOLO:
+		return "%d players  ·  everyone for themselves" % seats_for(limit, teams)
 	return "%d players" % limit
 
 ## THE LINE UNDER THE PLAYERS ROW, which is where the two rows meet. The
@@ -257,10 +271,14 @@ static func seats_note(limit: int, teams := 0) -> String:
 	if teams > 1:
 		var seats := seats_for(limit, teams)
 		return "%d players over %d teams: %d a side. %s" % [seats, teams, seats / teams, fill]
+	if teams == SOLO:
+		var seats := seats_for(limit, teams)
+		var capped := "" if seats == limit else " (%d is as many as can each have a colour)" % SOLO_MAX_PLAYERS
+		return "%d players, everyone for themselves%s. %s" % [seats, capped, fill]
 	return fill
 
 static func teams_label(count: int) -> String:
-	return "%d teams" % count
+	return "Solo" if count == SOLO else "%d teams" % count
 
 static func fly_label(answer: String) -> String:
 	match answer:

@@ -258,7 +258,9 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(lobby.clean_settings({"teams": 8})["teams"], 8)
         self.assertEqual(lobby.clean_settings({"teams": 10})["teams"], 10)
         self.assertEqual(lobby.clean_settings({"teams": 11})["teams"], 5)
-        self.assertEqual(lobby.clean_settings({"teams": 1})["teams"], 5)
+        # One is solo — everyone for themselves — and zero is nothing.
+        self.assertEqual(lobby.clean_settings({"teams": 1})["teams"], 1)
+        self.assertEqual(lobby.clean_settings({"teams": 0})["teams"], 5)
 
     def test_the_revive_ladder_clamps_to_its_rungs(self):
         # A range rather than a list of choices, so out-of-range lands on

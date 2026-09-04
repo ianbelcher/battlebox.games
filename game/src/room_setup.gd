@@ -61,15 +61,19 @@ static func apply(world: Node) -> void:
 	# of them. sv_add_team and sv_remove_team go one at a time and each
 	# broadcasts; there is nobody here to broadcast to yet.
 	var teams := EnvConfig.number("WORLD_TEAMS", 0)
-	if teams > 0:
+	if teams == GameSetup.SOLO:
+		# Everyone for themselves: a side each, and BotDirector.fill keeps
+		# the number of sides equal to the number of players.
+		world.solo = true
+	elif teams > 0:
 		world.team_count = clampi(teams, 2, 24)
 		world.team_names = world.TEAM_NAMES.slice(0, world.team_count)
 	# HOW MANY SEATS, dealt evenly across those sides: a hundred over nine
 	# teams is ninety-nine, eleven a side. Computer players fill whichever
 	# seats people are not in (BotDirector.fill), so this is the size of
 	# the game rather than a count of anybody in particular.
-	Game.player_limit = GameSetup.seats_for(
-		wanted_players(world.DEFAULT_PLAYERS), world.team_count)
+	Game.player_limit = GameSetup.seats_for(wanted_players(world.DEFAULT_PLAYERS),
+		GameSetup.SOLO if world.solo else world.team_count)
 	if EnvConfig.has("WORLD_REVIVE"):
 		world.revive_mode = clampi(
 			EnvConfig.number("WORLD_REVIVE", world.revive_mode),
@@ -93,6 +97,6 @@ static func apply(world: Node) -> void:
 static func describe(world: Node) -> String:
 	var minutes: float = world.holdout_minutes if world.game_mode == "holdout" \
 		else world.storm_minutes
-	return "ROOM setup mode=%s map=%s size=%d minutes=%d seats=%d teams=%d" % [
+	return "ROOM setup mode=%s map=%s size=%d minutes=%d seats=%d teams=%s" % [
 		world.game_mode, world.store.theme, world.store.world_size,
-		int(minutes), Game.player_limit, world.team_count]
+		int(minutes), Game.player_limit, "solo" if world.solo else str(world.team_count)]

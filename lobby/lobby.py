@@ -146,7 +146,8 @@ FLY_ANSWERS = ("everyone", "nobody", "computers", "humans")
 # seats people are not in. Zero is "just us".
 PLAYER_LIMITS = (0, 4, 6, 8, 10, 16, 20, 30, 50, 100)
 TARGETS = (1, 3, 5, 10)
-TEAM_COUNTS = (2, 3, 4, 5, 6, 7, 8, 9, 10)
+# One is solo: everyone for themselves, a side each.
+TEAM_COUNTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 # ONE LIST, for every mode that has a clock. It used to be 3/5/8 for
 # battle royale and 2/5/10 for last flag standing, for no reason either
 # mode could explain — and on screen that is a row whose buttons move and

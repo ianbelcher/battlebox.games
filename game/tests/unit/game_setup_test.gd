@@ -91,8 +91,26 @@ func test_teams_are_part_of_the_game() -> void:
 	equal(GameSetup.clean({"teams": 10})["teams"], 10, "up to ten")
 	equal(GameSetup.clean({"teams": 11})["teams"], GameSetup.DEFAULT_TEAMS,
 		"eleven is not on the list")
-	equal(GameSetup.clean({"teams": 1})["teams"], GameSetup.DEFAULT_TEAMS,
-		"and one side is not a game")
+	equal(GameSetup.clean({"teams": 1})["teams"], GameSetup.SOLO,
+		"one is solo: everyone for themselves")
+	equal(GameSetup.clean({"teams": 0})["teams"], GameSetup.DEFAULT_TEAMS,
+		"and no sides at all is not a thing")
+	equal(GameSetup.teams_label(GameSetup.SOLO), "Solo", "said as what it is")
+
+## SOLO IS TEAMS OF ONE. Not "no teams": every seat is its own side, so
+## everything that thinks in sides keeps working, and the only limit is
+## how many colours there are for people to each have one.
+func test_solo_is_a_side_each() -> void:
+	equal(GameSetup.seats_for(10, GameSetup.SOLO), 10, "ten players, ten sides")
+	equal(GameSetup.seats_for(100, GameSetup.SOLO), GameSetup.SOLO_MAX_PLAYERS,
+		"a full house is as many as have a colour")
+	equal(GameSetup.players_label(10, GameSetup.SOLO),
+		"10 players  ·  everyone for themselves", "and the label says so")
+	equal(GameSetup.seats_note(10, GameSetup.SOLO),
+		"10 players, everyone for themselves. Computer players fill the seats people are not in.",
+		"the line under the row too")
+	has(GameSetup.seats_note(100, GameSetup.SOLO), "24 is as many",
+		"and says why a hundred became twenty-four")
 	check(GameSetup.uses("teams", "battle"), "a battle has sides")
 	check(not GameSetup.uses("teams", "creative"),
 		"nobody is on a side in creative")
