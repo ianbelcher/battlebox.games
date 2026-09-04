@@ -162,6 +162,10 @@ func _ready() -> void:
 	# is drawn.
 	if OS.get_environment("WORLD_GHOST_TEST") == "1":
 		add_child(load("res://tests/ghost_probe.gd").new())
+	# WORLD_SIGHT_TEST=1: are the names and hearts over other players'
+	# heads drawn only for the seats that can actually see them?
+	if OS.get_environment("WORLD_SIGHT_TEST") == "1":
+		add_child(load("res://tests/sight_probe.gd").new())
 	# WORLD_DOWNED_TINTS=1: knock this player out and report what is red.
 	if OS.get_environment("WORLD_DOWNED_TINTS") == "1":
 		add_child(load("res://tests/downed_tints.gd").new())

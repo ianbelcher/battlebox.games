@@ -98,6 +98,8 @@ listed like any other room, and says what it is like any other room.
 | `lobby_client.gd` | The lobby's JSON API, with no UI in it |
 | `ui_theme.gd` | Every colour, radius and font size in every menu |
 | `splitscreen.gd` | 1–4 SubViewports sharing one World3D, one camera each |
+| `render_layers.gd` | Which camera draws what: your own body, your own held item, and the tags over the heads you can see |
+| `overhead_sight.gd` | Whether a seat has a clear line to a body, so a name or hearts never float over the wall somebody is hiding behind. Pure; no nodes |
 | `player.gd` | Movement, aim, actions. Hand-rolled voxel AABB, no physics engine |
 | `player_hud.gd` | Per-player overlay: hotbar, radar, the picker, the menus |
 | `world_menu.gd` | The grown-ups' menu (keyboard and mouse only, on purpose) |

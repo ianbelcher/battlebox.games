@@ -417,7 +417,7 @@ func _process(delta: float) -> void:
 			continue
 		cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 		cam.near = 0.5
-		cam.cull_mask = RenderLayers.camera_mask(-1)
+		cam.cull_mask = RenderLayers.orbit_mask(player.slot)
 		if cell.get("vm") != null and is_instance_valid(cell.vm):
 			cell.vm.queue_free()
 			cell.vm = null
@@ -488,6 +488,58 @@ func _process(delta: float) -> void:
 	var target_mode := Input.MOUSE_MODE_CAPTURED if want_capture else Input.MOUSE_MODE_VISIBLE
 	if Input.mouse_mode != target_mode:
 		Input.mouse_mode = target_mode
+	_update_overhead_sight(delta)
+
+## WHO CAN SEE WHOM, for the names and hearts over everybody's head.
+##
+## The tags used to be drawn for every camera, and a tag floats above the
+## blocks its player is behind — so hiding did not work: crouch behind a
+## wall and your hearts hung over it like a flag. Now each seat's camera
+## only draws the tags of the bodies it has a clear line to. The check is
+## a half-block walk through the client's copy of the world
+## (OverheadSight), a few times a second rather than every frame, with a
+## short hold after the line breaks so a tag does not flicker at the
+## edge of a doorway.
+##
+## Nothing is drawn on a headless run (the server runs its computer
+## players as local seats), so there is nothing to work out there.
+const SIGHT_PERIOD := 0.1
+const SIGHT_HOLD_MSEC := 350
+var _sight_clock := 0.0
+var _headless := DisplayServer.get_name() == "headless"
+
+func _update_overhead_sight(delta: float) -> void:
+	if _headless:
+		return
+	_sight_clock += delta
+	if _sight_clock < SIGHT_PERIOD:
+		return
+	_sight_clock = 0.0
+	if world == null or world.players == null or world.chunks == null:
+		return
+	var chunks: ChunkView = world.chunks
+	var opaque_at := func(cell: Vector3i) -> bool:
+		return Blocks.is_opaque(chunks.get_block(cell))
+	var now := Time.get_ticks_msec()
+	for child in world.players.get_children():
+		if not (child is Player):
+			continue
+		var player: Player = child
+		var seen_by: Array = []
+		for cell: Dictionary in _cells:
+			if cell.slot < 0 or cell.cam == null:
+				continue
+			if player.is_local and player.slot == cell.slot:
+				continue
+			var cam: Camera3D = cell.cam
+			if OverheadSight.body_in_view(cam.global_position,
+					-cam.global_transform.basis.z,
+					cam.projection == Camera3D.PROJECTION_ORTHOGONAL,
+					player.global_position, opaque_at):
+				player.seen_at[cell.slot] = now
+			if now - int(player.seen_at.get(cell.slot, -SIGHT_HOLD_MSEC * 2)) <= SIGHT_HOLD_MSEC:
+				seen_by.append(cell.slot)
+		player.set_overhead_layers(OverheadSight.layers_for(seen_by))
 
 
 ## X-Ray Goggles: while held, every other player gets a glowing marker

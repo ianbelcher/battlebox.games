@@ -379,6 +379,16 @@ var _warp_cooldown := 0.0
 
 var _avatar: Node3D
 var _tag: Label3D
+## The name over a person's head. Only people get one: the computer
+## players are the ones you do NOT need to tell apart, and on a screen
+## full of hearts a name is how you find your friend in the scrap.
+var _name_tag: Label3D
+var _name := ""
+var _human := true
+## When each seat's camera last had a clear line to this body, in ticks;
+## kept here so the sight pass in SplitScreen can hold a tag on for a
+## moment after the line breaks instead of flickering it at every edge.
+var seen_at: Dictionary = {}
 var _glow: OmniLight3D
 var _highlight: MeshInstance3D
 var _send_accum := 0.0
@@ -400,8 +410,10 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 		_avatar = AvatarFactory.build_character({})
 	_avatar.scale = Vector3(1.15, 1.15, 1.15)
 	add_child(_avatar)
+	_name = str(entry.name)
+	_human = not bool(entry.get("bot", false))
 	_tag = Label3D.new()
-	_tag.text = str(entry.name)
+	_tag.text = ""
 	_tag.font_size = 44
 	_tag.pixel_size = 0.006
 	_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -410,8 +422,23 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 	_tag.outline_modulate = Color(0.05, 0.05, 0.1, 0.9)
 	_tag.outline_size = 14
 	_tag.position = Vector3(0, 2.1, 0)
-	_tag.visible = not is_local  # your own tag is pure noise to you
 	add_child(_tag)
+	_name_tag = Label3D.new()
+	_name_tag.text = _name if _human else ""
+	_name_tag.font_size = 40
+	_name_tag.pixel_size = 0.006
+	_name_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_name_tag.no_depth_test = false
+	_name_tag.modulate = Color.WHITE
+	_name_tag.outline_modulate = Color(0.05, 0.05, 0.1, 0.9)
+	_name_tag.outline_size = 12
+	_name_tag.position = Vector3(0, NAME_ALONE_HEIGHT, 0)
+	add_child(_name_tag)
+	# Drawn by nobody until a seat's camera has actually seen this body
+	# (SplitScreen._update_overhead_sight). NOT `visible = false` for your
+	# own tag: that hid it from the person next to you on the sofa too.
+	# The spectator camera is the exception and always sees it.
+	set_overhead_layers(RenderLayers.OVERHEAD_SPECTATOR)
 	# Every character carries a modest warm lantern so night isn't a void —
 	# dim enough that it never blooms or floodlights a drop cluster.
 	_glow = OmniLight3D.new()
@@ -438,16 +465,20 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 	_apply_render_layer()
 
 ## Overhead display: hearts in two rows of four, trimmed in team color —
-## you read health and side at a glance instead of a name.
+## you read health and side at a glance. A person's name sits above the
+## hearts; a team-mate has no hearts over them, so their name drops down
+## to where the hearts would have been instead of floating high alone.
+##
+## Where the name sits, from the feet: on its own, and above one or two
+## rows of hearts (each row about 0.3 of a block tall at this size).
+const NAME_ALONE_HEIGHT := 2.05
+const NAME_OVER_HEARTS: Array[float] = [2.05, 2.42, 2.6]
+
 func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 		friendly := false) -> void:
 	if _tag == null:
 		return
-	if is_local or (friendly and not downed_now):
-		# Your own tag is noise to you, and teammates don't need targets
-		# over their heads — enemies do.
-		_tag.text = ""
-		return
+	var rows := 0
 	if downed_now:
 		# NOTHING over a downed player. The grey, half-transparent body is
 		# the signal now, and it says the same thing from any distance
@@ -455,13 +486,37 @@ func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 		# everybody else. Their team-mate is told who to go for by the
 		# prompt on their own HUD, which is where an instruction belongs.
 		_tag.text = ""
-		return
-	hp = clampi(hp, 0, 8)
-	var top_row := "".rpad(mini(hp, 4), "♥")
-	var bottom_row := "".rpad(maxi(hp - 4, 0), "♥")
-	_tag.text = top_row if bottom_row.is_empty() else top_row + "\n" + bottom_row
+	elif friendly:
+		# Teammates don't need targets over their heads — enemies do.
+		# (Your own body counts as a team-mate here: the seat you are in
+		# never draws your tag at all, see set_overhead_layers.)
+		_tag.text = ""
+	else:
+		hp = clampi(hp, 0, 8)
+		var top_row := "".rpad(mini(hp, 4), "♥")
+		var bottom_row := "".rpad(maxi(hp - 4, 0), "♥")
+		_tag.text = top_row if bottom_row.is_empty() else top_row + "\n" + bottom_row
+		rows = 1 if bottom_row.is_empty() else 2
 	_tag.modulate = Color(team_color.darkened(0.12), 0.9)
 	_tag.outline_modulate = Color(0.05, 0.05, 0.1, 0.95)
+	_name_tag.text = "" if downed_now or not _human else _name
+	_name_tag.modulate = Color(team_color, 0.95)
+	_name_tag.position = Vector3(0, NAME_OVER_HEARTS[rows], 0)
+
+## Which seats' cameras draw the tags over this head. A mask of
+## RenderLayers.overhead_of bits, built by OverheadSight.layers_for; the
+## seat this body belongs to is never in it — your own name is noise to
+## you, and the seat's camera already culls its own body.
+func set_overhead_layers(mask: int) -> void:
+	if is_local and slot >= 0:
+		mask &= ~RenderLayers.overhead_of(slot)
+	_tag.layers = mask
+	_name_tag.layers = mask
+
+## What is over this head right now, for tests/sight_probe.gd: the layer
+## mask the tags sit on, and the two texts.
+func overhead_state() -> Dictionary:
+	return {"layers": _tag.layers, "name": _name_tag.text, "hearts": _tag.text}
 
 ## THE LOOK OF SOMEBODY WHO IS OUT OF THE FIGHT: grey, and half there.
 ##
@@ -526,9 +581,11 @@ func set_knocked_out_look(out_of_it: bool) -> void:
 
 func refresh_from_roster(entry: Dictionary) -> void:
 	set_team_glow(int(entry.get("team", -1)))
-	_tag.text = str(entry.name)
+	_name = str(entry.name)
+	_human = not bool(entry.get("bot", false))
+	_name_tag.text = _name if _human else ""
 	var team := int(entry.get("team", -1))
-	_tag.modulate = WorldNode.TEAM_COLORS[team] if team >= 0 else Color.WHITE
+	_name_tag.modulate = WorldNode.TEAM_COLORS[team] if team >= 0 else Color.WHITE
 	var style: Dictionary = AvatarFactory.normalize_style(entry.get("style"))
 	if str(_avatar.get_meta("style", "")) != str(style):
 		var old := _avatar
@@ -552,7 +609,8 @@ func _apply_render_layer() -> void:
 		return
 	for node in _avatar.find_children("*", "VisualInstance3D", true, false):
 		(node as VisualInstance3D).layers = render_layer_bit()
-	_tag.layers = render_layer_bit()
+	# The tags are not on the body layer: which seats draw them is decided
+	# by line of sight, in SplitScreen._update_overhead_sight.
 
 func set_fp(enabled: bool) -> void:
 	if fp_mode == enabled:

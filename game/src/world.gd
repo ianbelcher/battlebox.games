@@ -2563,6 +2563,9 @@ func _client_sync_players() -> void:
 	for child in players.get_children():
 		if child is Player and not wanted.has(child.player_id):
 			child.queue_free()
+	# A new arrival, or somebody switching team, gets their hearts and
+	# name composed now rather than at the next heart change.
+	_refresh_overheads()
 
 func _client_update_focus() -> void:
 	var focus: Array = []

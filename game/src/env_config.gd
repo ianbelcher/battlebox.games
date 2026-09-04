@@ -112,6 +112,7 @@ const KNOWN := {
 	"WORLD_HUDDLE_TEST": "1 counts who is sat on their own flag and who is out attacking",
 	"WORLD_POLE_TEST": "1 turns reviving off and checks no flag channel starts with no way back",
 	"WORLD_GHOST_TEST": "1 reports whether a knocked-out team is actually hidden, or drawn and moving",
+	"WORLD_SIGHT_TEST": "1 reports which seats the names and hearts over each head are drawn for",
 	"WORLD_SIEGE_TEST": "1 reports how close anybody actually gets to an enemy flag, against the touch radius",
 	"WORLD_SNIPE_TEST": "1 shoots a computer player from out of its sight and reports its reaction",
 	"WORLD_SPREAD_TEST": "1 reports how far apart a team's defenders stand and which sides they cover",
