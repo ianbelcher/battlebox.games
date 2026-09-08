@@ -58,10 +58,14 @@ func _initialize() -> void:
 			print("  " + p)
 		quit(1)
 
-## Every phase world.gd ever puts the match into — read from the source,
-## so this cannot drift out of date the way a copied list would.
+## Every phase the match is ever put into — read from the source, so this
+## cannot drift out of date the way a copied list would. Both files: the
+## phases moved into match_director.gd when the simulation was split out
+## of world.gd, and a scan of world.gd alone found two of them and called
+## itself broken.
 func _phases_in_world() -> Array[String]:
-	var text := FileAccess.get_file_as_string("res://src/world.gd")
+	var text := FileAccess.get_file_as_string("res://src/world.gd") \
+		+ FileAccess.get_file_as_string("res://src/match_director.gd")
 	var found := {}
 	var regex := RegEx.new()
 	# match_phase = "X"   and   cl_match.rpc("X", ...)

@@ -165,7 +165,7 @@ func _spectator_prompt() -> Control:
 	# thing this screen is FOR — how to start playing — down the page in
 	# small print underneath it.
 	var prompt := Label.new()
-	prompt.text = "Jump in!"
+	prompt.text = "Jump in"
 	prompt.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE + 6, sc))
 	prompt.add_theme_font_override("font", UiTheme.heavy(sc, 0.6, -0.6))
 	prompt.add_theme_color_override("font_color", UiTheme.INK)

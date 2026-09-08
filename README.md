@@ -206,5 +206,5 @@ traps that have cost the most time.
 The code is [MIT](LICENSE). The art, sound, fonts and building kits are
 other people's work under their own terms, and [NOTICE](NOTICE) records
 which is which — Kenney (CC0) for everything you can see and hear,
-Silicon23 (MIT) for the 28 Minecraft builds. Nothing is bundled here that
+Silicon23 (MIT) for the 28 Minecraft builds, Barlow (OFL) for the type. Nothing is bundled here that
 its licence does not allow to be redistributed.

@@ -486,7 +486,7 @@ func _build_game_screen() -> void:
 	_game_screen.add_child(_players_label)
 	_wave_label = _make_label("", 20, Color("ff6b6b"), 4)
 	_game_screen.add_child(_wave_label)
-	_join_hint = _make_label("🎮  New player?  Press Ⓐ on another controller to hop in!",
+	_join_hint = _make_label("Press A on another controller to join",
 		15, Color(1, 1, 1, 0.65), 4)
 	_join_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_join_hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
@@ -518,7 +518,7 @@ func _build_game_screen() -> void:
 	vote_row.add_child(_make_label("Reset the world with a NEW map?", 16, GOLD))
 	var yes := Button.new()
 	yes.focus_mode = Control.FOCUS_NONE
-	yes.text = "Yes!"
+	yes.text = "Yes"
 	yes.pressed.connect(func() -> void:
 		Game.world.sv_reset_answer.rpc_id(1, true)
 		_vote_panel.visible = false)
@@ -548,7 +548,7 @@ func _build_game_screen() -> void:
 	_lobby_panel.add_child(lobby_box)
 	_lobby_label = _make_label("BATTLE ROYALE", 34, GOLD, 6)
 	lobby_box.add_child(_lobby_label)
-	lobby_box.add_child(_make_label("Pick your team!", 20, Color.WHITE))
+	lobby_box.add_child(_make_label("Pick your team", 20, Color.WHITE))
 	# NO STORM OR LOOT BUTTONS HERE. This overlay is what everybody looks
 	# at in the twenty seconds before a battle drops, and it carried two
 	# of the game's own settings — how long the round runs, and whether
@@ -572,10 +572,11 @@ func _build_game_screen() -> void:
 	_banner.visible = false
 	var banner_bg := StyleBoxFlat.new()
 	banner_bg.bg_color = Color(UiTheme.SURFACE, 0.92)
-	banner_bg.set_corner_radius_all(18)
+	banner_bg.set_corner_radius_all(14)
 	banner_bg.set_content_margin_all(int(26 * ui_scale()))
-	banner_bg.border_color = GOLD
-	banner_bg.set_border_width_all(2)
+	banner_bg.border_color = UiTheme.LINE
+	banner_bg.set_border_width_all(1)
+	_banner.add_theme_font_override("font", UiTheme.display(ui_scale(), 1.0, true))
 	_banner.add_theme_stylebox_override("normal", banner_bg)
 	_game_screen.add_child(_banner)
 
@@ -719,7 +720,7 @@ func _on_connected() -> void:
 		if not MatchUi.final_table_shows(str(Game.world.match_phase)):
 			final_scores.hide_now()
 		if Game.world.match_phase == "COUNTDOWN":
-			_news("Next battle starting soon — fresh map incoming!"))
+			_news("Next battle starting soon — on a fresh map"))
 	world.match_won.connect(func(winner: int) -> void:
 		# The scoreboard says who won, how many games they have taken and
 		# what everybody scored — so no banner on top of it.
@@ -729,9 +730,9 @@ func _on_connected() -> void:
 	world.reset_vote_started.connect(func() -> void: _vote_panel.visible = true)
 	world.reset_result.connect(func(happened: bool) -> void:
 		_vote_panel.visible = false
-		_news("A brand new world!" if happened else "Map reset was voted down"))
+		_news("A new world" if happened else "Map reset was voted down"))
 	world.survival_ended.connect(func(seconds: float, bonked: int) -> void:
-		_show_banner("You survived %d:%02d and bonked %d Grumps!" % [
+		_show_banner("You survived %d:%02d and bonked %d Grumps" % [
 			int(seconds / 60.0), int(seconds) % 60, bonked])
 	)
 	_refresh_survival()
@@ -780,7 +781,7 @@ func _arrive() -> void:
 		for input in seats:
 			Game.join_local(input as InputSlot)
 		_split.update_layout()
-		_news("Back in the world!")
+		_news("Back in the world")
 	elif _should_seat_the_keyboard():
 		# STRAIGHT INTO THE GAME. Pressing Play and then being asked to
 		# "press SPACE to jump in" is being asked to join twice; no game
@@ -1162,7 +1163,7 @@ func _rebuild_team_rows() -> void:
 		var is_mine: bool = entry.peer == me and Game.local_inputs.has(entry.slot)
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", int(8 * ui_scale()))
-		var who := _make_label(("🤖 " if is_bot else "") + str(entry.name) + ":", 20,
+		var who := _make_label(str(entry.name) + ":", 20,
 			Color.WHITE if is_mine or is_bot else Color(1, 1, 1, 0.55))
 		row.add_child(who)
 		for t in 4:
@@ -1190,7 +1191,7 @@ func _refresh_survival() -> void:
 	if _survival_button == null or Game.world == null:
 		return
 	_survival_button.visible = not Game.world.survival_active
-	_wave_label.text = "Wave %d!" % Game.world.survival_wave \
+	_wave_label.text = "Wave %d" % Game.world.survival_wave \
 		if Game.world.survival_active else ""
 
 var _banner_sticky := false
@@ -1314,13 +1315,13 @@ func _process(_delta: float) -> void:
 				break
 		_join_hint.visible = Game.local_inputs.size() < Game.MAX_LOCAL \
 			and world.match_phase == "IDLE" and spare_pad
-		_join_hint.text = "🎮  New player?  Press Ⓐ on another controller to hop in!"
+		_join_hint.text = "Press A on another controller to join"
 	# The per-player red warning lives in each PlayerHud now.
 	_storm_tint.color.a = 0.0
 	var clock: float = world.clock
 	var hour := int(fposmod(clock * 24.0, 24.0))
 	var night: bool = clock > 0.78 or clock < 0.22
-	_clock_label.text = "%s %02d:00" % ["☾" if night else "☀", hour]
+	_clock_label.text = "%02d:00" % hour
 	Sfx.play_ambient("crickets" if night else "birds")
 
 func _claimed_keys() -> Dictionary:

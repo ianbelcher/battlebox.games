@@ -151,11 +151,7 @@ func _ready() -> void:
 func _build_identity_chip() -> void:
 	var chip := PanelContainer.new()
 	chip.mouse_filter = Control.MOUSE_FILTER_STOP
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(UiTheme.SURFACE, 0.72)
-	style.set_corner_radius_all(10)
-	style.set_content_margin_all(8)
-	chip.add_theme_stylebox_override("panel", style)
+	chip.add_theme_stylebox_override("panel", UiTheme.hud_plate(_uscale()))
 	chip.position = Vector2(10, 10)
 	_chip = chip
 	add_child(chip)
@@ -165,6 +161,7 @@ func _build_identity_chip() -> void:
 
 	_name_label = Label.new()
 	_name_label.add_theme_font_size_override("font_size", _us(22))
+	_name_label.add_theme_font_override("font", UiTheme.display(_uscale(), 0.5))
 	_name_label.mouse_filter = Control.MOUSE_FILTER_STOP
 	_name_label.gui_input.connect(func(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.pressed \
@@ -173,6 +170,7 @@ func _build_identity_chip() -> void:
 	row.add_child(_name_label)
 	_treasure_label = Label.new()
 	_treasure_label.add_theme_font_size_override("font_size", _us(22))
+	_treasure_label.add_theme_font_override("font", UiTheme.display(_uscale(), 0.5))
 	_treasure_label.add_theme_color_override("font_color", UiTheme.ACCENT)
 	row.add_child(_treasure_label)
 	_name_label.visible = false
@@ -193,9 +191,7 @@ func _build_hotbar() -> void:
 	add_child(bar_stack)
 	var bar_panel := PanelContainer.new()
 	bar_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var bar_style := StyleBoxFlat.new()
-	bar_style.bg_color = Color(UiTheme.SURFACE, 0.6)
-	bar_style.set_corner_radius_all(10)
+	var bar_style := UiTheme.hud_plate(_uscale(), 0.66, UiTheme.R_CARD)
 	bar_style.set_content_margin_all(6)
 	bar_panel.add_theme_stylebox_override("panel", bar_style)
 	bar_stack.add_child(bar_panel)
@@ -212,9 +208,9 @@ func _build_hotbar() -> void:
 		var heart := Label.new()
 		heart.text = "♥"
 		heart.add_theme_font_size_override("font_size", _us(17))
-		heart.add_theme_color_override("font_color", Color("ff4438"))
-		heart.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-		heart.add_theme_constant_override("outline_size", 5)
+		heart.add_theme_color_override("font_color", UiTheme.DANGER)
+		heart.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+		heart.add_theme_constant_override("outline_size", 3)
 		heart.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		heart.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		col.add_child(heart)
@@ -230,8 +226,10 @@ func _build_hotbar() -> void:
 		frame.add_child(icon)
 		var num := Label.new()
 		num.text = str(i + 1)
+		num.position = Vector2(5, 2)
 		num.add_theme_font_size_override("font_size", _us(12))
-		num.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+		num.add_theme_font_override("font", UiTheme.display(_uscale()))
+		num.add_theme_color_override("font_color", Color(1, 1, 1, 0.45))
 		frame.add_child(num)
 		col.add_child(frame)
 		_hotbar.add_child(col)
@@ -249,11 +247,7 @@ func _build_hotbar() -> void:
 	# the screen — which is where the game is — clear.
 	var status_panel := PanelContainer.new()
 	status_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var status_style := StyleBoxFlat.new()
-	status_style.bg_color = Color(UiTheme.SURFACE, 0.55)
-	status_style.set_corner_radius_all(8)
-	status_style.content_margin_left = 12
-	status_style.content_margin_right = 12
+	var status_style := UiTheme.hud_plate(_uscale(), 0.66)
 	status_style.content_margin_top = 3
 	status_style.content_margin_bottom = 3
 	status_panel.add_theme_stylebox_override("panel", status_style)
@@ -264,7 +258,8 @@ func _build_hotbar() -> void:
 	# line you glance at, not a headline — at the size the hotbar numbers
 	# are drawn it read as the loudest thing on screen.
 	_selected_label.add_theme_font_size_override("font_size", _us(11))
-	_selected_label.add_theme_color_override("font_color", Color("e8d9a8"))
+	_selected_label.add_theme_font_override("font", UiTheme.display(_uscale(), 0.6))
+	_selected_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	_selected_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_selected_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	status_panel.add_child(_selected_label)
@@ -369,7 +364,8 @@ func _build_revive_ring() -> void:
 	add_child(_revive_ring)
 	_storm_arrow = Label.new()
 	_storm_arrow.add_theme_font_size_override("font_size", _us(30))
-	_storm_arrow.add_theme_color_override("font_color", Color("ff5a4a"))
+	_storm_arrow.add_theme_font_override("font", UiTheme.display(_uscale(), 1.0, true))
+	_storm_arrow.add_theme_color_override("font_color", UiTheme.DANGER)
 	_storm_arrow.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	_storm_arrow.add_theme_constant_override("outline_size", 8)
 	_storm_arrow.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
@@ -392,14 +388,11 @@ func _build_center_note() -> void:
 	# the hotbar, so it was competing with the busiest part of the screen
 	# on its own. A dark card behind it is what makes the size count.
 	_note_card = PanelContainer.new()
-	var note_bg := StyleBoxFlat.new()
-	note_bg.bg_color = Color(UiTheme.SURFACE, 0.86)
-	note_bg.set_corner_radius_all(_us(12))
-	note_bg.set_content_margin_all(_us(14))
+	var note_bg := UiTheme.hud_plate(_uscale(), 0.86, UiTheme.R_CARD)
+	note_bg.content_margin_top = _us(10)
+	note_bg.content_margin_bottom = _us(10)
 	note_bg.content_margin_left = _us(20)
 	note_bg.content_margin_right = _us(20)
-	note_bg.border_color = UiTheme.ACCENT
-	note_bg.set_border_width_all(_us(2))
 	_note_card.add_theme_stylebox_override("panel", note_bg)
 	_note_card.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 	_note_card.grow_horizontal = Control.GROW_DIRECTION_BEGIN
@@ -418,9 +411,8 @@ func _build_center_note() -> void:
 	# is set in _refresh_crosshair_and_layout, which overrides this the
 	# moment the cell has a size — see the note there.
 	_center_note.add_theme_font_size_override("font_size", _us(34))
-	_center_note.add_theme_color_override("font_color", UiTheme.ACCENT)
-	_center_note.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
-	_center_note.add_theme_constant_override("outline_size", _us(6))
+	_center_note.add_theme_font_override("font", UiTheme.display(_uscale(), 0.5, true))
+	_center_note.add_theme_color_override("font_color", UiTheme.INK)
 	_center_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	# NO WRAPPING. The card is anchored to the corner and grows leftwards,
 	# so it has no width for a wrap to measure against — turning wrapping
@@ -511,7 +503,7 @@ func _refresh_round_card(phase: String) -> void:
 	if phase == "LOBBY":
 		_round_title.text = ("Starting in %d" % secs) if secs > 0 else "Starting…"
 	else:
-		_round_title.text = "Get ready!"
+		_round_title.text = "Get ready"
 	_round_hint.visible = phase == "LOBBY"
 	var me := _me()
 	var entry: Dictionary = Game.roster.get(me, {})
@@ -562,12 +554,12 @@ func _build_storm_line() -> void:
 	# know exactly when it starts and how long until it's fully closed.
 	_storm_label = Label.new()
 	_storm_label.add_theme_font_size_override("font_size", _us(20))
-	_storm_label.add_theme_color_override("font_color", Color("c9a2ff"))
-	_storm_label.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
-	_storm_label.add_theme_constant_override("outline_size", 5)
+	_storm_label.add_theme_font_override("font", UiTheme.display(_uscale(), 1.2))
+	_storm_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	_storm_label.add_theme_stylebox_override("normal", UiTheme.hud_plate(_uscale()))
 	_storm_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_storm_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_storm_label.offset_top = _us(38)
+	_storm_label.offset_top = _us(48)
 	_storm_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_storm_label.visible = false
 	add_child(_storm_label)
@@ -626,12 +618,17 @@ func _build_death_wash() -> void:
 	# in capture the flag actually needs to read.
 	_death_note = Label.new()
 	_death_note.add_theme_font_size_override("font_size", _us(44))
-	_death_note.add_theme_color_override("font_color", Color("ff5a4d"))
-	_death_note.add_theme_color_override("font_outline_color", Color(0.05, 0.02, 0.02, 0.95))
-	_death_note.add_theme_constant_override("outline_size", 8)
+	_death_note.add_theme_font_override("font", UiTheme.display(_uscale(), 1.5, true))
+	_death_note.add_theme_color_override("font_color", UiTheme.DANGER)
+	_death_note.add_theme_color_override("font_outline_color", Color(0.05, 0.02, 0.02, 0.9))
+	_death_note.add_theme_constant_override("outline_size", 6)
 	_death_note.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	_death_note.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_death_note.grow_vertical = Control.GROW_DIRECTION_BOTH
+	# Above the middle, not on it: dead centre is where the crosshair is,
+	# and the two drew through each other.
+	_death_note.offset_top = -_us(120)
+	_death_note.offset_bottom = -_us(120)
 	_death_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_death_note.visible = false
 	add_child(_death_note)
@@ -642,22 +639,20 @@ func _build_name_chip() -> void:
 	# speak of — just a sliver of backing so it reads over terrain.
 	_name_chip = Label.new()
 	_name_chip.add_theme_font_size_override("font_size", _us(14))
-	_name_chip.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
-	_name_chip.add_theme_constant_override("outline_size", 3)
-	var chip_bg := StyleBoxFlat.new()
-	chip_bg.bg_color = Color(UiTheme.SURFACE, 0.7)
+	_name_chip.add_theme_font_override("font", UiTheme.display(_uscale(), 0.8))
+	_name_chip.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	var chip_bg := UiTheme.hud_plate(_uscale(), 0.7, 4)
 	chip_bg.set_content_margin_all(2)
-	chip_bg.content_margin_left = 6
-	chip_bg.content_margin_right = 6
-	chip_bg.set_corner_radius_all(4)
+	chip_bg.content_margin_left = 7
+	chip_bg.content_margin_right = 7
 	_name_chip.add_theme_stylebox_override("normal", chip_bg)
 	_name_chip.position = Vector2(4, 4)
 	add_child(_name_chip)
 	_score_label = Label.new()
-	_score_label.add_theme_font_size_override("font_size", _us(17))
+	_score_label.add_theme_font_size_override("font_size", _us(19))
+	_score_label.add_theme_font_override("font", UiTheme.display(_uscale(), 0.8))
 	_score_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.95))
-	_score_label.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
-	_score_label.add_theme_constant_override("outline_size", 5)
+	_score_label.add_theme_stylebox_override("normal", UiTheme.hud_plate(_uscale()))
 	_score_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
 	_score_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_score_label.offset_top = _us(8)
@@ -754,10 +749,10 @@ func _build_capture_fade() -> void:
 	_damage_arrow.visible = false
 	add_child(_damage_arrow)
 	_revive_hint = Label.new()
-	_revive_hint.add_theme_font_size_override("font_size", _us(17))
-	_revive_hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
-	_revive_hint.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
-	_revive_hint.add_theme_constant_override("outline_size", 5)
+	_revive_hint.add_theme_font_size_override("font_size", _us(18))
+	_revive_hint.add_theme_font_override("font", UiTheme.display(_uscale(), 0.6))
+	_revive_hint.add_theme_color_override("font_color", UiTheme.INK)
+	_revive_hint.add_theme_stylebox_override("normal", UiTheme.hud_plate(_uscale()))
 	_revive_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_revive_hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_revive_hint.offset_top = -_us(190)
@@ -878,9 +873,9 @@ func _build_picker_pages() -> void:
 			if victim_team >= 0 and victim_team < WorldNode.TEAM_COLORS.size():
 				vic_color = "#" + WorldNode.TEAM_COLORS[victim_team].to_html(false)
 			if attacker.is_empty():
-				line.text = "☁💥  [color=%s]%s[/color]" % [vic_color, victim]
+				line.text = "[color=#6b6775]Storm[/color]  ›  [color=%s]%s[/color]" % [vic_color, victim]
 			else:
-				line.text = "[color=%s]%s[/color]  💥  [color=%s]%s[/color]" % [
+				line.text = "[color=%s]%s[/color]  ›  [color=%s]%s[/color]" % [
 					atk_color, attacker, vic_color, victim]
 			_feed_box.add_child(line)
 			# GONE AFTER TEN SECONDS. The feed only ever grew — 24 lines of
@@ -960,12 +955,6 @@ func _build_menu_header() -> Control:
 	row.add_theme_constant_override("separation", UiTheme.px(12, _menu_scale))
 	box.add_child(row)
 
-	var mark := Label.new()
-	mark.text = "🎒"
-	mark.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE, _menu_scale))
-	mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(mark)
-
 	var titles := VBoxContainer.new()
 	titles.add_theme_constant_override("separation", 0)
 	titles.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -974,7 +963,8 @@ func _build_menu_header() -> Control:
 	title.text = "YOUR STUFF"
 	title.add_theme_font_size_override("font_size",
 		UiTheme.px(UiTheme.T_TITLE, _menu_scale))
-	title.add_theme_color_override("font_color", UiTheme.ACCENT)
+	title.add_theme_font_override("font", UiTheme.display(_menu_scale, 1.0, true))
+	title.add_theme_color_override("font_color", UiTheme.INK)
 	titles.add_child(title)
 	_menu_who = Label.new()
 	_menu_who.text = "Blocks, kits and who you are"
@@ -1426,8 +1416,8 @@ func _build_game_tab() -> void:
 	var manage_row := HBoxContainer.new()
 	manage_row.add_theme_constant_override("separation", _us(8))
 	tab.add_child(manage_row)
-	for spec in [["➕ Team", "add_team"], ["➖ Team", "remove_team"],
-			["➕ Computer player", "add_bot"], ["➖ Computer player", "remove_bot"]]:
+	for spec in [["+  Team", "add_team"], ["−  Team", "remove_team"],
+			["+  Computer player", "add_bot"], ["−  Computer player", "remove_bot"]]:
 		var manage_btn := Button.new()
 		manage_btn.focus_mode = Control.FOCUS_NONE
 		manage_btn.text = str(spec[0])
@@ -1534,9 +1524,10 @@ func _page_disabled(page: int) -> bool:
 
 func _add_section(tab: Control, title: String) -> void:
 	var lbl := Label.new()
-	lbl.text = title
-	lbl.add_theme_font_size_override("font_size", _us(16))
-	lbl.add_theme_color_override("font_color", UiTheme.ACCENT)
+	lbl.text = title.to_upper()
+	lbl.add_theme_font_size_override("font_size", _us(15))
+	lbl.add_theme_font_override("font", UiTheme.display(_menu_scale, 1.6))
+	lbl.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	tab.add_child(lbl)
 	tab.add_child(HSeparator.new())
 
@@ -1889,13 +1880,12 @@ func _update_clock() -> void:
 	if world == null:
 		return
 	var hour := int(fposmod(world.clock * 24.0, 24.0))
-	var night: bool = world.clock > 0.78 or world.clock < 0.22
 	if _selected_label != null:
 		var parts: Array = []
 		var holding := _held_name()
 		if not holding.is_empty():
 			parts.append(holding)
-		parts.append("%s %02d:00" % ["☾" if night else "☀", hour])
+		parts.append("%02d:00" % hour)
 		# People, then computer players. The same reason the first screen
 		# splits them: "6 playing" in a room with one child and five bots
 		# is the wrong answer to the only question being asked.
@@ -1907,7 +1897,7 @@ func _update_clock() -> void:
 			else:
 				humans += 1
 		parts.append("%d playing" % humans if bots == 0
-			else "%d playing + %d 🤖" % [humans, bots])
+			else "%d playing  ·  %d computer" % [humans, bots])
 		_selected_label.text = "   ·   ".join(parts)
 
 ## What the player is holding, in words. Empty if their hand is empty.
@@ -2083,7 +2073,7 @@ func _refresh_team_box() -> void:
 		var mine: bool = int(entry.peer) == me and int(entry.slot) == slot
 		var bot: bool = bool(entry.get("bot", false))
 		var name_label := Label.new()
-		name_label.text = str(entry.name) + (" (you)" if mine else "") + ("  🤖" if bot else "")
+		name_label.text = str(entry.name) + (" (you)" if mine else "") + ("  · computer" if bot else "")
 		name_label.custom_minimum_size = Vector2(_us(120), 0)
 		name_label.add_theme_font_size_override("font_size", _us(15))
 		name_label.add_theme_color_override("font_color",
@@ -2244,10 +2234,11 @@ func _refresh_ctf_panel() -> void:
 	# THE HEADING SAYS WHAT THE MODE IS PLAYED ON, and last flag standing
 	# is not played on a target — it was reading "first to 3" in a mode
 	# where reaching three of anything means nothing at all.
-	head.text = "🛡  last flag standing   (took/lost)" if world.client_mode == "holdout" \
-		else "⚑  first to %d   (took/lost)" % int(world.ctf_target)
-	head.add_theme_font_size_override("font_size", _us(12))
-	head.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
+	head.text = "LAST FLAG STANDING   took / lost" if world.client_mode == "holdout" \
+		else "FIRST TO %d   took / lost" % int(world.ctf_target)
+	head.add_theme_font_size_override("font_size", _us(13))
+	head.add_theme_font_override("font", UiTheme.display(_uscale(), 1.2))
+	head.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
 	head.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
 	head.add_theme_constant_override("outline_size", 4)
 	_ctf_panel.add_child(head)
@@ -2339,20 +2330,20 @@ func _rename_team(head: Button, index: int) -> void:
 func _build_help_tab() -> void:
 	var tab := _scrolled_tab("Help", _video_tabs)
 	tab.add_theme_constant_override("separation", _us(6))
-	_add_section(tab, "🎮  CONTROLLER")
+	_add_section(tab, "CONTROLLER")
 	for line in ["Left stick — move      L3 (click stick) — creep quietly",
 			"Right stick — orbit the camera, up and down too",
-			"Ⓐ — jump / select      Ⓑ or RB — dig",
+			"A — jump / select      B or RB — dig",
 			"RT — fire / place      LB — fly up      LT — descend",
 			"D-pad up/down — zoom      D-pad left/right — weapon",
-			"Ⓨ — camera view (orbit / top-down / first person)",
-			"Start or Ⓧ — menu      in menu: LB/RB pages, LT/RT groups",
-			"Hold Ⓑ — leave the game"]:
+			"Y — camera view (orbit / top-down / first person)",
+			"Start or X — menu      in menu: LB/RB pages, LT/RT groups",
+			"Hold B — leave the game"]:
 		var pad_line := Label.new()
 		pad_line.text = str(line)
 		pad_line.add_theme_font_size_override("font_size", _us(17))
 		tab.add_child(pad_line)
-	_add_section(tab, "⌨  KEYBOARD + MOUSE")
+	_add_section(tab, "KEYBOARD + MOUSE")
 	for line in ["WASD — move      Shift — creep      Space — jump",
 			"Z / X — spin camera      E — blocks      ` — menu",
 			"Click — dig      Right-click — place      1-8 — hotbar",
@@ -2361,14 +2352,14 @@ func _build_help_tab() -> void:
 		key_line.text = str(line)
 		key_line.add_theme_font_size_override("font_size", _us(17))
 		tab.add_child(key_line)
-	_add_section(tab, "🏆  BATTLE ROYALE")
+	_add_section(tab, "BATTLE ROYALE")
 	for line in ["Set up teams and computer players on Game ▸ Players.",
-			"Grab crates for weapons — the sword alone won't win it.",
+			"Grab crates for weapons — the sword alone will not win it.",
 			"Stay inside the storm circle (watch the radar ring).",
 			"Downed teammates revive if you stand close to them.",
 			"Winner sticks around — battles loop until the host stops them."]:
 		var tip_line := Label.new()
-		tip_line.text = "• " + str(line)
+		tip_line.text = str(line)
 		tip_line.add_theme_font_size_override("font_size", _us(17))
 		tab.add_child(tip_line)
 
@@ -2390,12 +2381,14 @@ func _build_video_tab() -> void:
 		tbtn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		tbtn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tbtn.add_theme_font_size_override("font_size", _us(20))
-		tbtn.text = ("☑  " if Game.video[key] else "☐  ") + str(spec[1])
+		tbtn.text = str(spec[1]) + ("    ·  ON" if Game.video[key] else "    ·  OFF")
 		var label_text := str(spec[1])
-		# Every row is the same width; ON shows as a gold wash so width
+		# Every row is the same width; ON shows as an ember tint so width
 		# never reads as the "selected" signal.
 		var on_style := StyleBoxFlat.new()
-		on_style.bg_color = Color(1.0, 0.82, 0.4, 0.18)
+		on_style.bg_color = UiTheme.ACCENT_SOFT
+		on_style.border_color = Color(UiTheme.ACCENT, 0.6)
+		on_style.set_border_width_all(1)
 		on_style.set_corner_radius_all(9)
 		on_style.set_content_margin_all(_us(7))
 		on_style.content_margin_left = _us(14)
@@ -2413,7 +2406,7 @@ func _build_video_tab() -> void:
 		apply_style.call()
 		tbtn.pressed.connect(func() -> void:
 			Game.video[key] = not bool(Game.video[key])
-			tbtn.text = ("☑  " if Game.video[key] else "☐  ") + label_text
+			tbtn.text = label_text + ("    ·  ON" if Game.video[key] else "    ·  OFF")
 			apply_style.call()
 			Game.video_changed.emit()
 			Sfx.play("tick", -10.0))
@@ -2662,21 +2655,21 @@ func _refresh_battle_prompts(player: Player) -> void:
 		match world.match_phase:
 			"IDLE":
 				_battle_start.disabled = false
-				_battle_start.text = "🏆  Start Battle"
+				_battle_start.text = "Start battle"
 			"LOBBY":
 				_battle_start.disabled = true
-				_battle_start.text = "⚔  Battle starts in %d…" % int(ceil(world.match_seconds))
+				_battle_start.text = "Battle starts in %d…" % int(ceil(world.match_seconds))
 			"COUNTDOWN":
 				_battle_start.disabled = true
-				_battle_start.text = "🏆  Next battle in %d…" % int(ceil(world.match_seconds))
+				_battle_start.text = "Next battle in %d…" % int(ceil(world.match_seconds))
 			_:
 				_battle_start.disabled = true
-				_battle_start.text = "⚔  Battle in progress"
+				_battle_start.text = "Battle in progress"
 	if _lobby_countdown != null and world != null:
 		var in_lobby: bool = world.match_phase == "LOBBY"
 		_lobby_countdown.visible = in_lobby
 		if in_lobby:
-			_lobby_countdown.text = "🏆  Battle starts in %d — pick your team!" \
+			_lobby_countdown.text = "Battle starts in %d — pick your team" \
 				% int(ceil(world.match_seconds))
 	if _revive_hint != null and world != null:
 		var mate_down := ""
@@ -2701,8 +2694,8 @@ func _refresh_battle_prompts(player: Player) -> void:
 							mate_reach = gap < WorldNode.REVIVE_RADIUS
 		if not mate_down.is_empty():
 			_revive_hint.visible = true
-			_revive_hint.text = ("⛑  Hold still — picking %s up!" % mate_down) \
-				if mate_reach else ("⛑  Get to %s to pick them up!" % mate_down)
+			_revive_hint.text = ("Hold still — picking %s up" % mate_down) \
+				if mate_reach else ("Get to %s to pick them up" % mate_down)
 		else:
 			_revive_hint.visible = false
 	_update_revive_ring(player)
@@ -2737,19 +2730,19 @@ func _refresh_notices(player: Player, delta: float) -> void:
 		if world.match_phase == "LOBBY" and _menu.visible:
 			# The card says this; the corner only has to while the menu
 			# is up over it.
-			say = ("🏆  Next battle in %d" % secs) if secs > 0 \
-				else "🏆  Battle starting…"
+			say = ("Next battle in %d" % secs) if secs > 0 \
+				else "Battle starting…"
 		elif world.match_phase == "BATTLE" and str(world.client_mode) == "holdout":
 			# THE ROUND CLOCK. Last flag standing has no storm closing in
 			# to tell you how long is left, and "how long do I have to
 			# hold this" is the question the whole mode is about.
 			var left := int(ceil(world.match_seconds))
-			say = "🛡  %d:%02d" % [left / 60, left % 60]
+			say = "%d:%02d" % [left / 60, left % 60]
 		elif world.match_phase == "BATTLE" and not world.alive_ids.has(
 				Game.player_id(multiplayer.get_unique_id(), slot)) \
 				and not world.out_ids.has(
 				Game.player_id(multiplayer.get_unique_id(), slot)):
-			say = "🏆  In the next one!"
+			say = "In the next one"
 		# News wins the corner while it lasts. It is a one-off — the map
 		# was replaced, you rejoined — and the clock will still be there
 		# in five seconds' time.
@@ -2773,21 +2766,26 @@ func _refresh_notices(player: Player, delta: float) -> void:
 		_storm_label.visible = storm_on
 		if storm_on:
 			var storm_secs := int(ceil(world.storm_seconds))
+			# Plain while the wall is on its way in; the warning colour
+			# once there is nowhere left to go but the arena.
+			var urgent: bool = world.storm_radius <= StormClock.HOLD_RADIUS + 0.5
+			_storm_label.add_theme_color_override("font_color",
+				UiTheme.DANGER if urgent else UiTheme.INK_DIM)
 			if world.storm_radius <= 0.0:
-				_storm_label.text = "⛈  STORM!  no way out"
-			elif world.storm_radius <= StormClock.HOLD_RADIUS + 0.5:
-				_storm_label.text = "⛈  LAST STAND  %d" % storm_secs
+				_storm_label.text = "STORM  ·  NO WAY OUT"
+			elif urgent:
+				_storm_label.text = "LAST STAND  %d" % storm_secs
 			else:
-				_storm_label.text = ("⛈  STORM!  %d" % storm_secs) if storm_secs > 0 \
-					else "⛈  STORM!"
+				_storm_label.text = ("STORM  %d" % storm_secs) if storm_secs > 0 \
+					else "STORM"
 	if _death_note != null and world != null:
 		var my_pid := Game.player_id(multiplayer.get_unique_id(), slot)
 		var down_now: bool = bool(world.client_downed.get(my_pid, false))
 		var out_now: bool = world.out_ids.has(my_pid)
 		if (down_now and not _was_down) or (out_now and not _was_out):
 			_death_t = 2.6
-			_death_note.text = "💀  KNOCKED OUT!" if out_now \
-				else "⛑  DOWNED — a teammate can revive you!"
+			_death_note.text = "KNOCKED OUT" if out_now \
+				else "DOWNED — a team-mate can pick you up"
 		_was_down = down_now
 		_was_out = out_now
 		# WHOLE TEAM OUT? Then you are gone from the world entirely —
@@ -3042,8 +3040,10 @@ func _refresh_crosshair_and_layout(player: Player) -> void:
 			_menu.scale = Vector2.ONE
 			_menu.anchor_left = 0.1
 			_menu.anchor_right = 0.9
+		# A status line, not a headline: at size.x / 45 it was the largest
+		# type on the screen, bigger than the round clock it sits under.
 		_selected_label.add_theme_font_size_override("font_size",
-			int(clampf(size.x / 45.0, 16.0, 34.0)))
+			int(clampf(size.x / 66.0, 13.0, 24.0)))
 		_last_index = -1
 
 ## The full-screen tints: under water, inside the storm, and the storm
@@ -3080,7 +3080,7 @@ func _refresh_tints(player: Player) -> void:
 			var angle := atan2(to_center.x, -to_center.y) + player.camera_yaw
 			var arrows := ["⬆", "⬈", "➡", "⬊", "⬇", "⬋", "⬅", "⬉"]
 			var arrow: String = arrows[posmod(int(round(angle / (PI / 4.0))), 8)]
-			_storm_arrow.text = "%s  STORM! run %dm  %s" % [arrow, int(outside), arrow]
+			_storm_arrow.text = "%s  STORM  ·  %dm to safety" % [arrow, int(outside)]
 			_storm_arrow.visible = true
 		else:
 			_storm_arrow.visible = false
@@ -3114,12 +3114,16 @@ func _refresh_hotbar_icons(player: Player) -> void:
 			var frame: Panel = _chips[i]
 			var entry: Dictionary = player.slots[i]
 			var selected := i == _last_index
-			frame.custom_minimum_size = Vector2(slot_px, slot_px) * (1.18 if selected else 1.0)
+			frame.custom_minimum_size = Vector2(slot_px, slot_px) * (1.12 if selected else 1.0)
+			# Graphite, like everything else on the screen. The slots were
+			# a navy that nothing else in the game is painted, with a white
+			# frame each — eight little dialog boxes in a row.
 			var style := StyleBoxFlat.new()
-			style.bg_color = Color(0.08, 0.09, 0.14, 0.85)
-			style.set_corner_radius_all(8)
-			style.border_color = UiTheme.ACCENT if selected else Color(1, 1, 1, 0.25)
-			style.set_border_width_all(4 if selected else 2)
+			style.bg_color = Color(UiTheme.SURFACE_2, 0.92) if selected \
+				else Color(UiTheme.SURFACE, 0.82)
+			style.set_corner_radius_all(7)
+			style.border_color = UiTheme.ACCENT if selected else Color(1, 1, 1, 0.09)
+			style.set_border_width_all(2 if selected else 1)
 			frame.add_theme_stylebox_override("panel", style)
 			var icon: BlockIcon = frame.get_child(0)
 			icon.block_id = int(entry.id)

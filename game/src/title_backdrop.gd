@@ -36,8 +36,10 @@ const HORIZON := 0.24
 ## Blocks across, in each rank. Enough to read as a skyline, few enough
 ## that the whole thing is a few dozen draw_rect calls.
 const COLUMNS := 34
-## Drifting cubes. A dozen is a sky with something in it; thirty is snow.
-const DRIFTERS := 12
+## Drifting cubes. A handful, large and faint, reads as depth — things
+## nearer than the skyline, further than the page. A dozen small bright
+## ones read as confetti, which is what this was.
+const DRIFTERS := 7
 const DRIFT_SEED := 4114
 
 var _sky: GradientTexture2D
@@ -82,29 +84,68 @@ func _build_skyline() -> void:
 	for i in range(gap, gap + 3):
 		_near[i] = 0.16 + rng.randf() * 0.08
 
-## Real voxel cubes, the same ones the block picker draws. Actual game
-## blocks rather than squares: this is a voxel game's title screen, and
-## the material it is made of is the only decoration it needs.
+## BLOCKS, DRAWN AS BLOCKS. Each one is three faces of an isometric cube
+## — a lit top, a shaded left, a darker right — in a muted version of a
+## real block's colour. They were the block picker's icons, which are
+## flat squares with a lighter square inside, and at title-screen alpha
+## a flat square is a flat square: the page looked like it had confetti
+## on it. Three faces is what makes a shape read as a thing with a
+## volume, and a title screen for a voxel game should have volumes in it.
 func _build_drifters() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = DRIFT_SEED + 1
 	var kinds := [Blocks.GRASS, Blocks.BRICK, Blocks.WOOL_RED, Blocks.LEAVES,
 		Blocks.SANDSTONE, Blocks.GOLD, Blocks.ICE, Blocks.PUMPKIN]
 	for i in DRIFTERS:
-		var cube := BlockIcon.new(kinds[i % kinds.size()])
-		var side := 26.0 + rng.randf() * 42.0
+		var cube := IsoCube.new()
+		# Muted: the block's own colour pulled most of the way to the
+		# page's graphite, so it is recognisably a grass block or a brick
+		# without being a bright thing behind a line of text.
+		cube.base = Blocks.color_of(kinds[i % kinds.size()]).lerp(Color("2a2831"), 0.55)
+		# Big enough that the three faces survive being drawn this faint.
+		var side := 60.0 + rng.randf() * 80.0
 		cube.size = Vector2(side, side)
 		cube.pivot_offset = cube.size * 0.5
 		cube.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		# Faint. These are scenery behind a page of text, and a bright
-		# cube behind a word is a word nobody can read.
-		cube.modulate = Color(1, 1, 1, 0.10 + rng.randf() * 0.13)
+		# cube behind a word is a word nobody can read. The bigger ones
+		# are nearer, so they are the more solid.
+		cube.modulate = Color(1, 1, 1, 0.07 + (side - 60.0) / 80.0 * 0.09)
 		cube.set_meta("x", rng.randf())
 		cube.set_meta("y", rng.randf())
-		cube.set_meta("rise", 0.008 + rng.randf() * 0.020)
-		cube.set_meta("spin", (rng.randf() - 0.5) * 0.35)
+		# The nearer, the faster — the whole of the parallax.
+		cube.set_meta("rise", 0.004 + (side - 60.0) / 80.0 * 0.010)
+		# NO SPIN. A block is a thing with a top and a bottom; one turning
+		# over as it goes is a piece of paper.
+		cube.set_meta("spin", 0.0)
 		add_child(cube)
 		_cubes.append(cube)
+
+## One isometric block: three faces from one colour.
+class IsoCube extends Control:
+	var base := Color("2a2831")
+
+	func _draw() -> void:
+		var s := minf(size.x, size.y)
+		var top := PackedVector2Array([Vector2(s * 0.5, 0.0), Vector2(s, s * 0.25),
+			Vector2(s * 0.5, s * 0.5), Vector2(0.0, s * 0.25)])
+		var left := PackedVector2Array([Vector2(0.0, s * 0.25), Vector2(s * 0.5, s * 0.5),
+			Vector2(s * 0.5, s), Vector2(0.0, s * 0.75)])
+		var right := PackedVector2Array([Vector2(s * 0.5, s * 0.5), Vector2(s, s * 0.25),
+			Vector2(s, s * 0.75), Vector2(s * 0.5, s)])
+		draw_colored_polygon(top, base.lightened(0.22))
+		draw_colored_polygon(left, base.darkened(0.18))
+		draw_colored_polygon(right, base.darkened(0.42))
+		# A hairline on the two lit edges, which is what makes the corner
+		# nearest the viewer read as a corner.
+		var edge := Color(1, 1, 1, 0.16)
+		draw_line(Vector2(0.0, s * 0.25), Vector2(s * 0.5, s * 0.5), edge, 1.0)
+		draw_line(Vector2(s * 0.5, s * 0.5), Vector2(s, s * 0.25), edge, 1.0)
+		draw_line(Vector2(s * 0.5, s * 0.5), Vector2(s * 0.5, s), edge, 1.0)
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_RESIZED:
+			queue_redraw()
 
 func _process(delta: float) -> void:
 	if not is_visible_in_tree():

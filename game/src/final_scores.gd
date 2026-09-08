@@ -63,11 +63,12 @@ func show(winner: int) -> void:
 
 	var title := Label.new()
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE, sc))
+	title.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE + 8, sc))
+	title.add_theme_font_override("font", UiTheme.display(sc, 1.5, true))
 	title.add_theme_color_override("font_color", UiTheme.ACCENT)
 	if winner >= 0 and winner < world.client_team_names.size():
 		var won := int(world.team_wins.get(winner, 0))
-		title.text = "🏆  %s WINS" % str(world.client_team_names[winner]).to_upper()
+		title.text = "%s WINS" % str(world.client_team_names[winner]).to_upper()
 		if won > 1:
 			title.text += "  ·  %d ON THIS MAP" % won
 		title.add_theme_color_override("font_color",
@@ -75,6 +76,7 @@ func show(winner: int) -> void:
 			else UiTheme.ACCENT)
 	else:
 		title.text = "NO WINNER THIS TIME"
+		title.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	box.add_child(title)
 	box.add_child(HSeparator.new())
 
@@ -145,6 +147,7 @@ func _final_teams(world: Node, sc: float) -> Control:
 				if str(col[0]) != "" else HORIZONTAL_ALIGNMENT_LEFT
 			h.custom_minimum_size = Vector2(UiTheme.px(int(col[1]), sc), 0)
 			h.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_NOTE, sc))
+			h.add_theme_font_override("font", UiTheme.display(sc, 1.2))
 			h.add_theme_color_override("font_color", UiTheme.INK_FAINT)
 			head.add_child(h)
 		var ctf_teams: Array = []
@@ -230,8 +233,9 @@ func _final_players(world: Node, sc: float) -> Control:
 	wrap.add_child(grid)
 	for head_text in ["Player", "This game", "Total"]:
 		var head := Label.new()
-		head.text = str(head_text)
+		head.text = str(head_text).to_upper()
 		head.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_NOTE, sc))
+		head.add_theme_font_override("font", UiTheme.display(sc, 1.2))
 		head.add_theme_color_override("font_color", UiTheme.INK_FAINT)
 		if head_text != "Player":
 			head.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -258,8 +262,9 @@ func _final_players(world: Node, sc: float) -> Control:
 	return wrap
 func _final_head(text: String, sc: float) -> Label:
 	var head := Label.new()
-	head.text = text
-	head.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_HEADING, sc))
+	head.text = text.to_upper()
+	head.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_HEADING - 1, sc))
+	head.add_theme_font_override("font", UiTheme.display(sc, 1.6))
 	head.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	return head
 func dismissable() -> bool:

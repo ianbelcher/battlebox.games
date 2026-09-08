@@ -174,7 +174,7 @@
     statusLine.className = state === 'ready' ? 'bb-status bb-ready' : 'bb-status';
   }
 
-  // The gate: the game's name, a turning block, and one button.
+  // The gate: the game's name, and one button.
   //
   // It is here because a browser will not play sound until somebody has
   // interacted with the page, and a silent intro is not much of an intro.
@@ -192,27 +192,22 @@
     var gate = document.createElement('div');
     gate.id = 'bb-gate';
 
-    var stage = document.createElement('div');
-    stage.className = 'bb-stage';
-    // Three blocks, not one: two small ones drifting behind the main one
-    // so the screen reads as a world made of blocks rather than as a lone
-    // shape somebody could not find a logo for.
-    ['bb-cube bb-far-a', 'bb-cube bb-far-b', 'bb-cube bb-main'].forEach(function (cls) {
-      var cube = document.createElement('div');
-      cube.className = cls;
-      ['t', 'b', 'n', 's', 'e', 'w'].forEach(function (face) {
-        var side = document.createElement('div');
-        side.className = face;
-        cube.appendChild(side);
-      });
-      stage.appendChild(cube);
+    // THE SIGN, as on the game's own front page. If the picture cannot be
+    // fetched — an old deploy without it, a blocked request — the name
+    // goes up in type instead of an empty rectangle: the one thing a
+    // title screen cannot be is a screen with no title on it.
+    var mark = document.createElement('img');
+    mark.className = 'bb-mark';
+    mark.src = 'wordmark.png';
+    mark.alt = 'BattleBox';
+    mark.decoding = 'async';
+    mark.addEventListener('error', function () {
+      var title = document.createElement('div');
+      title.className = 'bb-title';
+      title.textContent = 'BattleBox';
+      if (mark.parentNode) { mark.parentNode.replaceChild(title, mark); }
     });
-    gate.appendChild(stage);
-
-    var title = document.createElement('div');
-    title.className = 'bb-title';
-    title.textContent = 'BattleBox';
-    gate.appendChild(title);
+    gate.appendChild(mark);
 
     var tagline = document.createElement('div');
     tagline.className = 'bb-tagline';

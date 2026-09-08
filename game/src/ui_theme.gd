@@ -143,6 +143,23 @@ static func selected_box(sc: float) -> StyleBoxFlat:
 	sb.content_margin_bottom = px(9, sc)
 	return sb
 
+## A HUD PLATE: the dark backing behind anything drawn over the world.
+##
+## One shape for the score, the storm clock, the strip under the hotbar
+## and the name in the corner, so they read as parts of one instrument
+## rather than as four stickers — each of them used to bring its own
+## alpha, its own radius and its own idea of an outline. Translucent,
+## because the world behind it is the game; a hairline rather than a
+## border, because a frame around a readout is a dialog box.
+static func hud_plate(sc: float, alpha := 0.74, radius := R_CONTROL) -> StyleBoxFlat:
+	var sb := flat(Color(SURFACE.r, SURFACE.g, SURFACE.b, alpha), radius, sc,
+		1.0, Color(1, 1, 1, 0.08))
+	sb.content_margin_left = px(12, sc)
+	sb.content_margin_right = px(12, sc)
+	sb.content_margin_top = px(5, sc)
+	sb.content_margin_bottom = px(5, sc)
+	return sb
+
 ## A pill for keyboard/pad hints: "ESC", "LB", "Ⓐ".
 static func hint_box(sc: float) -> StyleBoxFlat:
 	var sb := flat(Color(1, 1, 1, 0.07), 999, sc, 1.0, LINE)
@@ -184,33 +201,72 @@ static func rail_box(bg: Color, sc: float, rail := Color(0, 0, 0, 0)) -> StyleBo
 		sb.border_color = rail
 	return sb
 
-## HEAVIER TYPE THAN THE BUNDLED FONT HAS.
+## THE DISPLAY FACE: a condensed grotesk, for anything that is a title.
 ##
-## The game ships one weight — the engine's default face plus three
-## fallbacks for symbols — so a heading cannot simply ask for bold, and
-## for a long time nothing did: every title on every screen was set in
-## the same weight as the body text under it, which is why none of them
-## read as titles. FontVariation's synthetic embolden thickens the strokes
-## of whatever face is actually in use, and works the same on the web
-## build (where there are no system fonts to borrow from) as it does here.
+## For a long time every heading on every screen was the body face with a
+## synthetic embolden on it, and none of them read as titles — a thicker
+## version of the text underneath is still the text underneath. A second
+## face that is plainly NOT the body one is what makes a heading a
+## heading, and condensed is the shape every game interface reaches for:
+## it sets big without spreading, so a title can be large and still be
+## one line.
+##
+## Barlow Condensed, from the same family as the body face (see
+## Game.BODY_FONT), so the two never argue. Semibold by default; bold
+## for the few things that carry a whole screen — the Play button, a
+## round's title.
 ##
 ## `tracking` is glyph spacing in design px — negative tightens a display
 ## line, positive opens up a small upper-case label, and both are what
-## make a wordmark look set rather than typed.
-static func heavy(sc: float, embolden := 0.6, tracking := 0.0) -> FontVariation:
+## make a title look set rather than typed.
+const DISPLAY_FONT := "res://assets/fonts/BarlowCondensed-SemiBold.ttf"
+const DISPLAY_BOLD_FONT := "res://assets/fonts/BarlowCondensed-Bold.ttf"
+
+static var _display_face: Font = null
+static var _display_bold_face: Font = null
+
+static func display(sc: float, tracking := 0.0, bold := false) -> FontVariation:
 	var face := FontVariation.new()
-	var theme := ThemeDB.get_default_theme()
-	# get_default_theme() has a font on it once Game._install_fallback_fonts
-	# has run; ThemeDB.fallback_font is what is there before that, and on
-	# the two platforms that skip the install entirely.
-	if theme != null and theme.default_font != null:
-		face.base_font = theme.default_font
-	else:
-		face.base_font = ThemeDB.fallback_font
-	face.variation_embolden = embolden
+	var base: Font = _display_font(bold)
+	if base == null:
+		# The file is missing — an export without it, or a test that has
+		# not imported. The body face with a synthetic embolden is a
+		# heading of a sort, and it is never a box with a number in it.
+		base = _body_font()
+		face.variation_embolden = 0.6
+	face.base_font = base
+	# Anything the display face lacks — a key-cap arrow, a dot — comes
+	# from the body chain rather than drawing as a box.
+	var body := _body_font()
+	if body != null and body != base:
+		face.fallbacks = [body] as Array[Font]
 	if not is_zero_approx(tracking):
 		face.set_spacing(TextServer.SPACING_GLYPH, int(round(tracking * sc)))
 	return face
+
+## The old name, kept because every screen calls it. `embolden` picks
+## the weight now: anything at 0.6 or over is what used to mean "as heavy
+## as it goes", and gets the bold cut.
+static func heavy(sc: float, embolden := 0.6, tracking := 0.0) -> FontVariation:
+	return display(sc, tracking, embolden >= 0.6)
+
+static func _display_font(bold: bool) -> Font:
+	if bold:
+		if _display_bold_face == null and ResourceLoader.exists(DISPLAY_BOLD_FONT):
+			_display_bold_face = load(DISPLAY_BOLD_FONT) as Font
+		return _display_bold_face
+	if _display_face == null and ResourceLoader.exists(DISPLAY_FONT):
+		_display_face = load(DISPLAY_FONT) as Font
+	return _display_face
+
+## The body face as installed by Game._install_fallback_fonts — the
+## default theme's font once that has run, the engine's before it and on
+## the platforms that skip the install.
+static func _body_font() -> Font:
+	var theme := ThemeDB.get_default_theme()
+	if theme != null and theme.default_font != null:
+		return theme.default_font
+	return ThemeDB.fallback_font
 
 # ------------------------------------------------------------------
 # The Theme
@@ -293,7 +349,10 @@ static func build(sc: float) -> Theme:
 	tab_hover.bg_color = Color(1, 1, 1, 0.12)
 	var tab_disabled: StyleBoxFlat = tab_sel.duplicate()
 	tab_disabled.bg_color = Color(1, 1, 1, 0.02)
-	var tab_focus := flat(Color(0, 0, 0, 0), R_CONTROL, sc, 2.0, Color.WHITE)
+	# A ring in the ink colour at half strength: keyboard focus has to be
+	# visible on a tab that is not the selected one, and a solid white
+	# frame around the ember one was the loudest thing on the menu.
+	var tab_focus := flat(Color(0, 0, 0, 0), R_CONTROL, sc, 2.0, Color(1, 1, 1, 0.5))
 	tab_focus.corner_radius_bottom_left = 0
 	tab_focus.corner_radius_bottom_right = 0
 	# The page body: a card that the selected tab sits on top of.
@@ -310,6 +369,7 @@ static func build(sc: float) -> Theme:
 		t.set_stylebox("tab_focus", type, tab_focus)
 		t.set_stylebox("tabbar_background", type, StyleBoxEmpty.new())
 		t.set_font_size("font_size", type, px(T_TAB, sc))
+		t.set_font("font", type, display(sc, 0.4))
 		t.set_color("font_selected_color", type, ON_ACCENT)
 		t.set_color("font_unselected_color", type, INK_DIM)
 		t.set_color("font_hovered_color", type, INK)

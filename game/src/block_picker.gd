@@ -96,7 +96,10 @@ func _init(p_category := "blocks") -> void:
 	box.add_child(head)
 	_title = Label.new()
 	_title.add_theme_font_size_override("font_size", 22)
-	_title.add_theme_color_override("font_color", UiTheme.ACCENT)
+	# The display face, like every other title in the game; the font size
+	# is set again by whoever lays this page out, the face is not.
+	_title.add_theme_font_override("font", UiTheme.display(1.0, 0.5, true))
+	_title.add_theme_color_override("font_color", UiTheme.INK)
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	head.add_child(_title)
 	_subtitle = Label.new()

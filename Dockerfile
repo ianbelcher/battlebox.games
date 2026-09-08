@@ -181,6 +181,9 @@ COPY --from=build /game/build/play /opt/battlebox/web
 # is the point of copying the directory rather than the file.
 COPY web/ /opt/battlebox/websrc/
 RUN cp /opt/battlebox/websrc/boot.css /opt/battlebox/websrc/boot.js \
+        /opt/battlebox/websrc/wordmark.png \
+        /opt/battlebox/websrc/BarlowCondensed-SemiBold.ttf \
+        /opt/battlebox/websrc/Barlow-Medium.ttf \
         /opt/battlebox/web/ \
     && if [ -f /opt/battlebox/websrc/demo.mp4 ]; then \
          cp /opt/battlebox/websrc/demo.mp4 /opt/battlebox/web/demo.mp4; \

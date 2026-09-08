@@ -47,7 +47,8 @@ mkdir -p "$WORK"/{tls,www,logs}
 cp -r "$GAME/build/play/." "$WORK/www/"
 cp "$ROOT/web/index.html" "$WORK/www/install.html"
 cp "$ROOT/web/voice.js" "$WORK/www/voice.js"
-cp "$ROOT/web/boot.css" "$ROOT/web/boot.js" "$WORK/www/"
+cp "$ROOT/web/boot.css" "$ROOT/web/boot.js" "$ROOT/web/wordmark.png" \
+   "$ROOT/web/BarlowCondensed-SemiBold.ttf" "$ROOT/web/Barlow-Medium.ttf" "$WORK/www/"
 [ -f "$ROOT/web/demo.mp4" ] && cp "$ROOT/web/demo.mp4" "$WORK/www/demo.mp4"
 grep -q 'Godot\|engine.startGame' "$WORK/www/index.html" \
   || { echo "the web root is not the game"; exit 1; }

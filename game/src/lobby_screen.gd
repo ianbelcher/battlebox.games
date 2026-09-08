@@ -290,8 +290,11 @@ func _build_hero() -> Control:
 	_play_button.call_deferred("grab_focus")
 	# The sheet of questions, for whoever wants a game of their own.
 	var create := _ghost_button("Create a game", UiTheme.T_LABEL)
-	create.custom_minimum_size = Vector2(0, _px(60))
-	create.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# The same height as Play, so the two read as one row of choices with
+	# one of them lit — a shorter button beside the tall one looked like
+	# it had been added later.
+	create.custom_minimum_size = Vector2(_px(190), _px(78))
+	create.size_flags_vertical = Control.SIZE_FILL
 	create.pressed.connect(_open_setup)
 	buttons.add_child(create)
 
@@ -604,7 +607,7 @@ func _build_setup() -> Control:
 	titles.add_theme_constant_override("separation", 0)
 	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(titles)
-	titles.add_child(_display("New game", UiTheme.T_TITLE + 6, UiTheme.INK))
+	titles.add_child(_display("NEW GAME", UiTheme.T_TITLE + 8, UiTheme.INK))
 	var back := _ghost_button("Back", UiTheme.T_LABEL)
 	back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	back.pressed.connect(_close_setup)
@@ -934,7 +937,9 @@ func _build_code_panel() -> Control:
 	root.add_child(centre)
 
 	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", UiTheme.card_box(_scale))
+	# The modal panel, shadow and all: this is a sheet over the page, not
+	# a card lying on it.
+	card.add_theme_stylebox_override("panel", UiTheme.panel_box(_scale))
 	centre.add_child(card)
 	var inner := VBoxContainer.new()
 	inner.add_theme_constant_override("separation", _px(10))
@@ -948,7 +953,7 @@ func _build_code_panel() -> Control:
 		UiTheme.T_BODY, UiTheme.INK_DIM, true))
 	# The code, as big as the wordmark on the front page. It is meant to
 	# be read out across a room to somebody holding a tablet.
-	_code_label = _display("", UiTheme.T_TITLE + 10, UiTheme.ACCENT)
+	_code_label = _display("", UiTheme.T_TITLE + 22, UiTheme.ACCENT)
 	inner.add_child(_code_label)
 
 	# And the same thing as a link, because on the web that is what people
@@ -1111,14 +1116,14 @@ func _text(body: String, size: int, color: Color, wrap := false) -> Label:
 ## is why no title on any of them read as a title.
 func _display(body: String, size: int, color: Color) -> Label:
 	var label := _text(body, size, color)
-	label.add_theme_font_override("font", UiTheme.heavy(_scale, 0.7, -1.2))
+	label.add_theme_font_override("font", UiTheme.display(_scale, 0.5, true))
 	return label
 
 ## A small upper-case label. Letterspaced, because upper case at this size
 ## sets too tight to read otherwise.
 func _eyebrow(body: String) -> Label:
-	var label := _text(body.to_upper(), UiTheme.T_NOTE, UiTheme.INK_FAINT)
-	label.add_theme_font_override("font", UiTheme.heavy(_scale, 0.25, 1.6))
+	var label := _text(body.to_upper(), UiTheme.T_LABEL - 1, UiTheme.INK_FAINT)
+	label.add_theme_font_override("font", UiTheme.display(_scale, 1.8))
 	return label
 
 ## A label inside a Button's overlay. It must not eat the click, and
@@ -1249,13 +1254,18 @@ func _field_box(border: float, edge: Color) -> StyleBoxFlat:
 ## it, and the only thing painted that colour anywhere on the page.
 func _primary_button(label: String, size: int) -> Button:
 	var button := Button.new()
-	button.text = label
+	# UPPER CASE, IN THE DISPLAY FACE. The one button on the page that
+	# is an order rather than an option is set like one: condensed, bold,
+	# letterspaced, the way every game's Play button has been set since
+	# there were games. Lower-case sentence text on an orange rectangle
+	# read as a web form's submit button.
+	button.text = label.to_upper()
 	# WIDE ENOUGH TO BE THE BUTTON. Sized off its own text it came out
 	# barely larger than the ghost button beside it, and a primary action
 	# that is the same size as the secondary one is not a primary action.
 	button.custom_minimum_size = Vector2(_px(280), _px(78))
 	button.add_theme_font_size_override("font_size", UiTheme.px(size, _scale))
-	button.add_theme_font_override("font", UiTheme.heavy(_scale, 0.5, 1.0))
+	button.add_theme_font_override("font", UiTheme.display(_scale, 2.0, true))
 	# NO GLOW UNDER IT. A StyleBoxFlat shadow is not a blur — it is the
 	# same rounded rectangle drawn larger — so an ember shadow behind an
 	# ember button came out as a hard second rectangle around the first,
@@ -1322,8 +1332,8 @@ func _tile(label: String, note: String) -> Button:
 	inner.offset_bottom = -_px(12)
 	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	inner.add_theme_constant_override("separation", _px(4))
-	var title := _row_label(label, UiTheme.T_LABEL, UiTheme.INK)
-	title.add_theme_font_override("font", UiTheme.heavy(_scale, 0.4, 0.0))
+	var title := _row_label(label, UiTheme.T_LABEL + 3, UiTheme.INK)
+	title.add_theme_font_override("font", UiTheme.display(_scale, 0.3))
 	inner.add_child(title)
 	var sub := _text(note, UiTheme.T_NOTE, UiTheme.INK_FAINT, true)
 	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE

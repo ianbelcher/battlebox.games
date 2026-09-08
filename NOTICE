@@ -40,6 +40,7 @@ game's Credits page.
 | DejaVu Sans | `game/assets/fonts/DejaVuSans.ttf` | DejaVu Fonts Licence (Bitstream Vera derivative) |
 | Noto Emoji | `game/assets/fonts/NotoEmoji-Regular.ttf` | SIL Open Font Licence 1.1 — see `NotoEmoji-OFL.txt` |
 | Noto Sans Symbols | `game/assets/fonts/NotoSansSymbols-Regular.ttf` | SIL Open Font Licence 1.1 — see `NotoSansSymbols-OFL.txt` |
+| Barlow, Barlow Condensed | `game/assets/fonts/Barlow-Medium.ttf`, `BarlowCondensed-SemiBold.ttf`, `BarlowCondensed-Bold.ttf` | SIL Open Font Licence 1.1 — see `Barlow-OFL.txt` |
 
 
 ## Generated from the above

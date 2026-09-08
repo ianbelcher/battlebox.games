@@ -231,18 +231,15 @@ func _build_header() -> Control:
 	row.add_theme_constant_override("separation", _s(14))
 	box.add_child(row)
 
-	var mark := Label.new()
-	mark.text = "🌍"
-	mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_font(mark, UiTheme.T_TITLE))
-
 	var titles := VBoxContainer.new()
 	titles.add_theme_constant_override("separation", 0)
 	titles.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(titles)
 	var title := Label.new()
 	title.text = "WORLD"
-	title.add_theme_color_override("font_color", UiTheme.ACCENT)
+	title.add_theme_color_override("font_color", UiTheme.INK)
+	_repaint.append(func() -> void:
+		title.add_theme_font_override("font", UiTheme.display(_scale(), 1.0, true)))
 	titles.add_child(_font(title, UiTheme.T_TITLE))
 	var sub := Label.new()
 	# NOT "settings" any more. Everything this menu could set is decided on
@@ -335,7 +332,15 @@ func _heading(parent: Control, text: String, note := "") -> Control:
 	var label := Label.new()
 	label.text = text.to_upper()
 	label.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	row.add_child(_font(label, UiTheme.T_HEADING))
+	# The display face, letterspaced: a small upper-case label in the
+	# body face is a line of shouting; in the condensed face it is a
+	# section title. Re-applied on resize because the tracking is in
+	# design pixels.
+	var face := func() -> void:
+		label.add_theme_font_override("font", UiTheme.display(_scale(), 1.6))
+	face.call()
+	_repaint.append(face)
+	row.add_child(_font(label, UiTheme.T_HEADING - 1))
 	var rule := HSeparator.new()
 	rule.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rule.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -643,7 +648,7 @@ func _build_players_tab() -> void:
 			["−  Remove a team", "remove_team", 0],
 			["+  Add a computer player", "add_bot", 1],
 			["−  Remove a computer player", "remove_bot", 1],
-			["🤖  Fill up to %d" % Game.MAX_PLAYERS, "fill_bots", 2]]:
+			["Fill up to %d" % Game.MAX_PLAYERS, "fill_bots", 2]]:
 		var manage: HBoxContainer = team_row
 		if int(spec[2]) == 1:
 			manage = bot_row
@@ -790,16 +795,31 @@ func _team_header(t: int, count: int, cell_w: int) -> Control:
 	box.add_child(_font(count_label, UiTheme.T_BODY))
 	return box
 
+## One of the people at THIS screen, as opposed to somebody across the
+## network.
+func _is_local(id: String) -> bool:
+	var entry: Dictionary = Game.roster.get(id, {})
+	return int(entry.get("peer", -1)) == multiplayer.get_unique_id() \
+		and Game.local_inputs.has(int(entry.get("slot", -1)))
+
 func _add_player_row(grid: GridContainer, id: String, team_count: int,
 		cell_w: int) -> void:
 	var entry: Dictionary = Game.roster[id]
 	var who := HBoxContainer.new()
 	who.add_theme_constant_override("separation", _s(8))
 	_min(who, 210, 0)
+	# WHO IS A PERSON. A small upper-case tag rather than a face: a
+	# computer player is the ordinary case in this game, so it is the
+	# person that gets the mark — in mint, the one colour that means
+	# "somebody is here" everywhere else on screen.
 	var tag := Label.new()
-	tag.text = "🤖" if bool(entry.get("bot", false)) else "🙂"
+	var bot := bool(entry.get("bot", false))
+	tag.text = "CPU" if bot else "YOU" if _is_local(id) else "LIVE"
+	tag.add_theme_color_override("font_color", UiTheme.INK_FAINT if bot else UiTheme.LIVE)
+	tag.add_theme_font_override("font", UiTheme.display(_scale(), 1.2))
 	tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	who.add_child(_font(tag, UiTheme.T_BODY + 4))
+	_min(tag, 40, 0)
+	who.add_child(_font(tag, UiTheme.T_NOTE))
 	var name_edit := LineEdit.new()
 	name_edit.text = str(entry.name)
 	name_edit.max_length = 12

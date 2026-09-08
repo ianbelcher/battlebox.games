@@ -44,6 +44,7 @@ const CHROME = process.env.CHROME_PATH
 const MIME = {
   '.html': 'text/html', '.css': 'text/css',
   '.js': 'text/javascript', '.mp4': 'video/mp4',
+  '.png': 'image/png', '.ttf': 'font/ttf',
 };
 
 // The page Godot generates, minus Godot: boot.css and boot.js are

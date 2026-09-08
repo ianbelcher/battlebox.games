@@ -114,11 +114,20 @@ Things worth knowing:
   screenshots.
 - **The log is full of ALSA errors.** There is no sound card. Ignore them;
   the script tells you if there were real script errors.
-- **Emoji only render because the fonts are bundled.** They are installed
-  everywhere except macOS and Windows, which have their own — so what you
-  photograph on Linux is what a browser draws. That was not always true:
-  the bundled fonts were web-only, and every screenshot taken here showed
-  a tofu box where the game shows a trophy.
+- **The typeface is bundled, and so are the symbol fonts.** Everything
+  is set in Barlow (body) and Barlow Condensed (titles, buttons, HUD
+  readouts), from `game/assets/fonts/`, on every platform — so what you
+  photograph here is what a browser draws. The three symbol fonts behind
+  them are installed everywhere except macOS and Windows, which have
+  their own. That was not always true: the bundled fonts were web-only,
+  and every screenshot taken here showed a tofu box where the game
+  showed a symbol. `tests/ui_glyphs.gd` reads the UI source and fails if
+  it uses a glyph none of the fonts can draw.
+- **No emoji in the interface.** Titles, headings, the storm clock, the
+  knockout feed and the round card are words in the display face, and
+  the few icons that remain are drawn (the block cubes, the key caps)
+  rather than typed. A trophy before every heading is what made the game
+  look like a toy, and it is the first thing that gets reviewed back in.
 
 One check needs a real browser, because what it tests is entirely about
 what a browser will and will not permit:

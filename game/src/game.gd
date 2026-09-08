@@ -223,6 +223,16 @@ const BUNDLED_FONTS := [
 	"res://assets/fonts/NotoEmoji-Regular.ttf",
 ]
 
+## THE GAME'S OWN TYPEFACE, on every platform.
+##
+## Every screen used to be set in the engine's built-in face, which is
+## the face of every unfinished Godot project there is — and a game that
+## looks like a default settings dialog reads as a toy however good the
+## world behind it is. Barlow is a plain, slightly narrow grotesk that
+## sits well beside the condensed display face UiTheme uses for titles;
+## the two are one family, which is why headings and body never argue.
+const BODY_FONT := "res://assets/fonts/Barlow-Medium.ttf"
+
 ## THE LOADING SCREEN CAN GO NOW. Told from here rather than left to the
 ## browser, because "the wasm finished downloading" and "there is a game
 ## to look at" are minutes apart on a slow line — see web/boot.js.
@@ -292,36 +302,44 @@ func _ready() -> void:
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 
-## Everywhere except macOS and Windows, where the system fonts already do
-## this job and do it better — both draw these in colour — so putting ours
-## in front of them would be a downgrade nobody asked for.
+## ONE TYPEFACE FOR THE WHOLE GAME, and the symbol fonts behind it.
 ##
-## IT USED TO BE WEB ONLY, on the reasoning that a desktop has fonts to
-## borrow. A Linux box very often does not: no emoji font is installed by
-## default on a server image or a bare desktop, so the trophy on the match
-## clock and the robot beside the player count came out as boxes with
-## their code point in them — the exact failure the bundled fonts exist to
-## prevent, on the one platform that was excluded from the fix.
+## The base face is BODY_FONT everywhere. Behind it, in order: the
+## engine's own built-in face (for anything Barlow lacks, which is mostly
+## punctuation like the return arrow on a key cap), then the three
+## bundled symbol fonts — except on macOS and Windows, whose system fonts
+## draw symbols and emoji in colour and do it better, so putting ours in
+## front of them would be a downgrade nobody asked for.
 ##
-## It also made tools/screenshot.sh lie. That runs here, on Linux, and is
-## the thing this repository uses to LOOK at the interface; a picture that
-## shows tofu where a browser shows a trophy is worse than no picture.
+## THE SYMBOL FONTS USED TO BE WEB ONLY, on the reasoning that a desktop
+## has fonts to borrow. A Linux box very often does not: no emoji font is
+## installed by default on a server image or a bare desktop, so every
+## symbol the menus used came out as a box with its code point in it —
+## the exact failure the bundled fonts exist to prevent, on the one
+## platform that was excluded from the fix. It also made
+## tools/screenshot.sh lie: that runs here, on Linux, and is the thing
+## this repository uses to LOOK at the interface.
 func _install_fallback_fonts() -> void:
-	if OS.has_feature("macos") or OS.has_feature("windows"):
-		return
 	var extra: Array[Font] = []
-	for path: String in BUNDLED_FONTS:
-		var font := load(path) as Font
-		if font != null:
-			extra.append(font)
-	if extra.is_empty():
-		push_warning("No fallback fonts loaded — symbols will show as boxes.")
+	var builtin := ThemeDB.fallback_font
+	if builtin != null:
+		extra.append(builtin)
+	if not (OS.has_feature("macos") or OS.has_feature("windows")):
+		for path: String in BUNDLED_FONTS:
+			var font := load(path) as Font
+			if font != null:
+				extra.append(font)
+	var body := load(BODY_FONT) as Font
+	if body == null:
+		push_warning("The game's typeface did not load — falling back to the engine's.")
+		body = builtin
+	if body == null:
 		return
-	# Wrap rather than mutate: the default font is a built-in resource, and
-	# a FontVariation keeps the game's existing typeface as the base while
-	# adding somewhere to look for the glyphs it doesn't have.
+	# Wrap rather than mutate: the fonts are resources, and a FontVariation
+	# keeps the game's typeface as the base while adding somewhere to look
+	# for the glyphs it doesn't have.
 	var wrapper := FontVariation.new()
-	wrapper.base_font = ThemeDB.fallback_font
+	wrapper.base_font = body
 	wrapper.fallbacks = extra
 	# BOTH of these, and the second one is the one that actually works.
 	# ThemeDB.fallback_font alone changes nothing: it is only consulted
