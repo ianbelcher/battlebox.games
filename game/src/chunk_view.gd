@@ -11,7 +11,9 @@ var view_radius := 5
 ## During matches everything stays resident (prefetched in the lobby).
 var match_mode := false
 const MAX_INFLIGHT_MESHES := 3
-var light_cap := 10
+## Lights per chunk. Twenty, from ten: underground every glowing block
+## is a light and eight was a cave with two lamps in it.
+var light_cap := 20
 const REQUEST_BATCH := 40
 const REQUEST_RETRY_SECONDS := 6.0
 
@@ -443,9 +445,12 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 		var light := OmniLight3D.new()
 		light.position = spec.pos
 		light.light_color = spec.color
-		light.light_energy = spec.energy
-		light.omni_range = 7.5
-		light.omni_attenuation = 1.4
+		light.light_energy = spec.energy * 1.4
+		# FOURTEEN BLOCKS, from seven and a half, and a gentler falloff:
+		# a lamp that lit its own block and nothing else was no help in
+		# a hall forty blocks across.
+		light.omni_range = 14.0
+		light.omni_attenuation = 0.9
 		light.shadow_enabled = false
 		holder.add_child(light)
 		if spec.flicker:

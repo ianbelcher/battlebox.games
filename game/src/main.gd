@@ -1101,7 +1101,7 @@ func _apply_video() -> void:
 		Game.world.sky.environment.ssao_enabled = bool(v.ssao)
 		Game.world.sky.environment.glow_enabled = bool(v.glow)
 	if Game.world != null and Game.world.chunks != null:
-		Game.world.chunks.light_cap = 8 if bool(v.lights) else 0
+		Game.world.chunks.light_cap = 20 if bool(v.lights) else 0
 		Game.world.chunks.set_water_shine(bool(v.water_shine))
 		var want_ao := 0.16 if bool(v.ao) else 0.0
 		if not is_equal_approx(Mesher.ao_step, want_ao):

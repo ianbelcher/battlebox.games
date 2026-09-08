@@ -523,16 +523,11 @@ func sv_where(slot: int) -> void:
 	# on every restart and every resize — so keeping it on disk only ever
 	# meant restoring a position that made no sense in the world that
 	# replaced it. Every join is a fresh placement.
-	# JOINING A ROUND ALREADY IN PROGRESS.
-	#
-	# This used to drop you at a random far corner with whatever hotbar you
-	# happened to have — the creative blocks — and without adding you to
-	# the match at all. So anyone arriving after the drop was a spectator
-	# who did not know it: no team kit, nowhere near their base, and not in
-	# `match_alive`, which is what decides whether you can be hurt.
-	#
-	# Everything the drop does for the people who were there at the start
-	# has to happen here too, or joining late is a different game.
+	# JOINING A ROUND ALREADY IN PROGRESS: everything the drop does for
+	# the people who were there at the start — a team, the kit, a base,
+	# a place in `match_alive` — happens here too, or joining late is a
+	# different game (it was: a far corner, creative blocks, a spectator
+	# who did not know it).
 	if match_phase != "IDLE":
 		var team := int(entry.get("team", -1))
 		if team < 0:
@@ -566,6 +561,11 @@ func sv_where(slot: int) -> void:
 		player_state[id] = {"pos": spot, "treasures": 0,
 			"name": str(entry.name), "hp": MATCH_HP}
 		match_alive[id] = true
+		# AND EVERYBODY IS TOLD: the joiner's hello carried the alive set
+		# from BEFORE this seat existed, so their own screen said "in the
+		# next one" while the server had them in the round.
+		cl_match_state.rpc(match_phase, battle._timer, match_alive.keys(),
+			downed_ids.keys(), out_ids.keys())
 		cl_treasures.rpc(id, 0)
 		cl_hearts.rpc(id, MATCH_HP)
 		cl_where.rpc_id(peer, slot, spot, 0)

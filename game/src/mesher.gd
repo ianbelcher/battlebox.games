@@ -140,6 +140,17 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 					continue
 				if Blocks.LK_TRANS[block] == 1:
 					_add_cube(block, x, y, z, cx, cz, "trans")
+					# The crystals are translucent AND lit, and only the
+					# opaque pass used to make lights: a cave full of them
+					# glowed on their own faces and lit nothing.
+					var glow := Blocks.LK_LIGHT[block]
+					if glow > 0.0:
+						lights.append({
+							"pos": Vector3(x + 0.5, y + 0.6, z + 0.5),
+							"energy": glow,
+							"color": Blocks.LK_COLOR[block],
+							"flicker": false,
+						})
 					continue
 				# THE TRAP BLOCK WEARS ITS NEIGHBOURS. Drawn with a
 				# borrowed id so every face is coloured, jittered and

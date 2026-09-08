@@ -304,12 +304,16 @@ func _cavern_shaft(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h:
 ## whole of what makes a dark place a place.
 func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int,
 		deep: bool) -> void:
-	var lamp := 0.05 if deep else 0.03
+	var lamp := 0.14 if deep else 0.06
 	for y in range(5, h - 3):
 		if data[idx(lx, y, lz)] != Blocks.AIR:
 			continue
 		var roll := hash01(wx, y, wz * 7)
 		var below := data[idx(lx, y - 1, lz)]
+		# Sea lanterns on the floors of the pools, so the water glows.
+		if below == Blocks.WATER and y > 5 and data[idx(lx, y - 2, lz)] == Blocks.STONE \
+				and roll < 0.05:
+			data[idx(lx, y - 2, lz)] = 147
 		if below == Blocks.STONE:
 			if roll < 0.02:
 				var crystals := [Blocks.CRYSTAL_PINK, Blocks.CRYSTAL_BLUE, Blocks.CRYSTAL_GREEN]
@@ -328,7 +332,7 @@ func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		elif y + 1 < CHUNK_H and data[idx(lx, y + 1, lz)] == Blocks.STONE:
 			if roll > 0.94:
 				data[idx(lx, y, lz)] = Blocks.COBBLE  # stalactite
-			elif deep and roll > 0.915:
+			elif deep and roll > 0.84:
 				# Shroomlight in the ceiling: the hall's own lamps.
 				data[idx(lx, y + 1, lz)] = 148
 

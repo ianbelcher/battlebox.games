@@ -384,7 +384,7 @@ static func _static_init() -> void:
 	EXTRA[BAMBOO_BLOCK] = {"name": "Bamboo Block", "color": Color("83973f"),
 		"top": Color("b3a94e"), "solid": true, "opaque": true, "hard": 1}
 	EXTRA[MAGMA] = {"name": "Magma", "color": Color("5b2c1e"),
-		"top": Color("d95f2a"), "solid": true, "opaque": true, "emit": 0.7, "hard": 2}
+		"top": Color("d95f2a"), "solid": true, "opaque": true, "emit": 1.6, "hard": 2}
 	EXTRA[WARPED_STEM] = {"name": "Warped Stem", "color": Color("3f6b62"),
 		"top": Color("2f4f48"), "solid": true, "opaque": true, "hard": 1}
 	var species_mats := [["Spruce", Color("6b4f2e")], ["Birch", Color("c7b77c")],

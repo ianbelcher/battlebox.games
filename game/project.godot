@@ -43,6 +43,14 @@ renderer/rendering_method.web="gl_compatibility"
 ; If Vulkan can't initialize (some Linux driver stacks), fall back to
 ; OpenGL instead of crashing on startup; effects auto-degrade.
 rendering_device/fallback_to_opengl3=true
+; THE BROWSER'S LIGHT BUDGET. gl_compatibility lights each mesh with at
+; most this many lamps, and a chunk is one mesh: at the default of eight,
+; a hall with twenty glowing blocks in it was lit by eight of them and the
+; rest glowed on their own faces only. The renderable total is the number
+; of lamps in the whole scene at once, which a cave-riddled world exceeds
+; at the default of thirty-two.
+limits/opengl/max_lights_per_object=32
+limits/opengl/max_renderable_lights=256
 ; Required for the macOS universal/arm64 export (Apple Silicon needs
 ; ETC2/ASTC textures imported alongside S3TC).
 textures/vram_compression/import_etc2_astc=true
