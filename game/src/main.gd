@@ -502,7 +502,7 @@ func _build_game_screen() -> void:
 				_split.update_layout())
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(UiTheme.SURFACE, 0.85)
-	style.set_corner_radius_all(12)
+	style.set_corner_radius_all(UiTheme.R_PANEL)
 	style.set_content_margin_all(int(14 * ui_scale()))
 	# Reset vote panel.
 	_vote_panel = PanelContainer.new()
@@ -572,7 +572,7 @@ func _build_game_screen() -> void:
 	_banner.visible = false
 	var banner_bg := StyleBoxFlat.new()
 	banner_bg.bg_color = Color(UiTheme.SURFACE, 0.92)
-	banner_bg.set_corner_radius_all(14)
+	banner_bg.set_corner_radius_all(UiTheme.R_PANEL)
 	banner_bg.set_content_margin_all(int(26 * ui_scale()))
 	banner_bg.border_color = UiTheme.LINE
 	banner_bg.set_border_width_all(1)

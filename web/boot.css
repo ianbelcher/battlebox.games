@@ -175,7 +175,7 @@ body.bb-booting #status { display: none !important; }
   color: #1a0b04;
   background: #ff5f2e;
   border: 0;
-  border-radius: 10px;
+  border-radius: 4px;
   padding: clamp(14px, 2vh, 20px) clamp(48px, 6.4vw, 88px);
   cursor: pointer;
   box-shadow: 0 18px 44px rgba(0, 0, 0, .55);

@@ -87,9 +87,13 @@ const T_LABEL   := 17
 const T_NOTE    := 14
 const T_HINT    := 15
 
-const R_PANEL   := 14
-const R_CARD    := 10
-const R_CONTROL := 7
+## SQUARE-ISH. These were 14 / 10 / 7, and every panel, card, chip and
+## key cap came out as a pebble; softened corners everywhere is the look
+## of a phone app, not a game. A couple of pixels is enough to stop a
+## corner catching the eye as a hard point without ever reading as round.
+const R_PANEL   := 5
+const R_CARD    := 4
+const R_CONTROL := 3
 
 static func px(n: float, sc: float) -> int:
 	return maxi(1, int(round(n * sc)))
@@ -162,7 +166,8 @@ static func hud_plate(sc: float, alpha := 0.74, radius := R_CONTROL) -> StyleBox
 
 ## A pill for keyboard/pad hints: "ESC", "LB", "Ⓐ".
 static func hint_box(sc: float) -> StyleBoxFlat:
-	var sb := flat(Color(1, 1, 1, 0.07), 999, sc, 1.0, LINE)
+	# A key cap, not a pill: square-cornered like the key it stands for.
+	var sb := flat(Color(1, 1, 1, 0.07), R_CONTROL, sc, 1.0, LINE)
 	sb.content_margin_left = px(11, sc)
 	sb.content_margin_right = px(11, sc)
 	sb.content_margin_top = px(4, sc)
@@ -393,11 +398,11 @@ static func build(sc: float) -> Theme:
 	# stylebox with no content margins is a scrollbar zero pixels wide:
 	# content silently ran off the bottom of every tab with nothing on
 	# screen to say so.
-	var track := flat(Color(1, 1, 1, 0.04), 999, sc)
+	var track := flat(Color(1, 1, 1, 0.04), 2, sc)
 	track.set_content_margin_all(px(4, sc))
-	var grab := flat(Color(1, 1, 1, 0.26), 999, sc)
+	var grab := flat(Color(1, 1, 1, 0.26), 2, sc)
 	grab.set_content_margin_all(px(4, sc))
-	var grab_hi := flat(ACCENT, 999, sc)
+	var grab_hi := flat(ACCENT, 2, sc)
 	grab_hi.set_content_margin_all(px(4, sc))
 	for type in ["VScrollBar", "HScrollBar"]:
 		t.set_stylebox("scroll", type, track)

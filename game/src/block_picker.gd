@@ -41,7 +41,7 @@ func _init(p_category := "blocks") -> void:
 	visible = false
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0, 0, 0, 0)
-	style.set_corner_radius_all(14)
+	style.set_corner_radius_all(UiTheme.R_PANEL)
 	style.set_content_margin_all(14)
 	style.set_border_width_all(0)
 	add_theme_stylebox_override("panel", style)
@@ -282,5 +282,5 @@ func _refresh() -> void:
 		# Anything you are not carrying is greyed right back, so the ones
 		# you can actually switch to stand out.
 		chip.modulate = Color.WHITE if _allowed(i) else Color(1, 1, 1, 0.28)
-		style.set_corner_radius_all(maxi(6, int(_chip_px * 0.14)))
+		style.set_corner_radius_all(UiTheme.R_CONTROL)
 		chip.add_theme_stylebox_override("panel", style)

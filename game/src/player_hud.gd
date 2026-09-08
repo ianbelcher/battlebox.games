@@ -429,15 +429,24 @@ func _build_center_note() -> void:
 ## kind does instead is stop, say the name of the thing, count down, and
 ## tell you whose side you are on — so that when you land you already
 ## know who to run towards. That is this: the mode, a countdown, your
-## team in its colour, the team-mates you have, and which key moves you
-## to another side. It goes away the moment the round is live.
+## team in its colour and the team-mates you have.
+##
+## It goes when the round is live — or the moment you press anything
+## once you have landed. The server holds SETUP for six seconds after
+## the drop, so the card used to sit over a game people were already
+## playing; a click or a button from THIS seat takes it down for good.
+##
+## NO "CHANGE TEAM" HINT. It pointed at the player's own menu, which has
+## nothing in it that changes teams — the table is set on the front page
+## and by whoever opens the world menu.
 var _round_card: PanelContainer
 var _round_kicker: Label
 var _round_title: Label
 var _round_team: Label
 var _round_mates: Label
-var _round_hint: Control
 var _round_t := 0.0
+## Pressed away for this round. Reset when the round is live.
+var _round_dismissed := false
 
 func _build_round_card() -> void:
 	var sc := _uscale()
@@ -478,11 +487,30 @@ func _build_round_card() -> void:
 	_round_mates.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, sc))
 	_round_mates.add_theme_color_override("font_color", UiTheme.INK_DIM)
 	box.add_child(_round_mates)
-	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, UiTheme.px(4, sc))
-	box.add_child(gap)
-	_round_hint = UiTheme.hint_row([_cap("menu"), "Change team"], sc)
-	box.add_child(_round_hint)
+
+## Any press from THIS seat, once the drop has happened, takes the round
+## card down. This seat's, so one child clicking does not clear the card
+## from three other screens: the keyboard seat answers to keys and the
+## mouse, a pad seat to buttons on its own device.
+func _input(event: InputEvent) -> void:
+	if _round_card == null or not _round_card.visible or world == null:
+		return
+	if world.match_phase != "SETUP":
+		return
+	if not _press_from_this_seat(event):
+		return
+	_round_dismissed = true
+	_round_card.visible = false
+
+func _press_from_this_seat(event: InputEvent) -> bool:
+	if not event.is_pressed() or event.is_echo():
+		return false
+	var seat: InputSlot = Game.local_inputs.get(slot)
+	if seat == null:
+		return false
+	if seat.kind == InputSlot.Kind.GAMEPAD:
+		return event is InputEventJoypadButton and event.device == seat.device
+	return event is InputEventMouseButton or event is InputEventKey
 
 ## What the mode is called on the card.
 func _round_kicker_text() -> String:
@@ -504,7 +532,6 @@ func _refresh_round_card(phase: String) -> void:
 		_round_title.text = ("Starting in %d" % secs) if secs > 0 else "Starting…"
 	else:
 		_round_title.text = "Get ready"
-	_round_hint.visible = phase == "LOBBY"
 	var me := _me()
 	var entry: Dictionary = Game.roster.get(me, {})
 	var team := int(entry.get("team", -1))
@@ -641,7 +668,7 @@ func _build_name_chip() -> void:
 	_name_chip.add_theme_font_size_override("font_size", _us(14))
 	_name_chip.add_theme_font_override("font", UiTheme.display(_uscale(), 0.8))
 	_name_chip.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	var chip_bg := UiTheme.hud_plate(_uscale(), 0.7, 4)
+	var chip_bg := UiTheme.hud_plate(_uscale(), 0.7, 2)
 	chip_bg.set_content_margin_all(2)
 	chip_bg.content_margin_left = 7
 	chip_bg.content_margin_right = 7
@@ -1983,7 +2010,7 @@ func _mark_selected(btn: Button, on: bool) -> void:
 	if on:
 		var sel := StyleBoxFlat.new()
 		sel.bg_color = UiTheme.ACCENT
-		sel.set_corner_radius_all(9)
+		sel.set_corner_radius_all(UiTheme.R_CARD)
 		sel.content_margin_left = _us(14)
 		sel.content_margin_right = _us(14)
 		sel.content_margin_top = _us(7)
@@ -2089,7 +2116,7 @@ func _refresh_team_box() -> void:
 				var style := StyleBoxFlat.new()
 				style.bg_color = WorldNode.TEAM_COLORS[t] * (1.0 if t == team else 0.3)
 				style.bg_color.a = 1.0
-				style.set_corner_radius_all(6)
+				style.set_corner_radius_all(UiTheme.R_CONTROL)
 				if t == team:
 					style.border_color = Color.WHITE
 					style.set_border_width_all(2)
@@ -2118,7 +2145,7 @@ func _refresh_team_box() -> void:
 			kick.add_theme_font_size_override("font_size", _us(13))
 			var kick_style := StyleBoxFlat.new()
 			kick_style.bg_color = UiTheme.SURFACE_3
-			kick_style.set_corner_radius_all(6)
+			kick_style.set_corner_radius_all(UiTheme.R_CONTROL)
 			kick_style.set_content_margin_all(_us(3))
 			for kick_state in ["normal", "hover", "pressed"]:
 				kick.add_theme_stylebox_override(kick_state, kick_style)
@@ -2389,13 +2416,13 @@ func _build_video_tab() -> void:
 		on_style.bg_color = UiTheme.ACCENT_SOFT
 		on_style.border_color = Color(UiTheme.ACCENT, 0.6)
 		on_style.set_border_width_all(1)
-		on_style.set_corner_radius_all(9)
+		on_style.set_corner_radius_all(UiTheme.R_CONTROL)
 		on_style.set_content_margin_all(_us(7))
 		on_style.content_margin_left = _us(14)
 		on_style.content_margin_right = _us(14)
 		var off_style := StyleBoxFlat.new()
 		off_style.bg_color = Color(1, 1, 1, 0.05)
-		off_style.set_corner_radius_all(9)
+		off_style.set_corner_radius_all(UiTheme.R_CONTROL)
 		off_style.set_content_margin_all(_us(7))
 		off_style.content_margin_left = _us(14)
 		off_style.content_margin_right = _us(14)
@@ -2715,7 +2742,10 @@ func news(text: String, seconds := 5.0) -> void:
 func _refresh_notices(player: Player, delta: float) -> void:
 	if _round_card != null and world != null:
 		var phase: String = world.match_phase
-		var card_up: bool = (phase == "LOBBY" or phase == "SETUP") and not _menu.visible
+		var pre_round := phase == "LOBBY" or phase == "SETUP"
+		if not pre_round:
+			_round_dismissed = false
+		var card_up: bool = pre_round and not _menu.visible and not _round_dismissed
 		_round_card.visible = card_up
 		if card_up:
 			_round_t -= delta
@@ -3121,7 +3151,7 @@ func _refresh_hotbar_icons(player: Player) -> void:
 			var style := StyleBoxFlat.new()
 			style.bg_color = Color(UiTheme.SURFACE_2, 0.92) if selected \
 				else Color(UiTheme.SURFACE, 0.82)
-			style.set_corner_radius_all(7)
+			style.set_corner_radius_all(UiTheme.R_CONTROL)
 			style.border_color = UiTheme.ACCENT if selected else Color(1, 1, 1, 0.09)
 			style.set_border_width_all(2 if selected else 1)
 			frame.add_theme_stylebox_override("panel", style)
