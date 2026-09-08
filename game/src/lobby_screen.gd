@@ -662,6 +662,9 @@ func _build_setup() -> Control:
 		_revive_options(), "")
 	_build_choice_field(_more_box, "drop", "When you are knocked out",
 		_drop_options(), "")
+	_build_choice_field(_more_box, "enemies", "Who shows on the map?", [
+		{"value": true, "label": GameSetup.enemies_label(true)},
+		{"value": false, "label": GameSetup.enemies_label(false)}], "")
 
 	root.add_child(_build_action_bar())
 	_refresh_setup()
@@ -702,6 +705,9 @@ func _more_summary_text() -> String:
 	if GameSetup.uses("drop", mode):
 		parts.append("Drop your weapons" if bool(_wanted.get("drop", false))
 			else "Keep your weapons")
+	if GameSetup.uses("enemies", mode):
+		parts.append("Everybody on the map" if bool(_wanted.get("enemies", true))
+			else "Only your team on the map")
 	return "  ·  ".join(parts)
 
 ## What you are about to make, and the button that makes it. Pinned to

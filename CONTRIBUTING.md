@@ -93,6 +93,15 @@ WORLD_SERVER_URL=ws://127.0.0.1:9080/ws WORLD_ROOM=brave-otter \
   WORLD_AUTOTEST=2 tools/screenshot.sh /tmp/shots 60
 ```
 
+The underground cannot be photographed from above, so it has a picture of
+its own — a vertical slice, one pixel a block, and a number saying how
+much of the rock is open:
+
+```sh
+WORLD_MAP_THEME=caverns WORLD_SLICE_Z=24 WORLD_MAP_OUT=/tmp/slice.png \
+  godot --headless --path game --script res://tests/cave_slice.gd
+```
+
 **Do this before you ship an interface change.** A UI bug is invisible to
 everything else here: the unit tests pass, the integration run reaches the
 world, the console is clean, and the screen is unreadable. Three real ones

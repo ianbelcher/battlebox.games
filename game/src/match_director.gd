@@ -467,7 +467,7 @@ func drop_everyone() -> void:
 	# Fitting the day to the match length is what makes a random start
 	# fair: whatever time it opens on, a round sees the same amount of
 	# daylight and the same amount of night, and ends where it began.
-	world.clock = world._random_clock()
+	world.clock = 0.0 if world.always_night() else world._random_clock()
 	world.day_length = clampf(world.storm_minutes * 60.0, world.MIN_DAY_SECONDS, 1800.0)
 	world.cl_clock.rpc(world.clock, world.day_length)
 	world.cl_match.rpc("SETUP", 6.0)

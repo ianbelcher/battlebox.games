@@ -139,7 +139,7 @@ def free_port() -> int:
 # ---------------------------------------------------------------------
 
 MODES = ("creative", "battle", "ctf", "holdout")
-MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space")
+MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space", "caverns")
 SIZES = (50, 100, 200, 400, 800)
 FLY_ANSWERS = ("everyone", "nobody", "computers", "humans")
 # How many players the room has seats for; computer players fill the
@@ -171,6 +171,8 @@ DEFAULT_SETTINGS = {
     "fly": "nobody",
     "revive": 2,
     "drop": False,
+    # Whether the other sides are drawn on the map. See GameSetup.
+    "enemies": True,
 }
 
 # THE ALWAYS-ON WORLD IS JUST ANOTHER GAME. It is listed like any other,
@@ -231,6 +233,7 @@ def clean_settings(raw: object) -> dict:
     except (TypeError, ValueError):
         out["revive"] = 2
     out["drop"] = bool(raw.get("drop", False))
+    out["enemies"] = bool(raw.get("enemies", True))
     return out
 
 
@@ -258,6 +261,7 @@ def settings_env(settings: dict) -> dict:
         "WORLD_FLY": str(clean["fly"]),
         "WORLD_REVIVE": str(clean["revive"]),
         "WORLD_DROP_KO": "1" if clean["drop"] else "0",
+        "WORLD_MAP_ENEMIES": "1" if clean["enemies"] else "0",
     }
 
 

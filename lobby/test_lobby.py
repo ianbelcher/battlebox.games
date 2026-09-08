@@ -215,7 +215,7 @@ class SettingsTests(unittest.TestCase):
     def test_a_whole_game_survives_intact(self):
         asked = {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
                  "players": 10, "target": 5, "teams": 8, "fly": "humans",
-                 "revive": 1, "drop": True}
+                 "revive": 1, "drop": True, "enemies": False}
         self.assertEqual(lobby.clean_settings(asked), asked)
 
     def test_a_mode_nobody_has_written_is_not_started(self):
@@ -288,7 +288,7 @@ class SettingsEnvTests(unittest.TestCase):
         env = lobby.settings_env({"mode": "holdout", "map": "sky", "size": 800,
                                   "minutes": 3, "players": 20, "target": 10,
                                   "teams": 8, "fly": "everyone", "revive": 0,
-                                  "drop": True})
+                                  "drop": True, "enemies": False})
         self.assertEqual(env["WORLD_MODE"], "holdout")
         self.assertEqual(env["WORLD_THEME"], "sky")
         self.assertEqual(env["WORLD_SIZE"], "800")
@@ -299,6 +299,7 @@ class SettingsEnvTests(unittest.TestCase):
         self.assertEqual(env["WORLD_CTF_TARGET"], "10")
         self.assertEqual(env["WORLD_REVIVE"], "0")
         self.assertEqual(env["WORLD_DROP_KO"], "1")
+        self.assertEqual(env["WORLD_MAP_ENEMIES"], "0")
 
     def test_everything_is_a_string(self):
         # It is going into os.environ, which takes strings and raises on

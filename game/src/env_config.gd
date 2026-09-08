@@ -47,6 +47,7 @@ const KNOWN := {
 	"WORLD_FLY": "everyone | nobody | computers | humans — who may fly",
 	"WORLD_REVIVE": "0 nobody · 1 team-mates · 2 team-mates and your own flag",
 	"WORLD_DROP_KO": "1 drops your weapons where you fell",
+	"WORLD_MAP_ENEMIES": "0 keeps the other sides off the map; 1 (default) shows everybody",
 
 	# --- Rooms ---------------------------------------------------------
 	"WORLD_ROOM_CODE": "this room's join code; absent means the always-on game",
@@ -126,6 +127,7 @@ const KNOWN := {
 	"WORLD_MAP_OUT": "where to write a top-down map render",
 	"WORLD_MAP_THEME": "which procedural theme to render",
 	"WORLD_MAP_SPAN": "how many chunks across to render",
+	"WORLD_SLICE_Z": "the world z a cave_slice.gd cross-section is cut at",
 	"WORLD_MAP_ZOOM": "pixels per block in the render",
 	"WORLD_MAP_SIZE": "world size to generate before rendering",
 	"WORLD_ICON_IDS": "weapon ids to render hotbar icons for",

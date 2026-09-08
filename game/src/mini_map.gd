@@ -100,6 +100,9 @@ func _draw_big_map() -> void:
 		# on the map exactly as in the world.
 		if downed and team != my_team:
 			continue
+		# A game with the other sides off the map: only your own people.
+		if team != my_team and not hud.world.client_map_enemies:
+			continue
 		var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
 			else Color.WHITE
 		# ...and your own team's fallen are drawn HOLLOW: a ring in the
@@ -282,6 +285,8 @@ func _update_radar() -> void:
 		if child is Player and child != player and child.visible \
 				and not hud.world.out_ids.has(child.player_id):
 			var team := int(Game.roster.get(child.player_id, {}).get("team", -1))
+			if team != my_team and not hud.world.client_map_enemies:
+				continue
 			var blip_color: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
 				else Color("ff4426")
 			if team == my_team and my_team >= 0:

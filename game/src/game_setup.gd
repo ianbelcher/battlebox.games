@@ -28,7 +28,7 @@ class_name GameSetup
 
 ## The keys a settings dictionary holds. Anything else is dropped.
 const FIELDS := ["mode", "map", "size", "minutes", "players", "target",
-	"teams", "fly", "revive", "drop"]
+	"teams", "fly", "revive", "drop", "enemies"]
 
 ## HOW ARE WE PLAYING. `note` is the one line under the name on the tile —
 ## what the mode IS, in the words a child would use, not its rules.
@@ -52,6 +52,7 @@ const MAPS := [
 	{"key": "city", "label": "City", "note": "Streets, blocks and rooftops"},
 	{"key": "sky", "label": "Skylands", "note": "Floating ground, a long way down"},
 	{"key": "space", "label": "Space", "note": "Low gravity, no sky"},
+	{"key": "caverns", "label": "Caverns", "note": "Flat on top, a world of caves below"},
 ]
 
 ## HOW BIG, in blocks across. The same five the world menu offers, and
@@ -149,6 +150,10 @@ static func defaults() -> Dictionary:
 		"fly": "nobody",
 		"revive": ReviveRule.MATES_AND_FLAG,
 		"drop": false,
+		# WHO SHOWS ON THE MAP. Everybody, by default; off, and the other
+		# sides are simply not drawn, so finding them is part of the game
+		# — which is the whole point of a dark cave.
+		"enemies": true,
 	}
 
 ## WHAT THE NEW GAME SCREEN OPENS ON, which is a different question from
@@ -203,6 +208,9 @@ static func uses(field: String, mode: String) -> bool:
 			return has_target(mode)
 		"revive", "drop":
 			return has_knockouts(mode)
+		"enemies":
+			# Nobody is an opponent in creative.
+			return mode != "creative"
 		"teams":
 			# Nobody is on a side in creative: there is nothing to be on a
 			# side FOR, and the colours are just colours.
@@ -277,6 +285,9 @@ static func seats_note(limit: int, teams := 0) -> String:
 		return "%d players, everyone for themselves%s. %s" % [seats, capped, fill]
 	return fill
 
+static func enemies_label(shown: bool) -> String:
+	return "Everybody shows on the map" if shown else "Only your own team"
+
 static func teams_label(count: int) -> String:
 	return "Solo" if count == SOLO else "%d teams" % count
 
@@ -350,6 +361,7 @@ static func clean(raw: Dictionary) -> Dictionary:
 	out["revive"] = clampi(int(raw.get("revive", ReviveRule.MATES_AND_FLAG)),
 		ReviveRule.NONE, ReviveRule.MATES_AND_FLAG)
 	out["drop"] = bool(raw.get("drop", false))
+	out["enemies"] = bool(raw.get("enemies", true))
 	return out
 
 static func _has_key(raw: Dictionary, table: Array, field: String) -> bool:

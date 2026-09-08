@@ -12,7 +12,7 @@ extends RefCounted
 ## which is how "space" ended up in the picker while the server's
 ## _known_map() silently refused it — clicking Space did nothing at all.
 ## Anything that needs to know the maps asks here.
-const THEMES := ["classic", "desert", "isles", "castles", "city", "sky", "space"]
+const THEMES := ["classic", "desert", "isles", "castles", "city", "sky", "space", "caverns"]
 
 const CHUNK_SIZE := 16
 const CHUNK_H := 80
@@ -45,7 +45,27 @@ var _temperature := FastNoiseLite.new()
 var _lakes := FastNoiseLite.new()
 var _caves := FastNoiseLite.new()
 var _caves2 := FastNoiseLite.new()
+## The HALLS: one low-frequency 3D noise, thresholded. Everything above
+## the threshold is open air, so a low threshold is a world that is mostly
+## cave and a high one is the odd chamber. See _carve_caves.
+var _halls := FastNoiseLite.new()
 var _sky := FastNoiseLite.new()
+
+## CAVERNS: a flat plain on top and, under it, a world that is mostly
+## hollow. Where the surface is, in blocks; the crust under it is
+## CAVERN_CRUST thick and everything below that is fair game.
+const CAVERN_TOP := 54
+const CAVERN_CRUST := 8
+## Shafts down from the plain, on a grid this many blocks apart: the way
+## in. The plain is deliberately dull, so the holes are what you head for.
+const CAVERN_SHAFT_GRID := 48
+const CAVERN_SHAFT_RADIUS := 4.5
+## How much of the underground is hollow, as a threshold on _halls: the
+## noise is roughly -0.5..0.5, so 0.08 opens about a fifth of the rock and
+## -0.05 opens more than half of it. tests/cave_slice.gd prints the
+## share, which is how these were chosen.
+const HALL_THRESHOLD := 0.08
+const CAVERN_THRESHOLD := -0.05
 
 func _init(p_seed: int, p_theme := "classic", p_size := 250) -> void:
 	seed_value = p_seed
@@ -77,6 +97,14 @@ func _init(p_seed: int, p_theme := "classic", p_size := 250) -> void:
 	_caves2.seed = p_seed + 608
 	_caves2.frequency = 0.045
 	_caves2.fractal_octaves = 2
+	# Chambers forty to eighty blocks across: a wavelength of about sixty,
+	# with a couple of octaves of roughness so the walls are not smooth
+	# blobs.
+	_halls.seed = p_seed + 909
+	_halls.frequency = 0.013
+	# Two octaves, not three: the third put pockmarks all over the walls
+	# and broke every hall into a cluster of pockets.
+	_halls.fractal_octaves = 2
 	_sky.seed = p_seed + 707
 	_sky.frequency = 0.011
 	_sky.fractal_octaves = 2
@@ -99,6 +127,9 @@ func height_at(wx: int, wz: int) -> int:
 	# Ocean floor ~14, beaches just above sea, hills up to ~+30 over sea.
 	if theme == "city":
 		return clampi(SEA_LEVEL + 4 + int(detail * 1.2), 2, CHUNK_H - 12)
+	if theme == "caverns":
+		# Dead flat. All of this world is underneath.
+		return CAVERN_TOP
 	if theme == "sky":
 		# Skylands: a shallow ocean below, all the action up on the islands.
 		return clampi(SEA_LEVEL - 3 + int(detail * 0.8), 2, CHUNK_H - 12)
@@ -180,7 +211,7 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 			data[idx(lx, 0, lz)] = Blocks.BEDROCK
 			# No floating islands over the city (they make no sense above a
 			# street grid) and none in space, which has its own ships.
-			if theme != "city" and theme != "space":
+			if theme != "city" and theme != "space" and theme != "caverns":
 				_sky_island(data, lx, lz, wx, wz)
 			_landmark_column(data, lx, lz, wx, wz, h)
 	# The city plants its own street trees, verges and parks; the wild
@@ -189,48 +220,117 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 		_scatter_features(data, cx, cz)
 	return data
 
-## Winding underground caverns, lit by crystals and glowstone. Only under
+## The underground: tunnels, HALLS, and what grows in them. Only under
 ## dry land (never below sea/lakes, so nothing floods).
+##
+## THE HALLS ARE BIG NOW. They were "cheese" below y=22 from a noise
+## thresholded at 0.52 — pockets a few blocks across that nobody would
+## call a cavern. One low-frequency noise (_halls) thresholded much lower
+## gives chambers forty to eighty blocks wide and twenty tall, the odd one
+## breaking into the next, and the worms still thread them together so
+## the whole thing is one connected place rather than a set of rooms.
+##
+## Under every world, up to a crust below the surface so the ground you
+## walk on is still ground; and in the caverns world the threshold drops
+## to the point where most of the underground is air, with a thicker
+## crust so nothing shows from the plain except the shafts.
 func _carve_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int) -> void:
 	if h <= SEA_LEVEL + 1:
 		return
-	# Two noise worms whose intersection is a CONNECTED tunnel network you
-	# can actually run through, plus vast cheese caverns lower down with
-	# water pools on their floors.
-	for y in range(4, h - 3):
+	var deep := theme == "caverns"
+	var roof := h - (CAVERN_CRUST if deep else 6)
+	# Taller halls in the caverns world: the noise is sampled with less
+	# vertical stretch, so a chamber is as high as it is wide.
+	var y_scale := 0.85 if deep else 1.0
+	var threshold := CAVERN_THRESHOLD if deep else HALL_THRESHOLD
+	for y in range(4, roof):
 		var carve := false
 		if absf(_caves.get_noise_3d(wx, y * 1.6, wz)) < 0.085 \
 				and absf(_caves2.get_noise_3d(wx, y * 1.6, wz)) < 0.085:
 			carve = true
-		elif y < 22 and _caves.get_noise_3d(wx * 0.5, y * 1.1, wz * 0.5) > 0.52:
+		elif _halls.get_noise_3d(wx, y * y_scale, wz) > threshold:
 			carve = true
 		if carve:
-			data[idx(lx, y, lz)] = Blocks.WATER if y <= 8 else Blocks.AIR
-	# Walkable funnel entrances from the surface on a wide grid.
-	var ax := roundi(float(wx - 48) / 96.0) * 96 + 48
-	var az := roundi(float(wz - 48) / 96.0) * 96 + 48
-	if hash01(ax, az, 909) < 0.4:
-		var dist := Vector2(wx - ax, wz - az).length()
-		if dist < 9.0:
-			for y in range(maxi(4, h - 9 + int(dist)), h + 1):
-				data[idx(lx, y, lz)] = Blocks.AIR
-	# Stalagmites, stalactites, crystals, glowstone and mushrooms.
+			# Pools on the lowest floors. Water everywhere else; in the
+			# caverns world, MAGMA — a glowing lake floor that lights the
+			# hall above it, and the reason to look where you are going.
+			if deep:
+				data[idx(lx, y, lz)] = Blocks.MAGMA if y <= 6 else Blocks.AIR
+			else:
+				data[idx(lx, y, lz)] = Blocks.WATER if y <= 8 else Blocks.AIR
+	if deep:
+		_cavern_shaft(data, lx, lz, wx, wz, h)
+	else:
+		# Walkable funnel entrances from the surface on a wide grid.
+		var ax := roundi(float(wx - 48) / 96.0) * 96 + 48
+		var az := roundi(float(wz - 48) / 96.0) * 96 + 48
+		if hash01(ax, az, 909) < 0.4:
+			var dist := Vector2(wx - ax, wz - az).length()
+			if dist < 9.0:
+				for y in range(maxi(4, h - 9 + int(dist)), h + 1):
+					data[idx(lx, y, lz)] = Blocks.AIR
+	_dress_caves(data, lx, lz, wx, wz, h, deep)
+
+## A straight shaft from the plain down into the halls, on a grid, with a
+## wider mouth so it reads as a hole in the ground from a distance rather
+## than a pixel. Nearly every grid point has one: the plain is featureless
+## on purpose and these are the only way down.
+func _cavern_shaft(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int) -> void:
+	var half := CAVERN_SHAFT_GRID / 2
+	var ax := roundi(float(wx - half) / float(CAVERN_SHAFT_GRID)) * CAVERN_SHAFT_GRID + half
+	var az := roundi(float(wz - half) / float(CAVERN_SHAFT_GRID)) * CAVERN_SHAFT_GRID + half
+	if hash01(ax, az, 911) > 0.9:
+		return
+	var dist := Vector2(wx - ax, wz - az).length()
+	if dist >= CAVERN_SHAFT_RADIUS + 3.0:
+		return
+	# The mouth: a cone three blocks wider than the shaft, four deep.
+	var top_depth := 4 if dist < CAVERN_SHAFT_RADIUS else int(4.0 - (dist - CAVERN_SHAFT_RADIUS))
+	for y in range(maxi(4, h - top_depth + 1), h + 1):
+		data[idx(lx, y, lz)] = Blocks.AIR
+	if dist >= CAVERN_SHAFT_RADIUS:
+		return
+	# The shaft itself, through the crust and a way into whatever is
+	# underneath — far enough that it always opens into a hall.
+	for y in range(maxi(4, h - CAVERN_CRUST - 10), h + 1):
+		data[idx(lx, y, lz)] = Blocks.AIR
+	# Glowstone set into the wall of the mouth, so the hole can be seen
+	# from across the plain at night — which, down here, is always.
+	if dist >= CAVERN_SHAFT_RADIUS - 1.0 and hash01(wx, wz, 913) < 0.35:
+		data[idx(lx, h, lz)] = Blocks.GLOWSTONE
+
+## Stalagmites, stalactites, crystals, glowstone, mushrooms — and in the
+## caverns world a lot more of the things that glow, because light is the
+## whole of what makes a dark place a place.
+func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int,
+		deep: bool) -> void:
+	var lamp := 0.05 if deep else 0.03
 	for y in range(5, h - 3):
 		if data[idx(lx, y, lz)] != Blocks.AIR:
 			continue
 		var roll := hash01(wx, y, wz * 7)
-		if data[idx(lx, y - 1, lz)] == Blocks.STONE:
+		var below := data[idx(lx, y - 1, lz)]
+		if below == Blocks.STONE:
 			if roll < 0.02:
 				var crystals := [Blocks.CRYSTAL_PINK, Blocks.CRYSTAL_BLUE, Blocks.CRYSTAL_GREEN]
 				data[idx(lx, y, lz)] = crystals[int(roll * 150.0) % 3]
-			elif roll < 0.03:
+			elif roll < lamp:
 				data[idx(lx, y - 1, lz)] = Blocks.GLOWSTONE
-			elif roll < 0.05:
+			elif roll < lamp + 0.03:
 				data[idx(lx, y, lz)] = Blocks.MUSHROOM
-			elif roll < 0.1:
+				if deep:
+					data[idx(lx, y - 1, lz)] = Blocks.MYCELIUM
+			elif roll < lamp + 0.08:
 				data[idx(lx, y, lz)] = Blocks.COBBLE  # stalagmite
-		elif y + 1 < CHUNK_H and data[idx(lx, y + 1, lz)] == Blocks.STONE and roll > 0.94:
-			data[idx(lx, y, lz)] = Blocks.COBBLE  # stalactite
+			elif deep and y < 16 and roll > 0.97:
+				# Veins of magma low in the walls, for the glow.
+				data[idx(lx, y - 1, lz)] = Blocks.MAGMA
+		elif y + 1 < CHUNK_H and data[idx(lx, y + 1, lz)] == Blocks.STONE:
+			if roll > 0.94:
+				data[idx(lx, y, lz)] = Blocks.COBBLE  # stalactite
+			elif deep and roll > 0.915:
+				# Shroomlight in the ceiling: the hall's own lamps.
+				data[idx(lx, y + 1, lz)] = 148
 
 ## Theme landmarks are laid out on a 96-block anchor grid; each column asks
 ## the pure landmark function what it contributes, so structures far bigger
@@ -1025,6 +1125,10 @@ func _fill_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		_space_column(data, lx, lz, wx, wz, h)
 		return
 	var snow_line := SEA_LEVEL + 22
+	# The caverns plain sits above the snow line and is not a mountain:
+	# plain grass, so the holes in it are the only thing to look at.
+	if theme == "caverns":
+		snow_line = CHUNK_H
 	var beach_top := SEA_LEVEL + 2
 	for y in range(0, mini(h + 1, CHUNK_H)):
 		var block := Blocks.STONE

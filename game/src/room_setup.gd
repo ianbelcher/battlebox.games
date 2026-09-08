@@ -80,6 +80,12 @@ static func apply(world: Node) -> void:
 			ReviveRule.NONE, ReviveRule.MATES_AND_FLAG)
 	if EnvConfig.has("WORLD_DROP_KO"):
 		world.drop_on_knockout = EnvConfig.flag("WORLD_DROP_KO")
+	if EnvConfig.has("WORLD_MAP_ENEMIES"):
+		world.map_enemies = EnvConfig.flag("WORLD_MAP_ENEMIES")
+	# The caverns world has no day: the plain is lit by the moon and the
+	# halls by what glows in them. See WorldNode.always_night.
+	if world.always_night():
+		world.clock = 0.0
 	# WHO CAN FLY, as one of FlyRule's four answers turned back into the
 	# pair of defaults the world keeps. Two defaults rather than one
 	# because "computers only" and "humans only" cannot be said with a

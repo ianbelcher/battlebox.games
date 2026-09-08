@@ -128,25 +128,15 @@ const IDLE_DAY_SECONDS := 240.0
 ## Nothing sensible comes of a day shorter than this — the sky strobes.
 const MIN_DAY_SECONDS := 45.0
 
-## Seconds per full day/night cycle, right now (WORLD_FAST=1 quarters it).
-##
-## A BATTLE fits exactly one day into the match, whatever length the match
-## is set to: a three-minute round runs dawn → noon → dusk → night → dawn
-## and ends where it started. Every round therefore has the same shape and
-## the same last-minute darkness, rather than being decided by whatever
-## time of day the clock happened to be at when someone pressed Start.
+## Seconds per full day/night cycle (WORLD_FAST=1 quarters it). A BATTLE
+## fits exactly one day into the match whatever its length — dawn → noon →
+## dusk → night → dawn — so every round has the same shape.
 var day_length := 60.0 if fast_mode() else IDLE_DAY_SECONDS
 
-## What time it is when a world (or a battle) begins.
-##
-## Random, so no two starts feel the same — the world used to open at a
-## fixed morning and every battle was hard-set to 0.79, which is a few
-## minutes to seven in the evening. Every single round began at dusk and
-## went dark, which read as "this game is always night".
-##
-## WORLD_CLOCK pins it (0 midnight, 0.25 dawn, 0.5 noon, 0.75 dusk) so the
-## lighting at a particular hour can be looked at on purpose rather than
-## waited for.
+## What time it is when a world (or a battle) begins. Random, so no two
+## starts feel the same: every battle used to be hard-set to a few minutes
+## to seven in the evening, which read as "this game is always night".
+## WORLD_CLOCK pins it (0 midnight, 0.25 dawn, 0.5 noon, 0.75 dusk).
 static func _random_clock() -> float:
 	var forced := OS.get_environment("WORLD_CLOCK")
 	if forced.is_valid_float():
@@ -356,8 +346,13 @@ func _server_setup() -> void:
 	growth_timer.start()
 	Game.roster_changed.connect(_server_on_roster_changed)
 
+## THE CAVERNS WORLD IS ALWAYS NIGHT: moonlit plain, halls lit by what glows.
+func always_night() -> bool:
+	return (store.theme if multiplayer.is_server() else client_world) == "caverns"
+
 func _process(delta: float) -> void:
-	clock = fposmod(clock + delta / maxf(day_length, MIN_DAY_SECONDS), 1.0)
+	if not always_night():
+		clock = fposmod(clock + delta / maxf(day_length, MIN_DAY_SECONDS), 1.0)
 	if not multiplayer.is_server() and match_phase != "IDLE":
 		# The server only sends match_seconds at phase transitions — tick
 		# it locally so countdowns actually count.
@@ -438,7 +433,7 @@ func sv_hello() -> void:
 	cl_overview.rpc_id(peer, overview)
 	cl_battle_config.rpc_id(peer, int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
-		battle_fly_bots, int(holdout_minutes))
+		battle_fly_bots, int(holdout_minutes), map_enemies)
 	cl_teams.rpc_id(peer, team_names)
 	cl_mode.rpc_id(peer, game_mode)
 	cl_world_sel.rpc_id(peer, selected_map if not selected_map.is_empty() \
@@ -1707,7 +1702,7 @@ func sv_ctf_config(revive: int, target: int, drop: int, hold_mins := -1) -> void
 		battle.forget_holdout_length()
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
-		battle_fly_bots, int(holdout_minutes))
+		battle_fly_bots, int(holdout_minutes), map_enemies)
 
 ## Hand flight out, or take it away, from a group at a time.
 ##
@@ -2618,8 +2613,9 @@ func cl_overview(bytes: PackedByteArray) -> void:
 @rpc("authority", "reliable")
 func cl_battle_config(minutes: int, size: int, loot: bool, fly := false,
 		teams := -1, drop := false, revive := ReviveRule.MATES_AND_FLAG,
-		target := 3, fly_bots := false, hold_mins := 10) -> void:
+		target := 3, fly_bots := false, hold_mins := 10, enemies := true) -> void:
 	client_minutes = minutes
+	client_map_enemies = enemies
 	client_size = size
 	client_fly_bots = fly_bots
 	client_loot = loot
@@ -3134,6 +3130,10 @@ var ctf_target := 3
 ## makes attacking a distant base a real commitment.
 ## Cross-mode: does a knockout scatter your weapons where you fell?
 var drop_on_knockout := false
+## Whether the other sides are drawn on the map and radar. Chosen on the
+## front page (GameSetup "enemies"); the client keeps its own copy.
+var map_enemies := true
+var client_map_enemies := true
 var ctf_scores: Dictionary = {}   # team index -> net score (caps - losses)
 ## Captures MADE by each team, and flags LOST by each team. Kept apart from
 ## the net score because the table shows all three, and "3 for, 1 against"
