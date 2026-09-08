@@ -983,6 +983,13 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	state.hp = int(state.get("hp", world.MATCH_HP)) - amount
 	world.cl_hearts.rpc(id, state.hp)
 	world.cl_bonk.rpc(id, from_pos)
+	# A HIT STOPS THE PICK-UP. Anybody this player was kneeling over
+	# loses their progress and it starts again from nothing, so a rescue
+	# under fire is a thing you have to win, not a thing that finishes on
+	# its own while you take the hits. Without this a revive was never
+	# really interruptible: six seconds of standing still, and the
+	# shooter could only make it cost hearts, never make it fail.
+	_interrupt_revives_by(id, Vector3(state.get("pos", Vector3.ZERO)))
 	# AND IF THAT WAS A COMPUTER PLAYER, IT NOTICES.
 	#
 	# This line is the whole of "when they're being shot at they don't
@@ -994,6 +1001,20 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	world.bots.alerted(id, from_pos, attacker)
 	if state.hp <= 0:
 		eliminate(id, attacker)
+
+## Every downed team-mate within reach of `id` — the ones they were in
+## the middle of picking up — goes back to zero.
+func _interrupt_revives_by(id: String, at: Vector3) -> void:
+	var team := int(Game.roster.get(id, {}).get("team", -1))
+	for down_id: String in revive_progress.keys().duplicate():
+		if int(Game.roster.get(down_id, {}).get("team", -2)) != team:
+			continue
+		var dpos: Vector3 = world.player_state.get(down_id, {}).get("pos", Vector3.ZERO)
+		if dpos.distance_to(at) > world.REVIVE_RADIUS + 0.5:
+			continue
+		revive_progress.erase(down_id)
+		world.ctf._revive_pulse_t.erase(down_id)
+		world.cl_revive_progress.rpc(down_id, 0.0)
 
 ## Scatter what someone was carrying where they fell, as crates anyone can
 ## pick up — including them, if a team-mate stands them back up on the spot.

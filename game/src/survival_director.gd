@@ -208,8 +208,12 @@ func tick_crates() -> void:
 				"pos": Vector3(wx + 0.5, y + 1.0, wz + 0.5)}
 			_next_crate_id += 1
 			broadcast_crates()
-	# Pickup by touch.
+	# Pickup by touch — by somebody who is actually in the fight. A
+	# downed player drifting over a crate took it, which is loot for a
+	# ghost and one fewer crate for the people playing.
 	for id: String in world.player_state.keys():
+		if world.downed_ids.has(id) or world.out_ids.has(id):
+			continue
 		var ppos: Vector3 = world.player_state[id].pos
 		for crate_id: int in world.crates_by_id.keys():
 			if ppos.distance_to(world.crates_by_id[crate_id].pos) < 1.6:

@@ -191,33 +191,19 @@ const SPECTATOR_LIFT_SPEED := 7.0
 func lift_clear_to(height: float) -> void:
 	_lift_to = height
 
-## ARE WE HELD STILL BY A REVIVE? True for the player being picked up AND
-## for the team-mate picking them up, so the pair of them stand there for
-## the three seconds it takes and it always finishes.
+## ARE WE HELD STILL BY A REVIVE? Only if we are the one on the floor:
+## the fallen player stays put so the rescuer has something to reach.
 ##
-## Worked out on the client from state it already has: the server decides
-## whether a revive is happening at all, and the same radius it measures
-## with decides who is close enough to be part of it. A shade of slack, so
-## whoever is holding still is comfortably inside the range being tested.
+## THE RESCUER IS FREE. This used to freeze both of them, so walking up
+## to a fallen team-mate took the controls away for the whole pick-up —
+## under fire, next to a computer player, with no way to say "not now".
+## Staying is the rescuer's choice: step out of the ring and the server
+## simply stops counting (MatchDirector.tick_revives), and a hit on the
+## way cancels it anyway.
 func revive_locked() -> bool:
 	if world == null or world.players == null:
 		return false
-	if world.revive_progress.has(player_id):
-		return true      # being picked up
-	if downed or world.out_ids.has(player_id):
-		return false     # you cannot pick anybody up in either state
-	var my_team := int(Game.roster.get(player_id, {}).get("team", -1))
-	for rid: String in world.revive_progress.keys():
-		if not world.client_downed.has(rid):
-			continue
-		if int(Game.roster.get(rid, {}).get("team", -2)) != my_team:
-			continue
-		for child in world.players.get_children():
-			if child is Player and child.player_id == rid \
-					and child.position.distance_to(position) \
-						< WorldNode.REVIVE_RADIUS + 0.5:
-				return true
-	return false
+	return world.revive_progress.has(player_id)      # being picked up
 
 ## Held still for the beat after taking a flag. Same idea as the revive
 ## lock: the game is doing something to you, so you stop.
@@ -1121,10 +1107,9 @@ func _local_move(delta: float) -> void:
 	# revive never completed) to 1.5 (too slow to reach anything, so being
 	# downed meant sitting still) to 2.6, and none of them were right.
 	#
-	# Once the revive has actually started, neither of you needs to be
-	# anywhere else, so neither of you goes anywhere, and the three seconds
-	# always finish. Being downed costs you nothing until somebody is
-	# actually helping you.
+	# The one being picked up holds still so the rescuer has something to
+	# reach; the rescuer keeps their controls. Being downed costs you
+	# nothing until somebody is actually helping you.
 	if revive_locked() or capture_lock > 0.0:
 		speed = 0.0
 	if carry_time > 0.0:

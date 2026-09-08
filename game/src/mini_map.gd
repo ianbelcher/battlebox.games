@@ -102,11 +102,11 @@ func _draw_big_map() -> void:
 			continue
 		var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
 			else Color.WHITE
-		# ...and your own team's ghosts are washed out, so a glance tells
-		# you who is playing and who is waiting for you.
-		if downed:
-			tint = tint.lerp(Color(0.92, 0.94, 0.98), 0.62)
-		_map_blip(image, child.position, tint, size_px, child.is_local)
+		# ...and your own team's fallen are drawn HOLLOW: a ring in the
+		# team colour around a dark centre. They used to be a paler dot,
+		# and a paler dot beside a dot is a dot — from the floor, looking
+		# for who is still up, nobody could tell them apart.
+		_map_blip(image, child.position, tint, size_px, child.is_local, downed)
 	# Flags last, over the terrain and the player blips: in capture the
 	# flag they are the only thing on this map anybody actually needs.
 	for entry: Array in hud.world.flags:
@@ -177,20 +177,26 @@ func _map_ground(wx: int, wz: int, half: float) -> Color:
 	var grey := raw.get_luminance()
 	return Color(grey * 0.42 + 0.10, grey * 0.44 + 0.11, grey * 0.48 + 0.14)
 func _map_blip(image: Image, at: Vector3, tint: Color, size_px: int,
-		mine: bool) -> void:
+		mine: bool, hollow := false) -> void:
 	var px := size_px / 2 + int((at.x - _map_centre.x) / _map_zoom)
 	var py := size_px / 2 + int((at.z - _map_centre.y) / _map_zoom)
 	var r := 5 if mine else 4
 	for dy in range(-r, r + 1):
 		for dx in range(-r, r + 1):
-			if dx * dx + dy * dy > r * r:
+			var d2 := dx * dx + dy * dy
+			if d2 > r * r:
 				continue
 			var x := px + dx
 			var y := py + dy
 			if x < 0 or x >= size_px or y < 0 or y >= size_px:
 				continue
-			var edge: bool = dx * dx + dy * dy > (r - 1) * (r - 1)
-			image.set_pixel(x, y, Color.BLACK if edge else tint)
+			var edge: bool = d2 > (r - 1) * (r - 1)
+			if hollow:
+				# Two pixels of colour, then the dark inside.
+				var ring: bool = d2 > (r - 2) * (r - 2)
+				image.set_pixel(x, y, tint if ring else Color(0.05, 0.05, 0.08))
+			else:
+				image.set_pixel(x, y, Color.BLACK if edge else tint)
 func _update_radar() -> void:
 	var player := hud._player()
 	if player == null or hud.world == null or hud.world.chunks == null or hud.world.players == null:
@@ -280,7 +286,9 @@ func _update_radar() -> void:
 				else Color("ff4426")
 			if team == my_team and my_team >= 0:
 				blip_color = blip_color.lightened(0.4)
-			_blip(image, center, yaw, child.position, blip_color, true, span, eye_row)
+			# A fallen team-mate is a ring on the radar as on the map.
+			_blip(image, center, yaw, child.position, blip_color, true, span, eye_row,
+				hud.world.client_downed.has(child.player_id))
 	# Flags on the radar too — and THIS is the view that turns with you, so
 	# a flag off the edge shows as a chevron whose direction swings round
 	# as you look about, and points straight up when you are facing it.
@@ -386,7 +394,7 @@ func _radar_dot(image: Image, x: int, y: int, c: Color) -> void:
 		return
 	image.set_pixel(x, y, c)
 func _blip(image: Image, center: Vector3, yaw: float, pos: Vector3, color: Color,
-		big := false, span := 2.0, eye_row := 64.0) -> void:
+		big := false, span := 2.0, eye_row := 64.0, hollow := false) -> void:
 	var s := Vector2(pos.x - center.x, pos.z - center.z).rotated(yaw) / span
 	var px := 64 + int(s.x)
 	var py := int(eye_row) + int(s.y)
@@ -399,5 +407,8 @@ func _blip(image: Image, center: Vector3, yaw: float, pos: Vector3, color: Color
 				# One-pixel dark outline so blips read on any terrain.
 				if absi(dx) <= r + 1 and absi(dy) <= r + 1:
 					image.set_pixel(px + dx, py + dy, Color(0.05, 0.05, 0.08))
+			elif hollow and absi(dx) < r and absi(dy) < r:
+				# Dark inside: a fallen player is a ring, not a dot.
+				image.set_pixel(px + dx, py + dy, Color(0.05, 0.05, 0.08))
 			else:
 				image.set_pixel(px + dx, py + dy, color)

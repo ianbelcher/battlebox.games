@@ -1956,7 +1956,10 @@ func cl_hit_ok() -> void:
 ## landing one is total, so getting there has to be the hard part.
 const SWORD_REACH := 3.0
 
-const REVIVE_SECONDS := 3.0
+## SIX, up from three: at three a round saw dozens of knockouts and no side
+## ever out, every pick-up done before anybody could stop it. A hit cancels
+## one now (MatchDirector.hurt), so six is long enough for that to count.
+const REVIVE_SECONDS := 6.0
 const REVIVE_RADIUS := 3.0
 const REVIVE_HP := 1
 
@@ -2313,8 +2316,11 @@ func cl_revive_noise(pos: Vector3) -> void:
 	for child in players.get_children():
 		if child is Player and child.is_local:
 			dist = minf(dist, child.position.distance_to(pos))
-	if dist < 40.0:
-		Sfx.play("warp", -2.0 - dist * 0.4, 0.6)
+	# QUIET. Twice a second for the whole pick-up at -2 dB was the loudest
+	# thing in the round, with no bearing to tell you where. A murmur
+	# that fades fast with distance says "somebody nearby is being helped".
+	if dist < 28.0:
+		Sfx.play("warp", -16.0 - dist * 0.6, 0.6)
 
 @rpc("authority", "reliable")
 func cl_feed(attacker_name: String, attacker_team: int,

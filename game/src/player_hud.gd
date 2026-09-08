@@ -54,6 +54,8 @@ var _char_grid: GridContainer
 var _char_scroll: ScrollContainer
 var _char_cursor := 0
 var _name_chip: Label
+## The hotbar and its strip, so what sits ABOVE them can measure them.
+var _bar_stack: VBoxContainer
 var _menu: PanelContainer
 var _menu_dim: ColorRect
 var _menu_shell: VBoxContainer
@@ -182,6 +184,7 @@ func _build_hotbar() -> void:
 	# Bottom: hotbar, pinned to the screen bottom and growing upward so it
 	# can never slide off-screen whatever lives above it.
 	var bar_stack := VBoxContainer.new()
+	_bar_stack = bar_stack
 	bar_stack.add_theme_constant_override("separation", 2)
 	bar_stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar_stack.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
@@ -782,6 +785,8 @@ func _build_capture_fade() -> void:
 	_revive_hint.add_theme_stylebox_override("normal", UiTheme.hud_plate(_uscale()))
 	_revive_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	_revive_hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_revive_hint.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	# Placed above the hotbar by _place_revive_hint once it has a size.
 	_revive_hint.offset_top = -_us(190)
 	_revive_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_revive_hint.visible = false
@@ -909,10 +914,14 @@ func _build_picker_pages() -> void:
 			# who knocked over whom, most of it minutes old, stacked down
 			# the side of the screen over the thing you are trying to look
 			# at. A knockout is news for about as long as it takes to read.
+			# WEAK: the feed is emptied at round setup, and a lambda holding
+			# the freed line logged "capture was freed" for every knockout.
+			var handle: WeakRef = weakref(line)
 			var timer := get_tree().create_timer(FEED_SECONDS)
 			timer.timeout.connect(func() -> void:
-				if is_instance_valid(line):
-					line.queue_free())
+				var old_line: Node = handle.get_ref()
+				if old_line != null:
+					old_line.queue_free())
 			if _feed_box.get_child_count() > 12:
 				_feed_box.get_child(0).queue_free())
 	Game.roster_changed.connect(_refresh_identity)
@@ -2709,7 +2718,12 @@ func _refresh_battle_prompts(player: Player) -> void:
 			var my_team := int(Game.roster.get(Game.player_id(
 				multiplayer.get_unique_id(), slot), {}).get("team", -1))
 			var mate_near := INF
+			var me_id := Game.player_id(multiplayer.get_unique_id(), slot)
 			for down_id: String in world.client_downed.keys():
+				# Not yourself: the prompt told a downed player to pick
+				# themself up, being zero blocks from where they fell.
+				if down_id == me_id:
+					continue
 				if int(Game.roster.get(down_id, {}).get("team", -2)) != my_team:
 					continue
 				for child in world.players.get_children():
@@ -2721,11 +2735,23 @@ func _refresh_battle_prompts(player: Player) -> void:
 							mate_reach = gap < WorldNode.REVIVE_RADIUS
 		if not mate_down.is_empty():
 			_revive_hint.visible = true
-			_revive_hint.text = ("Hold still — picking %s up" % mate_down) \
+			_place_revive_hint()
+			# "Stay close", not "hold still": the rescuer keeps their
+			# controls now, and leaving is how you stop.
+			_revive_hint.text = ("Picking %s up — stay close" % mate_down) \
 				if mate_reach else ("Get to %s to pick them up" % mate_down)
 		else:
 			_revive_hint.visible = false
 	_update_revive_ring(player)
+
+## Just above the hotbar, wherever the hotbar is: it grows with the
+## screen, and a prompt at a fixed height lay across the weapon slots.
+func _place_revive_hint() -> void:
+	if _bar_stack == null:
+		return
+	var clear := _bar_stack.size.y + 26.0 + _us(10)
+	_revive_hint.offset_bottom = -clear
+	_revive_hint.offset_top = -clear - _revive_hint.get_minimum_size().y
 
 ## Something happened to the WORLD — the map was replaced, you rejoined —
 ## said in the same corner the match clock uses.
@@ -2833,11 +2859,12 @@ func _refresh_notices(player: Player, delta: float) -> void:
 					break
 			if not mate_left:
 				_team_gone_lifted = true
-				# ASK, do not teleport. A jump straight to the spectator
-				# height landed on the same frame the ten-block knockout
-				# drift started, so the drift ran perfectly and was never
-				# seen — see Player.lift_clear_to.
-				player.lift_clear_to(float(WorldGen.CHUNK_H) - 26.0)
+				# NO LIFT TO THE SKY. Being knocked out comes after being
+				# downed, and the drift up out of the fight has already
+				# happened; hauling somebody another fifty blocks up on
+				# top of it read as the game throwing them away. The body
+				# goes, the flying stays, and they watch from where they
+				# are — or from wherever they choose to fly.
 				player.visible = false
 		elif not out_now:
 			_team_gone_lifted = false
