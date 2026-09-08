@@ -662,6 +662,9 @@ func _build_setup() -> Control:
 		_revive_options(), "")
 	_build_choice_field(_more_box, "drop", "When you are knocked out",
 		_drop_options(), "")
+	_build_choice_field(_more_box, "hearts", "Hearts for people", _hearts_options(), "")
+	_build_choice_field(_more_box, "bot_hearts", "Hearts for computer players",
+		_hearts_options(), "")
 	_build_choice_field(_more_box, "enemies", "Who shows on the map?", [
 		{"value": true, "label": GameSetup.enemies_label(true)},
 		{"value": false, "label": GameSetup.enemies_label(false)}], "")
@@ -705,6 +708,10 @@ func _more_summary_text() -> String:
 	if GameSetup.uses("drop", mode):
 		parts.append("Drop your weapons" if bool(_wanted.get("drop", false))
 			else "Keep your weapons")
+	if GameSetup.uses("hearts", mode):
+		parts.append("%s · computers %s" % [
+			GameSetup.hearts_label(int(_wanted.get("hearts", GameSetup.DEFAULT_HEARTS))),
+			GameSetup.hearts_label(int(_wanted.get("bot_hearts", GameSetup.DEFAULT_HEARTS)))])
 	if GameSetup.uses("enemies", mode):
 		parts.append("Everybody on the map" if bool(_wanted.get("enemies", true))
 			else "Only your team on the map")
@@ -848,6 +855,12 @@ func _revive_options() -> Array:
 	var out: Array = []
 	for rung: int in ReviveRule.choices(true):
 		out.append({"value": rung, "label": ReviveRule.label(rung)})
+	return out
+
+func _hearts_options() -> Array:
+	var out: Array = []
+	for count: int in GameSetup.HEARTS:
+		out.append({"value": count, "label": GameSetup.hearts_label(count)})
 	return out
 
 func _drop_options() -> Array:

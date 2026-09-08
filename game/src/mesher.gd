@@ -15,10 +15,16 @@ const SIZE := WorldGen.CHUNK_SIZE
 const H := WorldGen.CHUNK_H
 
 ## Baked face shading kept subtle - the sun and SSAO do the heavy lifting.
+## Per-face shading, BAKED into the vertex colour as a stand-in for the
+## sun. Gentler than it was (bottom faces were 0.62): the bake multiplies
+## every light, so a ceiling directly over a lamp was drawn at two thirds
+## of the brightness of the floor under it, which read as lamps that only
+## shone upward. The sun still tells the faces apart; the lamps no longer
+## lose on the underside.
 const SHADE_TOP := 1.0
-const SHADE_BOTTOM := 0.62
-const SHADE_X := 0.86
-const SHADE_Z := 0.78
+const SHADE_BOTTOM := 0.82
+const SHADE_X := 0.9
+const SHADE_Z := 0.86
 static var ao_step := 0.16
 
 ## Cross-quad footprint (width, height) per plant so flowers read as flowers

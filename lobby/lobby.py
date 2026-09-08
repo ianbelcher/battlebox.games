@@ -153,6 +153,8 @@ TEAM_COUNTS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 # mode could explain — and on screen that is a row whose buttons move and
 # grey out as you change your mind about the mode.
 ROUND_LENGTHS = (3, 5, 10, 60)
+# Hearts a player starts with, people and computer players separately.
+HEARTS = (1, 2, 4, 8)
 
 # The NEUTRAL baseline — what a field becomes when it arrives missing.
 # Creative, because a bare POST with no settings in it is not somebody
@@ -173,6 +175,8 @@ DEFAULT_SETTINGS = {
     "drop": False,
     # Whether the other sides are drawn on the map. See GameSetup.
     "enemies": True,
+    "hearts": 8,
+    "bot_hearts": 8,
 }
 
 # THE ALWAYS-ON WORLD IS JUST ANOTHER GAME. It is listed like any other,
@@ -234,6 +238,9 @@ def clean_settings(raw: object) -> dict:
         out["revive"] = 2
     out["drop"] = bool(raw.get("drop", False))
     out["enemies"] = bool(raw.get("enemies", True))
+    out["hearts"] = _snap(raw, "hearts", HEARTS, DEFAULT_SETTINGS["hearts"])
+    out["bot_hearts"] = _snap(raw, "bot_hearts", HEARTS,
+                              DEFAULT_SETTINGS["bot_hearts"])
     return out
 
 
@@ -262,6 +269,8 @@ def settings_env(settings: dict) -> dict:
         "WORLD_REVIVE": str(clean["revive"]),
         "WORLD_DROP_KO": "1" if clean["drop"] else "0",
         "WORLD_MAP_ENEMIES": "1" if clean["enemies"] else "0",
+        "WORLD_HEARTS": str(clean["hearts"]),
+        "WORLD_BOT_HEARTS": str(clean["bot_hearts"]),
     }
 
 

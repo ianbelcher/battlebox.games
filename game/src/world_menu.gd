@@ -675,7 +675,7 @@ func _build_players_tab() -> void:
 			_add_bot_btn = btn
 
 	var roster_card := _section(box, "Everyone playing",
-		"Click a name to type a new one. Click a colour to change team.")
+		"Click a name to type a new one, a colour to change team, the hearts to change how many they start a round with.")
 	# Horizontal scroll is the backstop: the swatches shrink as teams are
 	# added, but at 24 teams on a small window they still have to go
 	# somewhere. Before this the row simply ran off the right of the panel
@@ -827,6 +827,27 @@ func _add_player_row(grid: GridContainer, id: String, team_count: int,
 	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_min(name_edit, 150, 44)
 	_font(name_edit, UiTheme.T_BODY)
+	# THIS PLAYER'S HEARTS, as a button that steps 8 → 4 → 2 → 1 → 8. The
+	# game's own numbers come from the front page; this is the knob for
+	# "the little one gets eight and the rest of us get two".
+	var hearts_btn := Button.new()
+	hearts_btn.focus_mode = Control.FOCUS_ALL
+	var current: int = int(world.hearts_max.get(id, WorldNode.MATCH_HP)) if world != null \
+		else int(WorldNode.MATCH_HP)
+	hearts_btn.text = "♥ %d" % current
+	hearts_btn.tooltip_text = "How many hearts %s starts a round with" % str(entry.name)
+	_min(hearts_btn, 64, 44)
+	_font(hearts_btn, UiTheme.T_BODY)
+	hearts_btn.pressed.connect(func() -> void:
+		var ladder: Array = GameSetup.HEARTS
+		var at := ladder.find(current)
+		current = int(ladder[(at - 1 + ladder.size()) % ladder.size()]) if at >= 0 \
+			else int(GameSetup.DEFAULT_HEARTS)
+		hearts_btn.text = "♥ %d" % current
+		if world != null:
+			world.sv_set_hearts.rpc_id(1, id, current)
+		Sfx.play("tick", -8.0))
+	who.add_child(hearts_btn)
 	name_edit.text_submitted.connect(func(text: String) -> void:
 		Game.sv_rename_any.rpc_id(1, id, text)
 		name_edit.release_focus()

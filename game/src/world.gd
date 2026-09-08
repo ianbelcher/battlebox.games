@@ -559,7 +559,7 @@ func sv_where(slot: int) -> void:
 		if match_phase == "BATTLE" and storm_radius >= 0.0 and not ctf.active():
 			spot = store.safe_stand(storm_center, maxf(storm_radius * 0.5, 1.0))
 		player_state[id] = {"pos": spot, "treasures": 0,
-			"name": str(entry.name), "hp": MATCH_HP}
+			"name": str(entry.name), "hp": max_hp(id)}
 		match_alive[id] = true
 		# AND EVERYBODY IS TOLD: the joiner's hello carried the alive set
 		# from BEFORE this seat existed, so their own screen said "in the
@@ -567,7 +567,7 @@ func sv_where(slot: int) -> void:
 		cl_match_state.rpc(match_phase, battle._timer, match_alive.keys(),
 			downed_ids.keys(), out_ids.keys())
 		cl_treasures.rpc(id, 0)
-		cl_hearts.rpc(id, MATCH_HP)
+		send_hearts(id)
 		cl_where.rpc_id(peer, slot, spot, 0)
 		cl_stand.rpc(id, spot, loot_only, Weapons.starting_kit(game_mode), true)
 		return
@@ -993,22 +993,10 @@ func sv_orb_hit(slot: int, target_id: String, hit_pos: Vector3) -> void:
 		return
 	cl_bonk.rpc(target_id, hit_pos)
 
-## THE SWORD KILLS OUTRIGHT. That is the entire reason to carry one.
-##
-## It is the weapon everybody drops into a round holding, and against
-## anything that shoots it was a joke: one heart a swing, at arm's length,
-## against a Little Shooter putting out seven pellets a second from across
-## the field. Nobody chose it, they endured it until they found a crate.
-##
-## Landing one now means you got inside somebody's guard — three blocks,
-## in front of you, while they were presumably shooting at you — and that
-## is worth a kill. It makes the opening of a battle royale a real
-## standoff rather than a scramble, and it gives a defender on a flag
-## mound something to be frightened of.
-##
-## Routed through `match_hurt` with the full bar rather than a special
-## case, so every rule downstream still applies: the downed-vs-out
-## decision, capture the flag's revive setting, the feed, the scoring.
+## THE SWORD KILLS OUTRIGHT: one heart a swing at arm's length was a joke
+## against a gun, and landing one means you got inside somebody's guard.
+## Routed through `match_hurt` with the full bar so every rule downstream
+## still applies — downed-vs-out, the revive setting, the feed, the score.
 @rpc("any_peer", "reliable")
 func sv_sword_hit(slot: int, target_id: String, hit_pos: Vector3) -> void:
 	if not multiplayer.is_server():
@@ -1125,24 +1113,12 @@ func _team_wool(id: String) -> int:
 ## water, no plants, and nothing you can see through. Painting glass or
 ## leaves turned a window or a canopy into solid wool, which looks
 ## exactly like the sprayer inventing blocks and filling in holes.
-## IS THIS BLOCK ALLOWED TO BE BROKEN, HERE?
-##
-## Two questions in one: the block's own `unbreakable` flag, and whether it
-## belongs to a flag. The beacon pole is unbreakable in the palette, but
-## the mound under it is ordinary dirt and wool — and a mound you can dig
-## away is not indestructible in any sense that matters, because the first
-## thing anybody works out is to mine the hill out from under the other
-## team's beacon and leave it hanging. The whole COLUMN is off limits, so
-## nobody can tunnel underneath it either.
-##
-## EVERYTHING THAT REMOVES A BLOCK ON THE SERVER COMES THROUGH HERE:
-## digging, every explosive, the block sucker, the tunnelling digger, fire
-## charring the ground, and the computer players' dig-out. Adding a new way
-## to break the world and not calling this is how the flags start
-## disappearing again.
-##
-## Placing is deliberately still allowed — building on your own mound is
-## half the fun and none of the risk.
+## IS THIS BLOCK ALLOWED TO BE BROKEN, HERE? Its own `unbreakable` flag,
+## and whether it belongs to a flag: the whole COLUMN under a beacon is off
+## limits, or the first thing anybody does is mine the hill out from under
+## it. EVERYTHING that removes a block on the server comes through here —
+## digging, explosives, the sucker, fire, the bots' dig-out — or the flags
+## start disappearing again. Placing is still allowed.
 func can_carve(pos: Vector3i, block: int) -> bool:
 	if not Blocks.is_breakable(block):
 		return false
@@ -1515,25 +1491,13 @@ func cl_teams(names: Array) -> void:
 	team_count = maxi(names.size(), 1)
 	battle_config_changed.emit()
 
-## START THE ROUND WHEN SOMEBODY ARRIVES, not at boot.
-##
-## A room asked for as battle royale has to actually be playing battle
-## royale — but opening the round in _server_setup means it opens while
-## the room is still empty, and the lobby only hands the code back to its
-## creator once the process is listening. They would arrive a few seconds
-## into a round that started without them, which is the one moment in a
-## battle royale that matters.
-##
-## So the first `sv_hello` opens it. Idempotent, because every client
-## sends one: only an IDLE phase is opened, and only in a mode that has
-## rounds.
-## A room created as a battle has been sitting IDLE waiting for somebody.
-## Called when a PERSON TAKES A SEAT (Game.sv_register_player), not when
-## their machine connects: the seat comes a few seconds after the socket
-## now, once the world has loaded, and a round opened on the socket had
-## counted down, dropped everybody and put the storm up before the person
-## it was opened for was standing anywhere — so the first thing they saw
-## of their own game was "In the next one!".
+## START THE ROUND WHEN SOMEBODY ARRIVES, not at boot: opened at boot, a
+## battle room's first round ran while the room was still empty. Called
+## when a PERSON TAKES A SEAT (Game.sv_register_player), not when their
+## socket connects — the seat comes seconds later, once the world has
+## loaded, and a round opened on the socket had dropped everybody before
+## the person it was opened for was standing anywhere. Idempotent: only
+## an IDLE phase is opened, and only in a mode that has rounds.
 func open_round_if_waiting() -> void:
 	if game_mode == "creative" or match_phase != "IDLE" or battle == null:
 		return
@@ -1654,13 +1618,9 @@ func fly_answer() -> String:
 ##   out          in `out_ids` and nothing else — the whole team went
 ##                down at once, and in battle royale that is permanent
 ##
-## `out_ids` was called `ghost_ids`, which read as a fourth thing rather
-## than as a name for the third. The word is still around for the LOOK a
-## knocked-out player has, which is a separate idea and now has its own
-## name (Player.set_knocked_out_look).
-##
 ## The client keeps its own mirrors — `alive_ids`, `client_downed`,
-## `out_ids` — because it draws them.
+## `out_ids` — because it draws them. (`out_ids` was `ghost_ids`; the
+## word survives for the LOOK, Player.set_knocked_out_look.)
 ##
 ## Who is still in the fight. id -> true.
 var match_alive: Dictionary = {}
@@ -2188,7 +2148,7 @@ func cl_revived(id: String) -> void:
 	out_ids.erase(id)
 	alive_ids[id] = true
 	client_downed.erase(id)
-	hearts[id] = MATCH_HP
+	hearts[id] = int(hearts_max.get(id, MATCH_HP))
 	hearts_changed.emit()
 	match_score_changed.emit()
 	for child in players.get_children():
@@ -2835,8 +2795,9 @@ func cl_party_fx(pos: Vector3i) -> void:
 	fx.flash_light(Vector3(pos), Color("ffd166"), 4.0)
 
 @rpc("authority", "reliable")
-func cl_hearts(id: String, hp: int) -> void:
+func cl_hearts(id: String, hp: int, top := MATCH_HP) -> void:
 	hearts[id] = hp
+	hearts_max[id] = top
 	hearts_changed.emit()
 	_refresh_overheads()
 
@@ -3134,6 +3095,37 @@ var drop_on_knockout := false
 ## front page (GameSetup "enemies"); the client keeps its own copy.
 var map_enemies := true
 var client_map_enemies := true
+## HOW MANY HEARTS A ROUND STARTS YOU WITH: people, computer players, and
+## anyone the world menu has set by hand (id -> hearts). The client's
+## `hearts_max` mirror arrives with every cl_hearts.
+var hearts_people := MATCH_HP
+var hearts_bots := MATCH_HP
+var hearts_override: Dictionary = {}
+var hearts_max: Dictionary = {}
+
+func max_hp(id: String) -> int:
+	if hearts_override.has(id):
+		return int(hearts_override[id])
+	return hearts_bots if bool(Game.roster.get(id, {}).get("bot", false)) else hearts_people
+
+## The one way hearts reach clients: what the server holds, and the bar
+## they are out of, so the HUD draws the right number of them.
+func send_hearts(id: String) -> void:
+	var hp := int(player_state.get(id, {}).get("hp", max_hp(id)))
+	cl_hearts.rpc(id, maxi(hp, 0), max_hp(id))
+
+## SET ONE PLAYER'S HEARTS from the world menu — "the little one gets
+## eight, the computer players get one". Takes effect on the spot: a
+## player mid-round above the new bar is brought down to it.
+@rpc("any_peer", "call_local", "reliable")
+func sv_set_hearts(target_id: String, count: int) -> void:
+	if not multiplayer.is_server() or not Game.roster.has(target_id):
+		return
+	hearts_override[target_id] = clampi(count, 1, MATCH_HP)
+	var state: Dictionary = player_state.get(target_id, {})
+	if not state.is_empty() and match_alive.has(target_id):
+		state.hp = mini(int(state.get("hp", MATCH_HP)), max_hp(target_id))
+	send_hearts(target_id)
 var ctf_scores: Dictionary = {}   # team index -> net score (caps - losses)
 ## Captures MADE by each team, and flags LOST by each team. Kept apart from
 ## the net score because the table shows all three, and "3 for, 1 against"

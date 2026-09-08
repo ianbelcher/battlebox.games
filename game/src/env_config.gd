@@ -48,6 +48,8 @@ const KNOWN := {
 	"WORLD_REVIVE": "0 nobody · 1 team-mates · 2 team-mates and your own flag",
 	"WORLD_DROP_KO": "1 drops your weapons where you fell",
 	"WORLD_MAP_ENEMIES": "0 keeps the other sides off the map; 1 (default) shows everybody",
+	"WORLD_HEARTS": "hearts a person starts a round with (1, 2, 4 or 8)",
+	"WORLD_BOT_HEARTS": "hearts a computer player starts a round with (1, 2, 4 or 8)",
 
 	# --- Rooms ---------------------------------------------------------
 	"WORLD_ROOM_CODE": "this room's join code; absent means the always-on game",

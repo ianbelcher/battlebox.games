@@ -2539,8 +2539,11 @@ func _refresh_identity() -> void:
 		or world.client_mode == "battle" \
 		or world.match_phase in ["SETUP", "BATTLE"])
 	var hp: int = int(world.hearts.get(id, 8)) if world != null else 8
+	var top: int = int(world.hearts_max.get(id, 8)) if world != null else 8
+	# Only as many hearts as this player HAS: a two-heart game draws two,
+	# not two lit and six dim, which reads as "nearly dead" from the start.
 	for i in _heart_cells.size():
-		(_heart_cells[i] as Label).modulate.a = 0.0 if not hearts_on \
+		(_heart_cells[i] as Label).modulate.a = 0.0 if not hearts_on or i >= top \
 			else (1.0 if i < hp else 0.18)
 
 func _edit_name() -> void:
@@ -2988,23 +2991,16 @@ func _refresh_scoreline(player: Player, delta: float) -> void:
 			_score_label.text = "%s  %d/%d alive   ·   %d still standing" % [
 				team_name, mates_alive, mates_total, standing]
 	if _vignette != null and world != null:
-		# The hurt vignette: strongest when hearts are low, eases back as
-		# regen tops you up.
-		#
-		# NOT WHILE YOU ARE DOWN. It is driven off hearts alone, and a
-		# knocked-out player has none — so it sat at full strength for the
-		# entire time you were out, which is a dark red ring around the
-		# screen exactly where the MAP is. That is the one thing somebody
-		# who is out actually needs to read: where their own base is, and
-		# which way to go to get picked up. The red wash went for this
-		# reason and this is the last of it.
-		#
-		# There is nothing lost by hiding it. The vignette means "mind
-		# yourself, you are nearly out" — advice that has already expired
-		# by the time it was being shown, and the colour draining out of
-		# the world says the rest.
+		# The hurt vignette: strongest when hearts are low, RELATIVE to how
+		# many this player started with (a two-heart game is not a red ring
+		# from the first second). NOT WHILE YOU ARE DOWN: driven off hearts
+		# alone it sat at full strength the whole time you were out, a red
+		# ring exactly where the MAP is — the one thing somebody who is out
+		# needs to read. The drained colour says the rest.
 		var vg_hp := int(world.hearts.get(_me(), 8))
-		var vg_target := clampf((5.0 - vg_hp) / 5.0, 0.0, 0.75) \
+		var vg_top := maxi(1, int(world.hearts_max.get(_me(), 8)))
+		var vg_frac := float(vg_hp) / float(vg_top)
+		var vg_target := clampf((0.62 - vg_frac) / 0.62, 0.0, 0.75) \
 			if world.match_phase == "BATTLE" else 0.0
 		if _out_of_it():
 			vg_target = 0.0

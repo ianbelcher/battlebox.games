@@ -31,8 +31,15 @@ func test_the_screen_opens_on_a_game_and_the_fallback_stays_neutral() -> void:
 func test_a_whole_game_survives_intact() -> void:
 	var asked := {"mode": "ctf", "map": "castles", "size": 400, "minutes": 10,
 		"players": 10, "target": 5, "teams": 8, "fly": "humans",
-		"revive": ReviveRule.MATES, "drop": true, "enemies": false}
+		"revive": ReviveRule.MATES, "drop": true, "enemies": false,
+		"hearts": 4, "bot_hearts": 1}
 	equal(GameSetup.clean(asked), asked, "nothing chosen is thrown away")
+
+func test_hearts_are_a_choice_off_the_ladder() -> void:
+	equal(GameSetup.defaults()["hearts"], 8, "eight is the game as it was")
+	equal(GameSetup.clean({"bot_hearts": 1})["bot_hearts"], 1, "one-shot computer players")
+	equal(GameSetup.clean({"hearts": 5})["hearts"], 8, "five is not on the ladder")
+	check(not GameSetup.uses("hearts", "creative"), "nobody is hurt in creative")
 
 func test_the_other_sides_show_on_the_map_unless_told_not_to() -> void:
 	equal(GameSetup.defaults()["enemies"], true, "everybody, by default")

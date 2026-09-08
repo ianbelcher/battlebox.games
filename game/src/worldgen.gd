@@ -66,6 +66,13 @@ const CAVERN_SHAFT_RADIUS := 4.5
 ## share, which is how these were chosen.
 const HALL_THRESHOLD := 0.08
 const CAVERN_THRESHOLD := -0.05
+## THE WATER TABLE. Cave floors below this fill to it, so a hall that dips
+## under it has a lake in the dip and a hall above it is dry — instead of
+## every cave bottom being a flooded cellar. Shallow: two blocks, so you
+## wade rather than swim, except in the odd pocket (POOL_DEEP) where the
+## bed drops away. In the caverns world the table is magma.
+const POOL_TOP := 9
+const POOL_DEEP := 5
 
 func _init(p_seed: int, p_theme := "classic", p_size := 250) -> void:
 	seed_value = p_seed
@@ -251,13 +258,17 @@ func _carve_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		elif _halls.get_noise_3d(wx, y * y_scale, wz) > threshold:
 			carve = true
 		if carve:
-			# Pools on the lowest floors. Water everywhere else; in the
-			# caverns world, MAGMA — a glowing lake floor that lights the
-			# hall above it, and the reason to look where you are going.
-			if deep:
-				data[idx(lx, y, lz)] = Blocks.MAGMA if y <= 6 else Blocks.AIR
-			else:
-				data[idx(lx, y, lz)] = Blocks.WATER if y <= 8 else Blocks.AIR
+			if y > POOL_TOP:
+				data[idx(lx, y, lz)] = Blocks.AIR
+			elif deep:
+				# A magma floor at the table, solid rock beneath: a lake
+				# of glow you can walk across, lighting the hall above.
+				if y == POOL_TOP:
+					data[idx(lx, y, lz)] = Blocks.MAGMA
+			elif y >= POOL_TOP - 1 or (y >= POOL_DEEP
+					and _lakes.get_noise_2d(wx * 2.0, wz * 2.0) > 0.42):
+				data[idx(lx, y, lz)] = Blocks.WATER
+			# ...and anything else under the table stays rock: the bed.
 	if deep:
 		_cavern_shaft(data, lx, lz, wx, wz, h)
 	else:
@@ -306,14 +317,16 @@ func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		deep: bool) -> void:
 	var lamp := 0.14 if deep else 0.06
 	for y in range(5, h - 3):
-		if data[idx(lx, y, lz)] != Blocks.AIR:
-			continue
+		var here := data[idx(lx, y, lz)]
 		var roll := hash01(wx, y, wz * 7)
 		var below := data[idx(lx, y - 1, lz)]
-		# Sea lanterns on the floors of the pools, so the water glows.
-		if below == Blocks.WATER and y > 5 and data[idx(lx, y - 2, lz)] == Blocks.STONE \
-				and roll < 0.05:
-			data[idx(lx, y - 2, lz)] = 147
+		# Sea lanterns set into the beds of the pools, so the water glows.
+		if here == Blocks.WATER:
+			if below == Blocks.STONE and roll < 0.06:
+				data[idx(lx, y - 1, lz)] = 147
+			continue
+		if here != Blocks.AIR:
+			continue
 		if below == Blocks.STONE:
 			if roll < 0.02:
 				var crystals := [Blocks.CRYSTAL_PINK, Blocks.CRYSTAL_BLUE, Blocks.CRYSTAL_GREEN]
@@ -1185,14 +1198,14 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				return
 			if hash01(wx, wz, 12) < 0.03:
 				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
-			elif hash01(wx, wz, 9) < 0.16:
+			elif hash01(wx, wz, 9) < 0.3:
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif interior and tree_roll < 0.012:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
 		Biome.JUNGLE:
 			if lx >= 4 and lx < 12 and lz >= 4 and lz < 12 and tree_roll < 0.09:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 1)
-			elif hash01(wx, wz, 9) < 0.22:
+			elif hash01(wx, wz, 9) < 0.38:
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 12) < 0.012:
 				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
@@ -1205,7 +1218,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 		Biome.FOREST:
 			if interior and tree_roll < 0.03:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
-			elif hash01(wx, wz, 9) < 0.1:
+			elif hash01(wx, wz, 9) < 0.28:
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 12) < 0.007:
 				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
@@ -1214,9 +1227,9 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 		Biome.PINE:
 			if lx >= 2 and lx < 14 and lz >= 2 and lz < 14 and tree_roll < 0.05:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 2)
-			elif hash01(wx, wz, 9) < 0.03:
+			elif hash01(wx, wz, 9) < 0.14:
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
-			elif hash01(wx, wz, 14) < 0.05:
+			elif hash01(wx, wz, 14) < 0.08:
 				data[idx(lx, ground + 1, lz)] = Blocks.FERN
 		Biome.FLOWERS:
 			if hash01(wx, wz, 10) < 0.15:
@@ -1227,7 +1240,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				elif pick > 0.33:
 					flower = Blocks.FLOWER_YELLOW
 				data[idx(lx, ground + 1, lz)] = flower
-			elif hash01(wx, wz, 9) < 0.08:
+			elif hash01(wx, wz, 9) < 0.26:
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 13) < 0.01:
 				data[idx(lx, ground + 1, lz)] = Blocks.BERRY_BUSH
@@ -1251,9 +1264,12 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				for dy in 3 + int(hash01(wx, wz, 53) * 4.0):
 					data[idx(lx, ground + 1 + dy, lz)] = Blocks.STONE
 				return
+			# GRASS EVERYWHERE. A plain was a green plane with a tuft every
+			# twenty blocks; a meadow is grass with the ground showing
+			# through, which is what every child expects a field to be.
 			if interior and tree_roll < 0.006:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
-			elif hash01(wx, wz, 9) < 0.05:
+			elif hash01(wx, wz, 9) < 0.34:
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 10) < 0.02:
 				var pick := hash01(wx, wz, 11)

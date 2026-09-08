@@ -82,6 +82,10 @@ static func apply(world: Node) -> void:
 		world.drop_on_knockout = EnvConfig.flag("WORLD_DROP_KO")
 	if EnvConfig.has("WORLD_MAP_ENEMIES"):
 		world.map_enemies = EnvConfig.flag("WORLD_MAP_ENEMIES")
+	if EnvConfig.has("WORLD_HEARTS"):
+		world.hearts_people = clampi(EnvConfig.number("WORLD_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
+	if EnvConfig.has("WORLD_BOT_HEARTS"):
+		world.hearts_bots = clampi(EnvConfig.number("WORLD_BOT_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
 	# The caverns world has no day: the plain is lit by the moon and the
 	# halls by what glows in them. See WorldNode.always_night.
 	if world.always_night():

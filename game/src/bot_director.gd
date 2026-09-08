@@ -1534,7 +1534,10 @@ func _rally_point(id: String, pos: Vector3) -> Vector3:
 ## of a steel vault, but a hillside, a tree or somebody's wall will not
 ## hold them for ever. Rate-limited by the same cooldown as shooting so
 ## this cannot turn into a mining laser.
-func _bot_dig_out(id: String, bot: Dictionary, pos: Vector3, dir: Vector2) -> void:
+## `lift` raises the bite: 0 chews level, 1 leaves the block ahead at
+## foot height as a step and opens the three above it — a stair going up.
+func _bot_dig_out(id: String, bot: Dictionary, pos: Vector3, dir: Vector2,
+		lift := 0) -> void:
 	if float(bot.get("dig_cd", 0.0)) > 0.0:
 		return
 	bot.dig_cd = 0.8
@@ -1545,7 +1548,7 @@ func _bot_dig_out(id: String, bot: Dictionary, pos: Vector3, dir: Vector2) -> vo
 	# Head height and one above, AND the step up — a bot at the bottom of
 	# a pit needs the wall in front of it opened at the height it wants
 	# to climb to, not just the height it is standing at.
-	for dy in [0, 1, 2]:
+	for dy in [lift, lift + 1, lift + 2]:
 		var cell := Vector3i(floori(ahead.x), floori(pos.y) + dy, floori(ahead.y))
 		if not world.store.inside_world(cell.x, cell.z, 1):
 			continue
@@ -1836,8 +1839,17 @@ const SQUAD_PUSH_MS := 26_000
 ## comes up wherever it arrives, and mostly it is a nuisance rather than a
 ## war winner, which is about right: the fun of it is that it happens at
 ## all.
-const SAP_DEPTH := 4.0
+## SEVEN BLOCKS DOWN, from four: deep enough to be under the crust the
+## halls leave beneath the surface, so a tunnel runs through the caves
+## rather than scraping along just under the grass where every crater
+## opens it to the sky.
+const SAP_DEPTH := 7.0
 const SAP_COOLDOWN := 0.55
+## This close to the objective the tunnel turns upward: one step up per
+## bite, so the sapper walks up its own stair and comes out of the ground
+## a few blocks from the flag rather than surfacing wherever the terrain
+## happens to thin.
+const SAP_RISE_RANGE := 9.0
 
 const BOT_SKILL_NAMES := ["Rookie", "Steady", "Sharp", "Deadly"]
 
@@ -2251,18 +2263,28 @@ func _bot_cruise_y(id: String, bot: Dictionary, flat: Vector2,
 
 ## Drive the tunnel forward one bite, on its own cooldown.
 ##
-## Two moves and no more: sink until we are under the fighting, then chew
-## towards the objective. Coming back up is not handled and does not need
-## to be — the ground rises and falls, so a tunnel held at a fixed depth
-## surfaces on its own soon enough.
+## Three moves: sink until we are under the fighting, chew towards the
+## objective, and in the last few blocks chew UPWARD — a rising stair
+## that brings the sapper out of the ground beside the thing it came for.
+## That last part is what makes it an ambush rather than a walk with
+## extra steps: nobody watching the approaches sees it coming.
 func _bot_sap(id: String, bot: Dictionary, pos: Vector3) -> void:
 	if float(bot.get("dig_cd", 0.0)) > 0.0:
 		return
 	var target: Vector3 = bot.get("sap_at", Vector3.INF)
 	if target == Vector3.INF or world.out_ids.has(id) or world.downed_ids.has(id):
 		return
+	var ahead := Vector2(target.x - pos.x, target.z - pos.z)
+	var near := ahead.length() < SAP_RISE_RANGE
 	var ground := float(world.store.surface_y(floori(pos.x), floori(pos.z)))
 	var want_y := minf(target.y - 1.0, ground - SAP_DEPTH)
+	if near:
+		# Coming up: dig the step ahead one higher than we stand, and
+		# walk_y takes the bot up it. Nothing to do once we are level.
+		if pos.y >= target.y - 0.5 or ahead.length() < 0.001:
+			return
+		_bot_dig_out(id, bot, pos, ahead.normalized(), 1)
+		return
 	if pos.y > want_y + 1.0:
 		# Not deep enough yet: take the floor out from under ourselves.
 		bot.dig_cd = SAP_COOLDOWN
@@ -2281,7 +2303,6 @@ func _bot_sap(id: String, bot: Dictionary, pos: Vector3) -> void:
 		if not cleared.is_empty():
 			world.cl_batch.rpc(cleared, Blocks.AIR)
 		return
-	var ahead := Vector2(target.x - pos.x, target.z - pos.z)
 	if ahead.length() < 0.001:
 		return
 	_bot_dig_out(id, bot, pos, ahead.normalized())

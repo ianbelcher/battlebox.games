@@ -777,6 +777,6 @@ func respawn(id: String) -> void:
 	world.downed_ids.erase(id)
 	var state: Dictionary = world.player_state.get(id, {})
 	if not state.is_empty():
-		state.hp = world.MATCH_HP
-	world.cl_hearts.rpc(id, world.MATCH_HP)
+		state.hp = world.max_hp(id)
+	world.send_hearts(id)
 	world.cl_revived.rpc(id)

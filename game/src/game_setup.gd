@@ -28,7 +28,16 @@ class_name GameSetup
 
 ## The keys a settings dictionary holds. Anything else is dropped.
 const FIELDS := ["mode", "map", "size", "minutes", "players", "target",
-	"teams", "fly", "revive", "drop", "enemies"]
+	"teams", "fly", "revive", "drop", "enemies", "hearts", "bot_hearts"]
+
+## HOW MANY HEARTS A PLAYER STARTS WITH — for people, and separately for
+## the computer players. Eight is the game as it was; one is a one-shot
+## game, the way the old console deathmatches were most fun. Two numbers
+## because "a horde of one-heart computer players against a family with
+## eight" is a game worth being able to set up. The world menu can then
+## change any one player's number on top (WorldNode.sv_set_hearts).
+const HEARTS := [1, 2, 4, 8]
+const DEFAULT_HEARTS := 8
 
 ## HOW ARE WE PLAYING. `note` is the one line under the name on the tile —
 ## what the mode IS, in the words a child would use, not its rules.
@@ -154,6 +163,8 @@ static func defaults() -> Dictionary:
 		# sides are simply not drawn, so finding them is part of the game
 		# — which is the whole point of a dark cave.
 		"enemies": true,
+		"hearts": DEFAULT_HEARTS,
+		"bot_hearts": DEFAULT_HEARTS,
 	}
 
 ## WHAT THE NEW GAME SCREEN OPENS ON, which is a different question from
@@ -211,6 +222,8 @@ static func uses(field: String, mode: String) -> bool:
 		"enemies":
 			# Nobody is an opponent in creative.
 			return mode != "creative"
+		"hearts", "bot_hearts":
+			return has_knockouts(mode)
 		"teams":
 			# Nobody is on a side in creative: there is nothing to be on a
 			# side FOR, and the colours are just colours.
@@ -284,6 +297,9 @@ static func seats_note(limit: int, teams := 0) -> String:
 		var capped := "" if seats == limit else " (%d is as many as can each have a colour)" % SOLO_MAX_PLAYERS
 		return "%d players, everyone for themselves%s. %s" % [seats, capped, fill]
 	return fill
+
+static func hearts_label(count: int) -> String:
+	return "1 heart" if count == 1 else "%d hearts" % count
 
 static func enemies_label(shown: bool) -> String:
 	return "Everybody shows on the map" if shown else "Only your own team"
@@ -362,6 +378,8 @@ static func clean(raw: Dictionary) -> Dictionary:
 		ReviveRule.NONE, ReviveRule.MATES_AND_FLAG)
 	out["drop"] = bool(raw.get("drop", false))
 	out["enemies"] = bool(raw.get("enemies", true))
+	out["hearts"] = _snap_int(raw, "hearts", HEARTS, DEFAULT_HEARTS)
+	out["bot_hearts"] = _snap_int(raw, "bot_hearts", HEARTS, DEFAULT_HEARTS)
 	return out
 
 static func _has_key(raw: Dictionary, table: Array, field: String) -> bool:

@@ -356,10 +356,10 @@ func drop_everyone() -> void:
 		# bots — recreate instead of crashing the match start.
 		if not world.player_state.has(id):
 			world.player_state[id] = {"pos": world.store.safe_stand(Vector3(world.spawn_pos)), "treasures": 0,
-				"name": str(entry.get("name", "?")), "hp": world.MATCH_HP}
+				"name": str(entry.get("name", "?")), "hp": world.max_hp(id)}
 		var state: Dictionary = world.player_state[id]
-		state.hp = world.MATCH_HP
-		world.cl_hearts.rpc(id, world.MATCH_HP)
+		state.hp = world.max_hp(id)
+		world.send_hearts(id)
 		var team_i := int(entry.get("team", 0))
 		# Everyone's place in the huddle comes from WHO they are, not from
 		# the order the roster happened to be walked in. Same team, same
@@ -506,7 +506,7 @@ func _storm_damage() -> void:
 			var bite := clampf(1.1 - out / 40.0, 0.3, 1.1)
 			_storm_hurt_ms[id] = now + int(bite * 1000.0)
 			state.hp = int(state.get("hp", world.MATCH_HP)) - 1
-			world.cl_hearts.rpc(id, maxi(state.hp, 0))
+			world.send_hearts(id)
 			# No knockback from the storm: pushing players while they're
 			# already outside fed back into more storm damage and once
 			# launched a player 142 km off the map.
@@ -727,13 +727,13 @@ func _tick_regen() -> void:
 		if now - int(_last_hit_ms.get(id, 0)) < 8000:
 			continue
 		var state: Dictionary = world.player_state.get(id, {})
-		if state.is_empty() or int(state.get("hp", world.MATCH_HP)) >= world.MATCH_HP:
+		if state.is_empty() or int(state.get("hp", world.MATCH_HP)) >= world.max_hp(id):
 			continue
 		if now - int(_last_regen_ms.get(id, 0)) < 3000:
 			continue
 		_last_regen_ms[id] = now
 		state.hp = int(state.get("hp", world.MATCH_HP)) + 1
-		world.cl_hearts.rpc(id, state.hp)
+		world.send_hearts(id)
 
 ## A downed player leaves the round for good: nobody left to lift them,
 ## or the storm got there first.
@@ -802,7 +802,7 @@ func tick_revives(delta: float) -> void:
 					state.hp = world.REVIVE_HP
 				# You come back on ONE heart and heal from there, so a
 				# pick-up in the open is still a risk worth taking.
-				world.cl_hearts.rpc(id, world.REVIVE_HP)
+				world.send_hearts(id)
 				world.cl_revive_progress.rpc(id, 0.0)
 				world.cl_downed_state.rpc(id, false)
 				Sfx.play("collect")
@@ -981,7 +981,7 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	if state.is_empty():
 		return
 	state.hp = int(state.get("hp", world.MATCH_HP)) - amount
-	world.cl_hearts.rpc(id, state.hp)
+	world.send_hearts(id)
 	world.cl_bonk.rpc(id, from_pos)
 	# A HIT STOPS THE PICK-UP. Anybody this player was kneeling over
 	# loses their progress and it starts again from nothing, so a rescue
