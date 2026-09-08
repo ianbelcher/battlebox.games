@@ -7,15 +7,24 @@ A voxel game that runs in a browser. Built for children; playable at
 **[battlebox.games](https://battlebox.games)**, and this repository is the
 whole of it — clone it and run your own.
 
-Anyone can start a game, and sets it up before going in: the mode, the
-map, how big the world is, how long a round lasts, how many teams (or
-solo, everyone for themselves), how many players it has seats for, and
-who is allowed to fly. Computer
-players fill the seats people are not in, so the game is the size it was
-made whether one child is in it or six. A public one is listed for
-everybody, with what it is written under its name; a private one gets a
-two-word code and is shared as a link. When the last player leaves, a
-created game closes itself.
+The front page asks who you are and has one big button. **Play** puts
+you in the game with the most people in it, or the always-open one, and
+the line under the button says which before you press it. Pressing it
+takes you through a loading screen — the sign, a bar, "Loading
+BattleBox… 38 of 90" — and straight into a seat: no second "press a
+button to join". A room that was waiting for somebody opens its round
+the moment you sit down, with a card that says the mode, counts down,
+and tells you whose side you are on and who is with you.
+
+Anyone can create a game instead, and sets it up before going in: the
+mode, the map, how long a round lasts, how many teams (or solo, everyone
+for themselves) and how many players it has seats for — with the size of
+the world, who can fly and the knockout rules folded under "More
+options". Computer players fill the seats people are not in, so the game
+is the size it was made whether one child is in it or six. A public one
+is listed for everybody, with what it is written under its name; a
+private one gets a two-word code and is shared as a link. When the last
+player leaves, a created game closes itself.
 
 A game is what it was made as. **None of it can be changed from inside a
 running world.** Changing the mode ended the round everybody was playing
@@ -158,6 +167,10 @@ python3 tools/integration_test.py --mode ctf
 
 # Rooms: created, joined through the proxy, and reaped
 python3 tools/lobby_test.py
+
+# Where a server's frame goes, every five seconds: packets, tick rate,
+# the longest frame, and milliseconds per second per subsystem
+WORLD_NETSTAT=1 WORLD_MODE=battle WORLD_PLAYERS=100 godot --headless --path game
 
 # The Minecraft importer, against a generated region file
 python3 tools/make_mca.py /tmp/fixture

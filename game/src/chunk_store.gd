@@ -48,6 +48,16 @@ var _cache: Dictionary = {}       # Vector2i -> PackedByteArray
 ## them anywhere else — so they are pinned in the cache for the lifetime of
 ## the world and only `reset_world()` lets them go.
 var _edited: Dictionary = {}      # Vector2i -> true
+## THE WIRE FORM OF EACH CHUNK, kept. A chunk is sent to every client that
+## walks near it, and it was zstd-compressed afresh for every one of them
+## — the same twenty kilobytes, the same answer, paid for on the server's
+## only thread each time. A blob is dropped the moment its chunk is
+## edited, so what is sent is never stale; an unedited chunk is packed
+## once for the life of the world.
+var _packed: Dictionary = {}      # Vector2i -> PackedByteArray (zstd)
+## The chunks still to be generated ahead of anybody asking — see warm().
+var _warm_queue: Array[Vector2i] = []
+var _warm_planned := false
 
 func _init() -> void:
 	source = EnvConfig.text("WORLD_SOURCE", "procedural")
@@ -274,9 +284,59 @@ func get_chunk(cpos: Vector2i) -> PackedByteArray:
 	_cache[cpos] = data
 	return data
 
-## Compressed payload for the wire.
+## Compressed payload for the wire. Cached — see `_packed`.
 func get_chunk_compressed(cpos: Vector2i) -> PackedByteArray:
-	return get_chunk(cpos).compress(FileAccess.COMPRESSION_ZSTD)
+	if _packed.has(cpos):
+		return _packed[cpos]
+	var blob := get_chunk(cpos).compress(FileAccess.COMPRESSION_ZSTD)
+	_packed[cpos] = blob
+	return blob
+
+## How many chunks the slab is across, from the middle: the world plus
+## one ring of the ocean round it, which is as far as a client standing
+## at the edge ever asks to see.
+func slab_radius_chunks() -> int:
+	return mini(WORLD_RADIUS_CHUNKS, int(ceil(float(half_extent()) / 16.0)) + 1)
+
+## GENERATE THE WORLD BEFORE ANYBODY ASKS FOR IT, a little at a time.
+##
+## Chunks were generated on demand: the first client to walk somewhere
+## paid for the terrain there, on the server's thread, in the middle of
+## whatever else the server was doing. Measured, that was six chunks a
+## frame at ten milliseconds each — a frame of seventy to two hundred
+## milliseconds for as long as anyone was streaming, which is every
+## second of a drop, when a hundred players land on fresh ground at once
+## and every computer player freezes while the terrain under the people
+## is worked out.
+##
+## So the server works through the slab from the middle outwards in the
+## time it has spare, `budget_usec` a frame, and packs each chunk for the
+## wire as it goes. A room with nobody in it has all the time in the
+## world; a room mid-battle gets a sliver. Returns how many are left, so
+## the caller can stop asking once the answer is none.
+func warm(budget_usec: int) -> int:
+	if not _warm_planned:
+		_plan_warm()
+	var stop := Time.get_ticks_usec() + budget_usec
+	while not _warm_queue.is_empty() and Time.get_ticks_usec() < stop:
+		var cpos: Vector2i = _warm_queue.pop_back()
+		if _packed.has(cpos):
+			continue
+		get_chunk_compressed(cpos)
+	return _warm_queue.size()
+
+## Nearest chunks LAST, so pop_back() hands them out first: the middle of
+## the map is where everybody spawns and where the first arrival is
+## already standing.
+func _plan_warm() -> void:
+	_warm_planned = true
+	_warm_queue.clear()
+	var radius := slab_radius_chunks()
+	for cz in range(-radius, radius + 1):
+		for cx in range(-radius, radius + 1):
+			_warm_queue.append(Vector2i(cx, cz))
+	_warm_queue.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return a.length_squared() > b.length_squared())
 
 func get_block(pos: Vector3i) -> int:
 	if pos.y < 0 or pos.y >= WorldGen.CHUNK_H:
@@ -301,6 +361,8 @@ func set_block(pos: Vector3i, block: int) -> void:
 	# From here on this chunk IS the world — regenerating it would undo
 	# whatever was just built — so it is pinned against eviction.
 	_edited[cpos] = true
+	# ...and its wire form is out of date.
+	_packed.erase(cpos)
 
 ## Top solid/water surface for spawning things on.
 func surface_y(wx: int, wz: int) -> int:
@@ -313,6 +375,29 @@ func surface_y(wx: int, wz: int) -> int:
 		if b != Blocks.AIR and not Blocks.is_cross(b):
 			return y
 	return 0
+
+## THE GROUND UNDER A WALKER: the highest block at or just above `from_y`
+## with two clear blocks over it, or -1 for "nowhere here a body fits".
+## One chunk lookup for the whole column, rather than one per block read
+## — this is asked for every computer player every frame, and through
+## get_block() it was a bounds check, a division, two modulos and a
+## dictionary hit per sample.
+func walkable_y(wx: int, wz: int, from_y: float) -> int:
+	var data := get_chunk(Vector2i(wx >> 4, wz >> 4))
+	var lx := wx & 15
+	var lz := wz & 15
+	var top := mini(int(from_y) + 2, WorldGen.CHUNK_H - 3)
+	for y in range(top, 0, -1):
+		var here := data[WorldGen.idx(lx, y, lz)]
+		if here == Blocks.AIR or Blocks.is_liquid(here):
+			continue
+		# Two blocks of headroom, or it is not somewhere a body fits.
+		if data[WorldGen.idx(lx, y + 1, lz)] != Blocks.AIR:
+			return -1
+		if data[WorldGen.idx(lx, y + 2, lz)] != Blocks.AIR:
+			return -1
+		return y
+	return -1
 
 func find_spawn() -> Vector3i:
 	if mca != null:
@@ -368,6 +453,8 @@ func reset_world(new_seed: int, map_name := "", new_size := 0) -> void:
 	# Dropping both is the entire reset: the world only ever existed here.
 	_cache.clear()
 	_edited.clear()
+	_packed.clear()
+	_warm_planned = false
 	_apply_map(map_name, new_seed)
 
 ## Wipe edits and switch to a chosen theme, or "mca" for an imported
@@ -425,16 +512,23 @@ func cached_count() -> int:
 func edited_count() -> int:
 	return _edited.size()
 
+## THE SLAB IS NEVER TRIMMED. It is generated ahead of anybody needing it
+## (see warm()) precisely so nobody waits on it, and dropping it again
+## would put that cost back at the moment it hurts most. What goes is the
+## border: ocean chunks past the edge of the map, which cost nothing to
+## make and only ever get asked for by somebody standing at the rim.
 func trim_cache() -> int:
 	if _cache.size() <= 1400:
 		return 0
+	var keep := slab_radius_chunks()
 	var dropped := 0
 	for cpos: Vector2i in _cache.keys():
 		if _cache.size() <= 1000:
 			break
-		if _edited.has(cpos):
+		if _edited.has(cpos) or (absi(cpos.x) <= keep and absi(cpos.y) <= keep):
 			continue
 		_cache.erase(cpos)
+		_packed.erase(cpos)
 		dropped += 1
 	return dropped
 

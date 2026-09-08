@@ -19,7 +19,7 @@ class_name EnvConfig
 const KNOWN := {
 	# --- What a server is ---------------------------------------------
 	"WORLD_ROLE": "server | client. Headless implies server unless this says otherwise",
-	"WORLD_NETSTAT": "1 reports how many position packets a second the server sends",
+	"WORLD_NETSTAT": "1 reports the server's packets, tick rate and where each frame went, every five seconds",
 	"WORLD_PORT": "port the game socket listens on (default 9081)",
 	"WORLD_SOURCE": "procedural | mca — where terrain comes from",
 	"WORLD_SEED": "procedural seed (default 20260726)",

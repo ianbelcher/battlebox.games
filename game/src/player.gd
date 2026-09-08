@@ -507,9 +507,16 @@ func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 ## RenderLayers.overhead_of bits, built by OverheadSight.layers_for; the
 ## seat this body belongs to is never in it — your own name is noise to
 ## you, and the seat's camera already culls its own body.
+var _overhead_mask := -1
+
 func set_overhead_layers(mask: int) -> void:
 	if is_local and slot >= 0:
 		mask &= ~RenderLayers.overhead_of(slot)
+	# Unchanged is the usual answer, several times a second for everybody
+	# on the map, and each of these is a trip to the rendering server.
+	if mask == _overhead_mask:
+		return
+	_overhead_mask = mask
 	_tag.layers = mask
 	_name_tag.layers = mask
 

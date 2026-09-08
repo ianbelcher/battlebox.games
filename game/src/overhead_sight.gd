@@ -20,6 +20,39 @@ class_name OverheadSight
 ## How far apart the samples are along the line, in blocks.
 const STEP := 0.5
 
+## HOW FAR AWAY A TAG IS STILL WORTH WORKING OUT, in blocks. At this size
+## a name over a head seventy blocks off is a few pixels of colour, and
+## the walk to find out whether it should be drawn is a hundred and forty
+## block reads — for every player, for every seat, ten times a second.
+## Nobody past this gets a tag, and nobody past this could have read one.
+const RANGE := 72.0
+
+## Is this body worth walking a line to at all? Two cheap tests before
+## the expensive one: is it within RANGE, and is it in front of the
+## camera. A perspective camera sees a cone, so "in front" is a dot
+## product against its forward; an orthographic one is a plane sliding
+## along its view, so it is the distance OFF that axis that matters, and
+## `reach` is how far off it the view extends (its size, or RANGE).
+##
+## This is what kept a hundred-player room from stuttering: the walk
+## itself is bounded per line, but it was being started for everybody on
+## the map, most of them behind the camera or a map-width away. Measured
+## at a hundred players and one seat it was twenty milliseconds every
+## tenth of a second, which is a hitch at exactly ten hertz.
+static func worth_checking(cam_pos: Vector3, forward: Vector3, orthographic: bool,
+		feet: Vector3, reach := RANGE) -> bool:
+	var to := feet - cam_pos
+	var depth := forward.dot(to)
+	if orthographic:
+		if depth < -2.0 or depth > 320.0:
+			return false
+		return (to - forward * depth).length() <= reach
+	if to.length_squared() > reach * reach:
+		return false
+	# Generous: a first-person view is wide, and a body just outside the
+	# edge of it is a body about to step into it.
+	return depth > -0.15 * to.length()
+
 ## Two points on the body, so a head poking over a parapet or a pair of
 ## legs under a fence both count as "I can see them".
 const BODY_POINTS: Array[float] = [1.5, 0.6]

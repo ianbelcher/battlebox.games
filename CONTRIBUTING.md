@@ -41,6 +41,12 @@ python3 tools/integration_test.py --mode ctf
 # 5. Rooms: created, joined through the proxy, and reaped
 python3 tools/lobby_test.py
 
+# 5b. Is the server keeping up? A hundred seats in a battle, and every
+#     five seconds: packets, the average and longest frame, and where
+#     the frame went by subsystem. "bots_goal=190" is a thing to fix;
+#     "the server is slow" is not.
+WORLD_NETSTAT=1 WORLD_MODE=battle WORLD_PLAYERS=100 godot --headless --path game
+
 # 6. The .mca importer, against a generated region file
 python3 tools/make_mca.py /tmp/fixture
 WORLD_MCA_DIR=/tmp/fixture godot --headless --path game -s res://tests/test_mca.gd

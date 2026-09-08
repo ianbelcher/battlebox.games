@@ -3,7 +3,8 @@ extends Control
 ## THE FIRST THING ANYBODY SEES. Three screens, in the order the
 ## decisions are made:
 ##
-##   HOME    play, or join one of the games running, or start one
+##   HOME    say who you are, play, join one of the games running, or
+##           set one up
 ##   NEW     what that new game IS — mode, world, size, length, who else
 ##   CODE    the two words that get a friend into the private one
 ##
@@ -24,8 +25,12 @@ extends Control
 ##
 ## THE FOUR-YEAR-OLD PATH HAS TO SURVIVE ALL OF IT. Play is the big ember
 ## button, it holds focus from the first frame, and it needs no reading:
-## Space, Enter or Ⓐ joins the always-on world exactly as it always did.
-## Everything else is beside it and optional.
+## Space, Enter or Ⓐ puts you in a game. WHICH game is QuickPlay's
+## table — the one with people in it, else the always-open one — and the
+## line under the button says which, so nobody is dropped into a world
+## nothing on the screen described. Setting a game up yourself is the
+## second button, and its sheet is the questions a game needs answered
+## before it exists.
 ##
 ## And everything here is REACHABLE WITHOUT A MOUSE. Every control on this
 ## screen was FOCUS_NONE once, which meant a gamepad could do exactly one
@@ -76,7 +81,11 @@ var _games_box: VBoxContainer
 var _games_note: Label
 var _status: Label
 var _play_button: Button
+var _play_note: Label
+var _name_field: LineEdit
 var _code_edit: LineEdit
+## The last listing, for Play to choose from.
+var _rooms: Array = []
 var _split_row: BoxContainer
 ## The spacer that lines the games list up with the tagline beside it.
 ## Only means anything while the two columns are side by side.
@@ -85,6 +94,10 @@ var _list_offset: Control
 # --- new game ---
 var _name_edit: LineEdit
 var _create_button: Button
+## The settings most people never touch, folded under one row.
+var _more_box: VBoxContainer
+var _more_toggle: Button
+var _more_summary: Label
 var _wanted: Dictionary = {}
 ## field name -> {value: Button}. Repainted, never rebuilt.
 var _choices: Dictionary = {}
@@ -245,23 +258,29 @@ func _build_hero() -> Control:
 	column.add_child(_wordmark())
 	column.add_child(_text("Build. Battle. Be the last one standing.",
 		UiTheme.T_BODY + 2, UiTheme.INK_DIM))
-	column.add_child(_gap(18))
+	column.add_child(_gap(16))
+
+	# WHO YOU ARE, asked here and not three menus into the world. It is
+	# the first thing every game of this shape asks, and it was the last
+	# thing this one let you do: the name over your head was a random
+	# animal until you found the chip in the corner of the HUD and clicked
+	# it. Saved with the keyboard seat's character, so it is remembered.
+	column.add_child(_build_name_row())
+	column.add_child(_gap(14))
 
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", _px(12))
 	column.add_child(buttons)
 
-	# ONE BUTTON, and it starts a game.
-	#
-	# There were two: "Play now", which dropped you into the always-on
-	# world, and "New game" beside it. The first was the confusing one —
-	# a big primary button that made you a world nothing on the screen had
-	# described, so on a quiet evening the front page's main action was
-	# "here is a random game". The always-on world is in the list now,
-	# saying what it is like every other game, and this button does the
-	# thing the screen is for.
-	_play_button = _primary_button("Start a game", UiTheme.T_TITLE)
-	_play_button.pressed.connect(_open_setup)
+	# PLAY, and it PLAYS. For a while this button was "Start a game" and
+	# opened the setup sheet, because the old "Play now" dropped you into
+	# a world nothing on the screen had described. Both halves of that
+	# are fixed differently now: the list describes every game, and the
+	# line under this button says exactly which one it will put you in
+	# (QuickPlay). A four-year-old presses the big orange button and is
+	# in a game; a grown-up reads the small print first.
+	_play_button = _primary_button("Play", UiTheme.T_TITLE + 6)
+	_play_button.pressed.connect(_quick_play)
 	buttons.add_child(_play_button)
 	# DEFERRED, because this column is not in the tree yet — it is being
 	# built and gets added by the caller. grab_focus() on a node outside
@@ -269,8 +288,19 @@ func _build_hero() -> Control:
 	# focus once and with it the whole point of the screen: Space, Enter
 	# or Ⓐ doing the obvious thing without anyone reading a word.
 	_play_button.call_deferred("grab_focus")
+	# The sheet of questions, for whoever wants a game of their own.
+	var create := _ghost_button("Create a game", UiTheme.T_LABEL)
+	create.custom_minimum_size = Vector2(0, _px(60))
+	create.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	create.pressed.connect(_open_setup)
+	buttons.add_child(create)
 
-	column.add_child(_gap(10))
+	column.add_child(_gap(6))
+	_play_note = _text("", UiTheme.T_NOTE, UiTheme.INK_FAINT, true)
+	column.add_child(_play_note)
+	_refresh_play_note()
+
+	column.add_child(_gap(6))
 	_status = _text("", UiTheme.T_NOTE, UiTheme.ACCENT)
 	_status.visible = false
 	column.add_child(_status)
@@ -285,6 +315,48 @@ func _build_hero() -> Control:
 ## voice it does not have anywhere else.
 func _wordmark() -> Control:
 	return NeonWordmark.new().setup(_scale)
+
+## "Playing as", and a box to change it. Empty is fine — the server hands
+## out an animal — so the placeholder says so rather than demanding one.
+func _build_name_row() -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _px(10))
+	var caption := _eyebrow("Playing as")
+	caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(caption)
+	_name_field = _field("your name (or we pick one)")
+	_name_field.max_length = 12
+	_name_field.custom_minimum_size = Vector2(_px(300), _px(CONTROL_HEIGHT - 6))
+	_name_field.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_name_field.text = Game.keyboard_name()
+	# Enter in the name box is the same as pressing Play: typing your
+	# name and hitting Enter is what everybody does, and a box that
+	# swallowed it looked broken.
+	_name_field.text_submitted.connect(func(_t: String) -> void: _quick_play())
+	row.add_child(_name_field)
+	return row
+
+## The big button. The game with people in it, else the always-open one
+## — and if the list never came (the lobby is down), the always-open one
+## by its fixed code, which is what Play has always done.
+func _quick_play() -> void:
+	var pick := QuickPlay.choose(_rooms, Room.HOUSE_CODE)
+	if pick.is_empty():
+		_join(Room.HOUSE_CODE, "BattleBox")
+		return
+	_join(str(pick.get("code", "")), str(pick.get("name", pick.get("code", ""))))
+
+## The line under Play: where it will put you. Rewritten whenever the
+## list does, so it is never a promise about a game that has since
+## filled up or gone.
+func _refresh_play_note() -> void:
+	if _play_note == null:
+		return
+	var pick := QuickPlay.choose(_rooms, Room.HOUSE_CODE)
+	if pick.is_empty():
+		_play_note.text = "Jumps straight into the always-open game."
+	else:
+		_play_note.text = "Jumps into %s" % QuickPlay.describe(pick)
 
 ## Somebody read you a code. Small, because it is the least common way in
 ## and it used to be a full-width form field with a heading over it.
@@ -349,6 +421,8 @@ func _show_rooms(rooms: Array) -> void:
 	# A list that arrived is the end of whatever went wrong last time.
 	if _status != null and _status.visible and not _busy:
 		_set_status("")
+	_rooms = rooms
+	_refresh_play_note()
 	for child in _games_box.get_children():
 		child.queue_free()
 	# THE ALWAYS-ON WORLD IS IN THE LIST. It used to be lifted out and
@@ -559,8 +633,6 @@ func _build_setup() -> Control:
 	# --- the mode, and then everything the mode implies ---------------
 	_build_mode_field(column)
 	_build_map_field(column)
-	_build_choice_field(column, "size", "How big is the world?",
-		_size_options(), "")
 	_build_choice_field(column, "minutes", "How long is a round?",
 		_length_options(), "")
 	_build_choice_field(column, "target", "Captures to win",
@@ -568,15 +640,66 @@ func _build_setup() -> Control:
 	_build_choice_field(column, "teams", "How many teams?", _team_options(), "")
 	_build_choice_field(column, "players", "How many players?",
 		_player_options(), GameSetup.seats_note(GameSetup.DEFAULT_PLAYERS))
-	_build_choice_field(column, "fly", "Who can fly?", _fly_options(), "")
-	_build_choice_field(column, "revive", "Getting back up",
+
+	# --- and the rest, folded away --------------------------------------
+	# Ten rows of questions is a form, and a form is what this screen
+	# was: on a 1280x800 window the teams row was already off the bottom.
+	# The four that decide what the game IS stay up; the four that tune
+	# it sit under one line that says what they are currently set to, so
+	# nothing is hidden, only folded.
+	column.add_child(_build_more_toggle())
+	_more_box = VBoxContainer.new()
+	_more_box.add_theme_constant_override("separation", _px(26))
+	_more_box.visible = false
+	column.add_child(_more_box)
+	_build_choice_field(_more_box, "size", "How big is the world?",
+		_size_options(), "")
+	_build_choice_field(_more_box, "fly", "Who can fly?", _fly_options(), "")
+	_build_choice_field(_more_box, "revive", "Getting back up",
 		_revive_options(), "")
-	_build_choice_field(column, "drop", "When you are knocked out",
+	_build_choice_field(_more_box, "drop", "When you are knocked out",
 		_drop_options(), "")
 
 	root.add_child(_build_action_bar())
 	_refresh_setup()
 	return root
+
+## The row that opens the folded settings: a button, and beside it what
+## they are set to right now.
+func _build_more_toggle() -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _px(14))
+	_more_toggle = _ghost_button("More options", UiTheme.T_LABEL)
+	_more_toggle.custom_minimum_size = Vector2(_px(180), _px(46))
+	_more_toggle.pressed.connect(_toggle_more)
+	row.add_child(_more_toggle)
+	_more_summary = _text("", UiTheme.T_NOTE, UiTheme.INK_FAINT)
+	_more_summary.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_more_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_more_summary.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	row.add_child(_more_summary)
+	return row
+
+func _toggle_more() -> void:
+	if _more_box == null:
+		return
+	_more_box.visible = not _more_box.visible
+	_more_toggle.text = "  %s  " % ("Fewer options" if _more_box.visible else "More options")
+	_more_summary.visible = not _more_box.visible
+	Sfx.play("tick", -8.0)
+
+## What the folded rows say, in one line, for the mode in play: the
+## rows a mode does not ask are left out of it too.
+func _more_summary_text() -> String:
+	var mode := str(_wanted.get("mode", GameSetup.DEFAULT_MODE))
+	var parts: Array = [GameSetup.size_label(int(_wanted.get("size", GameSetup.DEFAULT_SIZE))),
+		GameSetup.fly_label(str(_wanted.get("fly", "nobody")))]
+	if GameSetup.uses("revive", mode):
+		parts.append(ReviveRule.label(int(_wanted.get("revive", ReviveRule.MATES_AND_FLAG))))
+	if GameSetup.uses("drop", mode):
+		parts.append("Drop your weapons" if bool(_wanted.get("drop", false))
+			else "Keep your weapons")
+	return "  ·  ".join(parts)
 
 ## What you are about to make, and the button that makes it. Pinned to
 ## the bottom of the screen, so it is on screen whatever the window is
@@ -770,6 +893,8 @@ func _refresh_setup() -> void:
 		var note: Label = _notes.get("players")
 		if note != null:
 			note.text = GameSetup.seats_note(int(_wanted.get("players", 0)), split)
+	if _more_summary != null:
+		_more_summary.text = _more_summary_text()
 
 
 ## Back to the front, from outside. main.gd calls this when somebody
@@ -894,6 +1019,9 @@ func _join_typed() -> void:
 	_api.look_up(code)
 
 func _join(code: String, display_name: String) -> void:
+	# The name goes with you, whichever door you leave by.
+	if _name_field != null:
+		Game.remember_keyboard_name(_name_field.text)
 	join_requested.emit(code, display_name)
 
 func _on_created(room: Dictionary) -> void:
@@ -1023,7 +1151,7 @@ func _empty_card() -> Control:
 	var line := _text("No other games right now", UiTheme.T_BODY, UiTheme.INK_DIM)
 	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	inner.add_child(line)
-	var sub := _text("Press New game and this fills up", UiTheme.T_NOTE,
+	var sub := _text("Press Create a game and this fills up", UiTheme.T_NOTE,
 		UiTheme.INK_FAINT)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	inner.add_child(sub)

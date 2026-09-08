@@ -457,6 +457,8 @@ func sv_register_player(slot: int, pname: String, style: Dictionary, bot := fals
 		world.bots.fill()
 	if not bot and world != null:
 		world.auto_team(id)
+		# Somebody real is here: a room that was waiting for one opens.
+		world.open_round_if_waiting()
 
 @rpc("any_peer", "call_local", "reliable")
 func sv_unregister_player(slot: int) -> void:
@@ -569,6 +571,30 @@ func cl_host(peer: int) -> void:
 # ------------------------------------------------------------------
 
 const PROFILE_PATH := "user://characters.cfg"
+
+## THE NAME ON THE FRONT PAGE. The keyboard seat's saved name, which is
+## what the person at this machine goes in as: the front page shows it
+## and lets it be changed BEFORE going into a game, the way every game of
+## this kind asks who you are before it asks anything else. Gamepad seats
+## keep their own, saved from in-game as before.
+func keyboard_name() -> String:
+	var config := ConfigFile.new()
+	config.load(PROFILE_PATH)
+	return str(config.get_value(_keyboard_profile_key(), "name", ""))
+
+func remember_keyboard_name(pname: String) -> void:
+	pname = pname.strip_edges().left(12)
+	var config := ConfigFile.new()
+	config.load(PROFILE_PATH)
+	if str(config.get_value(_keyboard_profile_key(), "name", "")) == pname:
+		return
+	config.set_value(_keyboard_profile_key(), "name", pname)
+	config.save(PROFILE_PATH)
+
+## The same key join_local() files the keyboard seat under, asked of the
+## slot itself so the two can never drift apart.
+func _keyboard_profile_key() -> String:
+	return InputSlot.new(InputSlot.Kind.KEYBOARD_WASD).claim_key()
 
 ## One-time move of a saved character from the old device-number key to
 ## the stable GUID key.

@@ -142,26 +142,38 @@ func _add_cell(slot: int, frac: Rect2) -> void:
 		"size": ZOOM_SIZES[DEFAULT_ZOOM], "prev_rot": 0, "prev_zoom": 0,
 		"fp": true, "prev_view": false, "fp_zoom": 0})
 
+## Only ever seen with a controller plugged in — the keyboard player is
+## seated the moment the world is up (Main._arrive) — or after everybody
+## on this machine has left. So it is a card in the game's own voice
+## rather than a line of outlined white text: what to press, on what.
 func _spectator_prompt() -> Control:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sc := UiTheme.scale_for(get_viewport_rect().size)
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiTheme.panel_box(sc))
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(card)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 10)
-	center.add_child(box)
+	box.add_theme_constant_override("separation", UiTheme.px(12, sc))
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	card.add_child(box)
 	# NO TITLE. The name is on the loading screen the player just watched,
 	# and before that on the tab, and before that on the link they
 	# followed. Saying it a fourth time in 64-point gold pushed the one
 	# thing this screen is FOR — how to start playing — down the page in
 	# small print underneath it.
 	var prompt := Label.new()
-	prompt.text = "Press SPACE or a gamepad's A button to jump in!"
-	prompt.add_theme_font_size_override("font_size", 42)
-	prompt.add_theme_color_override("font_color", Color.WHITE)
-	prompt.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
-	prompt.add_theme_constant_override("outline_size", 6)
+	prompt.text = "Jump in!"
+	prompt.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE + 6, sc))
+	prompt.add_theme_font_override("font", UiTheme.heavy(sc, 0.6, -0.6))
+	prompt.add_theme_color_override("font_color", UiTheme.INK)
 	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(prompt)
+	# Plain letters in the caps, never the circled glyphs — see
+	# PlayerHud._cap for why those are unreadable at this size.
+	box.add_child(UiTheme.hint_row(["A", "on a controller", "SPACE", "on the keyboard"], sc))
 	return center
 
 ## With three players the spare quarter becomes a big battle map of the
@@ -169,7 +181,7 @@ func _spectator_prompt() -> Control:
 func _add_join_hint(frac: Rect2) -> void:
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.05, 0.08)
+	style.bg_color = UiTheme.VOID
 	style.set_corner_radius_all(0)
 	panel.add_theme_stylebox_override("panel", style)
 	_place(panel, frac)
@@ -503,43 +515,75 @@ func _process(delta: float) -> void:
 ##
 ## Nothing is drawn on a headless run (the server runs its computer
 ## players as local seats), so there is nothing to work out there.
+##
+## BOUNDED PER FRAME, WHATEVER THE ROSTER. The first version walked every
+## player on the map for every seat, all in one go, ten times a second —
+## and a hundred players spread over a four-hundred-block world came to
+## twenty milliseconds a pass with one seat and eighty with four, which is
+## a stutter at exactly ten hertz and was the "janky" that arrived with
+## the name tags. Now a pass is started at most every SIGHT_PERIOD and
+## spread over as many frames as it needs, SIGHT_BUDGET_USEC of work at
+## a time; and a body that is out of range or behind the camera is not
+## walked to at all (OverheadSight.worth_checking).
 const SIGHT_PERIOD := 0.1
 const SIGHT_HOLD_MSEC := 350
+const SIGHT_BUDGET_USEC := 600
 var _sight_clock := 0.0
+var _sight_order: Array = []
+var _sight_cursor := 0
 var _headless := DisplayServer.get_name() == "headless"
 
 func _update_overhead_sight(delta: float) -> void:
 	if _headless:
 		return
-	_sight_clock += delta
-	if _sight_clock < SIGHT_PERIOD:
-		return
-	_sight_clock = 0.0
 	if world == null or world.players == null or world.chunks == null:
 		return
+	_sight_clock += delta
+	if _sight_order.is_empty():
+		if _sight_clock < SIGHT_PERIOD:
+			return
+		_sight_clock = 0.0
+		_sight_cursor = 0
+		for child in world.players.get_children():
+			if child is Player:
+				_sight_order.append(child)
+		if _sight_order.is_empty():
+			return
 	var chunks: ChunkView = world.chunks
 	var opaque_at := func(cell: Vector3i) -> bool:
 		return Blocks.is_opaque(chunks.get_block(cell))
 	var now := Time.get_ticks_msec()
-	for child in world.players.get_children():
-		if not (child is Player):
+	var stop := Time.get_ticks_usec() + SIGHT_BUDGET_USEC
+	while _sight_cursor < _sight_order.size():
+		var player: Player = _sight_order[_sight_cursor]
+		_sight_cursor += 1
+		if is_instance_valid(player) and player.is_inside_tree():
+			_sight_one(player, opaque_at, now)
+		if Time.get_ticks_usec() >= stop:
+			break
+	if _sight_cursor >= _sight_order.size():
+		_sight_order.clear()
+
+## One body, against every seat's camera.
+func _sight_one(player: Player, opaque_at: Callable, now: int) -> void:
+	var seen_by: Array = []
+	for cell: Dictionary in _cells:
+		if cell.slot < 0 or cell.cam == null:
 			continue
-		var player: Player = child
-		var seen_by: Array = []
-		for cell: Dictionary in _cells:
-			if cell.slot < 0 or cell.cam == null:
-				continue
-			if player.is_local and player.slot == cell.slot:
-				continue
-			var cam: Camera3D = cell.cam
-			if OverheadSight.body_in_view(cam.global_position,
-					-cam.global_transform.basis.z,
-					cam.projection == Camera3D.PROJECTION_ORTHOGONAL,
+		if player.is_local and player.slot == cell.slot:
+			continue
+		var cam: Camera3D = cell.cam
+		var forward := -cam.global_transform.basis.z
+		var ortho := cam.projection == Camera3D.PROJECTION_ORTHOGONAL
+		var reach := maxf(OverheadSight.RANGE, cam.size) if ortho else OverheadSight.RANGE
+		if OverheadSight.worth_checking(cam.global_position, forward, ortho,
+				player.global_position, reach) \
+				and OverheadSight.body_in_view(cam.global_position, forward, ortho,
 					player.global_position, opaque_at):
-				player.seen_at[cell.slot] = now
-			if now - int(player.seen_at.get(cell.slot, -SIGHT_HOLD_MSEC * 2)) <= SIGHT_HOLD_MSEC:
-				seen_by.append(cell.slot)
-		player.set_overhead_layers(OverheadSight.layers_for(seen_by))
+			player.seen_at[cell.slot] = now
+		if now - int(player.seen_at.get(cell.slot, -SIGHT_HOLD_MSEC * 2)) <= SIGHT_HOLD_MSEC:
+			seen_by.append(cell.slot)
+	player.set_overhead_layers(OverheadSight.layers_for(seen_by))
 
 
 ## X-Ray Goggles: while held, every other player gets a glowing marker

@@ -246,14 +246,14 @@ def _exercise(args, base: str, port: int, checks: Checks,
     # node that was not in the tree yet, once on a button inside a hidden
     # panel, which would have joined a game with no code.
     # The front page's one primary button holds focus, so Space or A does
-    # the obvious thing without anybody reading a word. It reads "Start a
-    # game" now — there were two buttons, and the other one dropped you
-    # into a world nothing on the screen had described.
+    # the obvious thing without anybody reading a word. It reads "Play":
+    # it puts you in the game with people in it, or the always-open one,
+    # and the line under it says which (see quick_play.gd).
     #
     # Matched on the button's TEXT (see SelfCheck._focused), spaces as
     # underscores, and it still fails on every other control the screen
-    # has: Join, Back, Create and play, Start playing.
-    checks.that(back.get("focus", "") == "Start_a_game",
+    # has: Join, Create a game, Back, Create and play, Start playing.
+    checks.that(back.get("focus", "") == "Play",
                 "the front page's main button holds focus, so Space and A "
                 f"work (focus={back.get('focus')})")
     checks.that(back.get("room") == "-",

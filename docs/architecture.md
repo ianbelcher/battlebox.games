@@ -91,7 +91,8 @@ listed like any other room, and says what it is like any other room.
 | File | What it is |
 | --- | --- |
 | `main.gd` | The shell: screens, the connect/reconnect loop, the server bootstrap |
-| `lobby_screen.gd` | The first screen — play, join a running game, or set one up |
+| `lobby_screen.gd` | The first screen — who you are, Play, the games running, or set one up |
+| `quick_play.gd` | Which game Play puts you in: people first, then the always-open one. Pure; no nodes |
 | `title_backdrop.gd` | What is behind it: sky, skyline, drifting blocks |
 | `neon_wordmark.gd` | BattleBox, as the neon sign the intro ends on — see `tools/make_wordmark.py` |
 | `game_setup.gd` | The table of what a new game can be. Pure; no nodes |
@@ -99,7 +100,7 @@ listed like any other room, and says what it is like any other room.
 | `ui_theme.gd` | Every colour, radius and font size in every menu |
 | `splitscreen.gd` | 1–4 SubViewports sharing one World3D, one camera each |
 | `render_layers.gd` | Which camera draws what: your own body, your own held item, and the tags over the heads you can see |
-| `overhead_sight.gd` | Whether a seat has a clear line to a body, so a name or hearts never float over the wall somebody is hiding behind. Pure; no nodes |
+| `overhead_sight.gd` | Whether a seat has a clear line to a body, so a name or hearts never float over the wall somebody is hiding behind — and whether a body is close enough and in front to be worth asking about, which is what keeps a hundred-player room from stuttering. Pure; no nodes |
 | `player.gd` | Movement, aim, actions. Hand-rolled voxel AABB, no physics engine |
 | `player_hud.gd` | Per-player overlay: hotbar, radar, the picker, the menus |
 | `world_menu.gd` | The grown-ups' menu (keyboard and mouse only, on purpose) |
@@ -204,8 +205,43 @@ the invariant below.
 The one invariant that makes it safe: an **edited** chunk may never be
 dropped from the server's cache. It has no file to come back from, so
 evicting one would silently regenerate the terrain under somebody's fort.
-`ChunkStore.trim_cache()` only ever drops chunks that are still exactly as
-generated.
+`ChunkStore.trim_cache()` only ever drops ocean chunks past the edge of
+the map.
+
+**The slab is generated ahead of anybody asking for it.** Chunks used to
+be made on demand, by the first client to walk somewhere, on the server's
+only thread — six of them a frame at ten milliseconds each, which was a
+frame of seventy to two hundred milliseconds for as long as anyone was
+streaming, and every drop streams. `ChunkStore.warm()` works through the
+slab from the middle out in the time the server has spare, and keeps
+each chunk's zstd wire form (`_packed`) so sending it to the next client
+is a dictionary hit. Memory is bounded by the world, not the uptime: at
+most 49×49 chunks of 20 KiB.
+
+## Keeping a hundred seats at thirty ticks
+
+The server runs at thirty ticks a second (`Main.SERVER_TICKS_PER_SECOND`),
+and `WORLD_NETSTAT=1` prints where each second of it went, by subsystem,
+every five seconds (`tick_stats.gd`). That report is how the following
+were found, and the numbers are from a hundred-seat battle royale on a
+four-hundred-block world:
+
+- **One roster picture per frame.** Everything a computer player decides
+  starts with "who is standing where, on which side"; seven different
+  walks of the roster asked it per bot. `BotDirector.refresh_picture()`
+  takes it once, splits it by side and buckets it on an 8-block grid, and
+  the enemies scan, the rescue rules, the revive tick and the orbs in
+  flight all read that. Orbs went from 200 ms/s to 40.
+- **Half the bots a frame.** A bot's positions go out at fifteen a second
+  whatever the tick rate; `BOT_STRIDE` steps each one every other frame
+  with the time that has passed. Nothing visible changes.
+- **A look that found nobody is not repeated next frame.** The sight
+  search was gated on the weapon cooldown, which a bot with nobody to
+  shoot never starts — so it searched sixty times a second. `look_cd`.
+- **Rays and columns read one chunk, not one block.** `clear_shot()` and
+  `ChunkStore.walkable_y()` hold the chunk they are in.
+
+Before: nine to thirteen ticks a second in a battle. After: the cap.
 
 ## Testing
 

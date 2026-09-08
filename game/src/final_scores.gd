@@ -86,6 +86,17 @@ func show(winner: int) -> void:
 	split.add_child(_final_teams(world, sc))
 	split.add_child(_final_players(world, sc))
 
+	# WHAT HAPPENS NEXT, and when. The table used to sit there with no
+	# word about whether another round was coming, so the ten seconds
+	# before the next lobby opened were spent wondering if the game had
+	# finished. Ticked by poll_dismiss.
+	_next_label = Label.new()
+	_next_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_next_label.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, sc))
+	_next_label.add_theme_color_override("font_color", UiTheme.ACCENT)
+	box.add_child(_next_label)
+	_refresh_next()
+
 	var hint := Label.new()
 	hint.text = "The full table is under G → Scores"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -261,8 +272,23 @@ func dismissable() -> bool:
 ## left a scoreboard nobody could get rid of. Polled rather than
 ## event-driven because Godot only raises joypad button events for pads it
 ## has actions bound for, and this needs to answer to ALL of them.
+var _next_label: Label
+
+func _refresh_next() -> void:
+	if _next_label == null or not is_instance_valid(_next_label) or Game.world == null:
+		return
+	var secs := int(ceil(float(Game.world.match_seconds)))
+	if str(Game.world.match_phase) == "END" and secs > 0:
+		_next_label.text = "Next round in %d" % secs
+		_next_label.visible = true
+	else:
+		_next_label.visible = false
+
 func poll_dismiss() -> void:
-	if not is_instance_valid(panel) or not dismissable():
+	if not is_instance_valid(panel):
+		return
+	_refresh_next()
+	if not dismissable():
 		return
 	for pad in Input.get_connected_joypads():
 		for button in [JOY_BUTTON_A, JOY_BUTTON_B, JOY_BUTTON_X, JOY_BUTTON_Y,

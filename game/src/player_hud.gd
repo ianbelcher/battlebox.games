@@ -138,6 +138,7 @@ func _ready() -> void:
 	_build_menu()
 	_build_revive_ring()
 	_build_center_note()
+	_build_round_card()
 	_build_storm_line()
 	_build_death_wash()
 	_build_name_chip()
@@ -151,7 +152,7 @@ func _build_identity_chip() -> void:
 	var chip := PanelContainer.new()
 	chip.mouse_filter = Control.MOUSE_FILTER_STOP
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.05, 0.08, 0.72)
+	style.bg_color = Color(UiTheme.SURFACE, 0.72)
 	style.set_corner_radius_all(10)
 	style.set_content_margin_all(8)
 	chip.add_theme_stylebox_override("panel", style)
@@ -193,7 +194,7 @@ func _build_hotbar() -> void:
 	var bar_panel := PanelContainer.new()
 	bar_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var bar_style := StyleBoxFlat.new()
-	bar_style.bg_color = Color(0.04, 0.05, 0.08, 0.6)
+	bar_style.bg_color = Color(UiTheme.SURFACE, 0.6)
 	bar_style.set_corner_radius_all(10)
 	bar_style.set_content_margin_all(6)
 	bar_panel.add_theme_stylebox_override("panel", bar_style)
@@ -249,7 +250,7 @@ func _build_hotbar() -> void:
 	var status_panel := PanelContainer.new()
 	status_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var status_style := StyleBoxFlat.new()
-	status_style.bg_color = Color(0.04, 0.05, 0.08, 0.55)
+	status_style.bg_color = Color(UiTheme.SURFACE, 0.55)
 	status_style.set_corner_radius_all(8)
 	status_style.content_margin_left = 12
 	status_style.content_margin_right = 12
@@ -392,7 +393,7 @@ func _build_center_note() -> void:
 	# on its own. A dark card behind it is what makes the size count.
 	_note_card = PanelContainer.new()
 	var note_bg := StyleBoxFlat.new()
-	note_bg.bg_color = Color(0.05, 0.06, 0.1, 0.86)
+	note_bg.bg_color = Color(UiTheme.SURFACE, 0.86)
 	note_bg.set_corner_radius_all(_us(12))
 	note_bg.set_content_margin_all(_us(14))
 	note_bg.content_margin_left = _us(20)
@@ -427,6 +428,133 @@ func _build_center_note() -> void:
 	# message that goes here is kept short enough not to need it.
 	_center_note.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_note_card.add_child(_center_note)
+
+## THE CARD BEFORE A ROUND: what is about to happen, to whom, and how
+## long until it does.
+##
+## A round used to open with "Next battle in 6" in the corner and, for
+## the host, a settings menu over the top of it. What every game of this
+## kind does instead is stop, say the name of the thing, count down, and
+## tell you whose side you are on — so that when you land you already
+## know who to run towards. That is this: the mode, a countdown, your
+## team in its colour, the team-mates you have, and which key moves you
+## to another side. It goes away the moment the round is live.
+var _round_card: PanelContainer
+var _round_kicker: Label
+var _round_title: Label
+var _round_team: Label
+var _round_mates: Label
+var _round_hint: Control
+var _round_t := 0.0
+
+func _build_round_card() -> void:
+	var sc := _uscale()
+	_round_card = PanelContainer.new()
+	_round_card.add_theme_stylebox_override("panel", UiTheme.panel_box(sc))
+	_round_card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_round_card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_round_card.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_round_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_round_card.visible = false
+	add_child(_round_card)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", UiTheme.px(8, sc))
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.custom_minimum_size = Vector2(UiTheme.px(380, sc), 0)
+	_round_card.add_child(box)
+	_round_kicker = Label.new()
+	_round_kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_round_kicker.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_NOTE, sc))
+	_round_kicker.add_theme_font_override("font", UiTheme.heavy(sc, 0.25, 1.6))
+	_round_kicker.add_theme_color_override("font_color", UiTheme.INK_FAINT)
+	box.add_child(_round_kicker)
+	_round_title = Label.new()
+	_round_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_round_title.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE + 12, sc))
+	_round_title.add_theme_font_override("font", UiTheme.heavy(sc, 0.7, -1.0))
+	_round_title.add_theme_color_override("font_color", UiTheme.INK)
+	box.add_child(_round_title)
+	_round_team = Label.new()
+	_round_team.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_round_team.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY + 4, sc))
+	_round_team.add_theme_font_override("font", UiTheme.heavy(sc, 0.5, 0.0))
+	box.add_child(_round_team)
+	_round_mates = Label.new()
+	_round_mates.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_round_mates.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_round_mates.custom_minimum_size = Vector2(UiTheme.px(380, sc), 0)
+	_round_mates.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, sc))
+	_round_mates.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	box.add_child(_round_mates)
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, UiTheme.px(4, sc))
+	box.add_child(gap)
+	_round_hint = UiTheme.hint_row([_cap("menu"), "Change team"], sc)
+	box.add_child(_round_hint)
+
+## What the mode is called on the card.
+func _round_kicker_text() -> String:
+	match str(world.client_mode):
+		"ctf":
+			return "CAPTURE THE FLAG"
+		"holdout":
+			return "LAST FLAG STANDING"
+		_:
+			return "BATTLE ROYALE"
+
+## Fill the card in for this phase. Cheap enough to call a few times a
+## second: it writes four labels and walks the roster once for the
+## team-mates.
+func _refresh_round_card(phase: String) -> void:
+	var secs := int(ceil(world.match_seconds))
+	_round_kicker.text = _round_kicker_text()
+	if phase == "LOBBY":
+		_round_title.text = ("Starting in %d" % secs) if secs > 0 else "Starting…"
+	else:
+		_round_title.text = "Get ready!"
+	_round_hint.visible = phase == "LOBBY"
+	var me := _me()
+	var entry: Dictionary = Game.roster.get(me, {})
+	var team := int(entry.get("team", -1))
+	var names: Array = world.client_team_names
+	# Everyone for themselves: a side each, so the side needs no name
+	# and there is nobody to list.
+	var solo := names.size() >= 2 and names.size() >= Game.roster.size()
+	if team < 0 or team >= names.size():
+		_round_team.text = "Picking your team…"
+		_round_team.add_theme_color_override("font_color", UiTheme.INK_DIM)
+		_round_mates.text = ""
+		return
+	var tint: Color = WorldNode.TEAM_COLORS[team % WorldNode.TEAM_COLORS.size()]
+	if solo:
+		_round_team.text = "Everyone for themselves"
+		_round_team.add_theme_color_override("font_color", tint)
+		_round_mates.text = "You are %s. Good luck." % str(names[team])
+		return
+	_round_team.text = "You're on %s" % str(names[team])
+	_round_team.add_theme_color_override("font_color", tint)
+	# People first, then the computer players, and no more than a few
+	# names before "and N more": a side of twenty is not a sentence.
+	var people: Array = []
+	var bots: Array = []
+	for rid: String in Game.roster.keys():
+		if rid == me or int(Game.roster[rid].get("team", -2)) != team:
+			continue
+		if bool(Game.roster[rid].get("bot", false)):
+			bots.append(str(Game.roster[rid].name))
+		else:
+			people.append(str(Game.roster[rid].name))
+	people.sort()
+	bots.sort()
+	var mates: Array = people + bots
+	if mates.is_empty():
+		_round_mates.text = "On your own this round."
+		return
+	var shown: Array = mates.slice(0, 3)
+	var line := "with " + ", ".join(shown)
+	if mates.size() > shown.size():
+		line += " and %d more" % (mates.size() - shown.size())
+	_round_mates.text = line
 
 ## The storm countdown along the top of the screen.
 func _build_storm_line() -> void:
@@ -517,7 +645,7 @@ func _build_name_chip() -> void:
 	_name_chip.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
 	_name_chip.add_theme_constant_override("outline_size", 3)
 	var chip_bg := StyleBoxFlat.new()
-	chip_bg.bg_color = Color(0.04, 0.05, 0.08, 0.7)
+	chip_bg.bg_color = Color(UiTheme.SURFACE, 0.7)
 	chip_bg.set_content_margin_all(2)
 	chip_bg.content_margin_left = 6
 	chip_bg.content_margin_right = 6
@@ -1013,6 +1141,8 @@ func _toggle_menu(player: Player, open_tab: int) -> void:
 		Game.world_menu.close()
 	_menu.visible = true
 	_menu_dim.visible = true
+	if _team_box_dirty:
+		_refresh_team_box()
 	# Which pages exist depends on the mode, and the mode can change while
 	# the menu is shut, so this is settled on the way in. Guarded: hiding
 	# the tab somebody is standing on fires tab_changed, which would
@@ -1886,9 +2016,20 @@ func _refresh_battle_highlights() -> void:
 ## The team matrix: one row per player, one column per team. You can move
 ## yourself and any computer player; other humans only move themselves,
 ## so their rows are read-only dots.
+## Rebuilt only while it can be seen. The roster is broadcast on every
+## join, leave and team change, and this is a control per player per
+## team — seven hundred of them in a hundred-seat game — thrown away and
+## made again on each one, behind a menu that was shut. It is marked
+## instead, and built when the menu opens.
+var _team_box_dirty := true
+
 func _refresh_team_box() -> void:
 	if _team_box == null:
 		return
+	if _menu == null or not _menu.visible:
+		_team_box_dirty = true
+		return
+	_team_box_dirty = false
 	for child in _team_box.get_children():
 		child.queue_free()
 	if world == null:
@@ -1986,7 +2127,7 @@ func _refresh_team_box() -> void:
 			kick.text = "✕"
 			kick.add_theme_font_size_override("font_size", _us(13))
 			var kick_style := StyleBoxFlat.new()
-			kick_style.bg_color = Color(0.14, 0.16, 0.23)
+			kick_style.bg_color = UiTheme.SURFACE_3
 			kick_style.set_corner_radius_all(6)
 			kick_style.set_content_margin_all(_us(3))
 			for kick_state in ["normal", "hover", "pressed"]:
@@ -2579,10 +2720,23 @@ func news(text: String, seconds := 5.0) -> void:
 
 ## The centre note, the storm countdown and the death card.
 func _refresh_notices(player: Player, delta: float) -> void:
+	if _round_card != null and world != null:
+		var phase: String = world.match_phase
+		var card_up: bool = (phase == "LOBBY" or phase == "SETUP") and not _menu.visible
+		_round_card.visible = card_up
+		if card_up:
+			_round_t -= delta
+			if _round_t <= 0.0:
+				_round_t = 0.2
+				_refresh_round_card(phase)
+		else:
+			_round_t = 0.0
 	if _center_note != null and world != null:
 		var secs := int(ceil(world.match_seconds))
 		var say := ""
-		if world.match_phase == "LOBBY" and not _menu.visible:
+		if world.match_phase == "LOBBY" and _menu.visible:
+			# The card says this; the corner only has to while the menu
+			# is up over it.
 			say = ("🏆  Next battle in %d" % secs) if secs > 0 \
 				else "🏆  Battle starting…"
 		elif world.match_phase == "BATTLE" and str(world.client_mode) == "holdout":
@@ -2818,7 +2972,10 @@ func _refresh_scoreline(player: Player, delta: float) -> void:
 ## The crosshair, and everything that has to be re-laid-out when this
 ## player's cell changes size.
 func _refresh_crosshair_and_layout(player: Player) -> void:
-	_crosshair.visible = player.fp_mode and not _menu.visible
+	# ...and not through the round card, which sits exactly where the
+	# crosshair does.
+	_crosshair.visible = player.fp_mode and not _menu.visible \
+		and not (_round_card != null and _round_card.visible)
 	_crosshair.add_theme_font_size_override("font_size", _us(int(30 * (1.0 + player.fp_zoom * 0.8))))
 	if size != _last_size:
 		_last_size = size

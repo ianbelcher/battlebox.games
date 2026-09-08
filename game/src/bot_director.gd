@@ -33,6 +33,103 @@ var _next_slot := 100
 ## the `roster.is_empty()` test stops it after the FIRST bot.
 
 
+## WHO IS STANDING WHERE, taken once at the top of every server frame.
+##
+## Nearly everything a computer player decides starts with a walk of the
+## roster: who is alive, not downed, on which side, standing where. Each
+## walk is a hundred string-keyed dictionary reads, and there were seven
+## different walks — enemies to shoot, team-mates near a body, rivals for
+## a rescue, anybody covering a spot, who an orb could hit, who could
+## pick a downed player up — each done again by each bot that asked. At a
+## hundred seats that came to hundreds of thousands of reads a second for
+## an answer that does not change inside a frame.
+##
+## So the world asks for it once (refresh_picture) and the walks below
+## read a flat array. Entries are [id, pos, team, is_bot]. Positions are
+## as of the top of the frame; nothing here needs them closer than that.
+var _standing: Array = []
+var _standing_by_team: Dictionary = {}
+var _enemies_by_team: Dictionary = {}
+## Who is on which side and who is a computer player: read off the
+## roster when the roster changes, not off it a hundred times a frame.
+var _team_of: Dictionary = {}
+var _is_bot: Dictionary = {}
+var _sides_hooked := false
+## The standing, bucketed into GRID-block squares, so "who is near this
+## orb" reads a handful of entries rather than everybody.
+const GRID := 8
+var _grid: Dictionary = {}
+
+func refresh_picture() -> void:
+	if not _sides_hooked:
+		_sides_hooked = true
+		Game.roster_changed.connect(_refresh_sides)
+		_refresh_sides()
+	_standing.clear()
+	_standing_by_team.clear()
+	_enemies_by_team.clear()
+	_grid.clear()
+	for id: String in world.match_alive.keys():
+		if world.downed_ids.has(id):
+			continue
+		var st: Dictionary = world.player_state.get(id, {})
+		if st.is_empty():
+			continue
+		var team := int(_team_of.get(id, -1))
+		var where: Vector3 = st.pos
+		var entry: Array = [id, where, team, bool(_is_bot.get(id, false))]
+		_standing.append(entry)
+		var mates: Array = _standing_by_team.get(team, [])
+		mates.append(entry)
+		_standing_by_team[team] = mates
+		var cell := Vector2i(floori(where.x / GRID), floori(where.z / GRID))
+		var bucket: Array = _grid.get(cell, [])
+		bucket.append(entry)
+		_grid[cell] = bucket
+
+func _refresh_sides() -> void:
+	_team_of.clear()
+	_is_bot.clear()
+	for id: String in Game.roster.keys():
+		var entry: Dictionary = Game.roster[id]
+		_team_of[id] = int(entry.get("team", -1))
+		_is_bot[id] = bool(entry.get("bot", false))
+
+## Everybody standing within `reach` blocks of a point, on any side —
+## read from the grid, so it is the few in the surrounding squares.
+func standing_near(at: Vector3, reach: float) -> Array:
+	var out: Array = []
+	var lo := Vector2i(floori((at.x - reach) / GRID), floori((at.z - reach) / GRID))
+	var hi := Vector2i(floori((at.x + reach) / GRID), floori((at.z + reach) / GRID))
+	for cz in range(lo.y, hi.y + 1):
+		for cx in range(lo.x, hi.x + 1):
+			var bucket: Array = _grid.get(Vector2i(cx, cz), [])
+			for entry: Array in bucket:
+				if Vector3(entry[1]).distance_to(at) <= reach:
+					out.append(entry)
+	return out
+
+## Everybody standing on this side.
+func standing_on(team: int) -> Array:
+	return _standing_by_team.get(team, [])
+
+## Everybody standing who is NOT on this side. Somebody with no side —
+## not in the roster — is everybody's enemy, as teams_differ has it.
+func enemies_of(team: int) -> Array:
+	if _enemies_by_team.has(team):
+		return _enemies_by_team[team]
+	var out: Array = []
+	for entry: Array in _standing:
+		if int(entry[2]) != team:
+			out.append(entry)
+	_enemies_by_team[team] = out
+	return out
+
+## The side somebody is on, or -99 for somebody who is not in the roster
+## at all — which no real side equals, so they count as an enemy of all.
+func side_of(id: String) -> int:
+	return int(_team_of.get(id, -99))
+
 ## Bot shots in flight, read by the world when it draws them. They travel
 ## exactly like a player's orb — straight
 ## line at the weapon's speed, stopped by solid blocks, hitting whatever
@@ -442,15 +539,12 @@ const SIGHT_MEMORY_MS := 4000
 
 func _bot_nearest_enemy(id: String, pos: Vector3, radius: float) -> String:
 	var near: Array = []
-	for other: String in world.match_alive.keys():
-		if other == id or world.downed_ids.has(other) or not world.teams_differ(id, other):
+	for entry: Array in enemies_of(side_of(id)):
+		if str(entry[0]) == id:
 			continue
-		var other_state: Dictionary = world.player_state.get(other, {})
-		if other_state.is_empty():
-			continue
-		var d: float = pos.distance_to(other_state.pos)
+		var d: float = pos.distance_to(entry[1])
 		if d < radius:
-			near.append([d, other])
+			near.append([d, entry[0]])
 	if near.is_empty():
 		return ""
 	near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
@@ -503,20 +597,33 @@ const BOT_REVIVE_CROWD := 18.0
 ## and leave one lying in the open until the shooter moves — which is what
 ## a person does, and what was asked for: they should get to
 ## cover to get each other up.
+## Remembered for a moment per body and radius: every able team-mate
+## asks about the same body in the same half second, and the answer is
+## a ray to every enemy in reach of it.
+const UNDER_FIRE_MEMORY_MS := 400
+var _fire_verdicts: Dictionary = {}
+
 func _under_fire(at: Vector3, ally: String, radius: float) -> bool:
+	var key := [Vector3i(at), side_of(ally), int(radius)]
+	var now := Time.get_ticks_msec()
+	var known: Array = _fire_verdicts.get(key, [])
+	if not known.is_empty() and now - int(known[0]) < UNDER_FIRE_MEMORY_MS:
+		return bool(known[1])
 	var eye := at + Vector3(0, 1.0, 0)
-	for other: String in world.match_alive.keys():
-		if world.downed_ids.has(other) or not world.teams_differ(ally, other):
-			continue
-		var st: Dictionary = world.player_state.get(other, {})
-		if st.is_empty():
-			continue
-		var epos: Vector3 = st.pos
+	var verdict := false
+	for entry: Array in enemies_of(side_of(ally)):
+		var epos: Vector3 = entry[1]
 		if epos.distance_to(at) > radius:
 			continue
 		if world.clear_shot(epos + Vector3(0, 1.4, 0), eye):
-			return true
-	return false
+			verdict = true
+			break
+	# Forgotten wholesale now and then, rather than growing for the life
+	# of the round.
+	if _fire_verdicts.size() > 256:
+		_fire_verdicts.clear()
+	_fire_verdicts[key] = [now, verdict]
+	return verdict
 
 ## Which body to go and pick up, or INF for none worth attempting.
 ##
@@ -592,30 +699,22 @@ func _bot_rescue_goal(id: String, pos: Vector3) -> Vector3:
 func _closer_mate(id: String, mate: String, body: Vector3, away: float) -> bool:
 	var team := int(Game.roster.get(id, {}).get("team", -1))
 	var rivals: Array = []
-	for other: String in world.match_alive.keys():
-		if other == id or other == mate or world.downed_ids.has(other) \
-				or world.out_ids.has(other) or world.teams_differ(id, other):
-			continue
-		if not bool(Game.roster.get(other, {}).get("bot", false)):
+	for entry: Array in standing_on(team):
+		var other := str(entry[0])
+		if other == id or other == mate or world.out_ids.has(other) \
+				or not bool(entry[3]):
 			continue
 		if world.ctf.active() and team >= 0 and _bot_ctf_defends(other, team):
 			continue
-		var st: Dictionary = world.player_state.get(other, {})
-		if st.is_empty():
-			continue
-		rivals.append(Vector3(st.pos).distance_to(body))
+		rivals.append(Vector3(entry[1]).distance_to(body))
 	return not RallyRules.mine_to_take(away, rivals)
 
 ## How many able team-mates are already close to this body — the ones who
 ## could be going in with you.
 func _mates_near(mate: String, body: Vector3) -> int:
 	var count := 0
-	for other: String in world.match_alive.keys():
-		if other == mate or world.downed_ids.has(other) \
-				or world.teams_differ(mate, other):
-			continue
-		var st: Dictionary = world.player_state.get(other, {})
-		if not st.is_empty() and Vector3(st.pos).distance_to(body) < BOT_REVIVE_CROWD:
+	for entry: Array in standing_on(side_of(mate)):
+		if str(entry[0]) != mate and Vector3(entry[1]).distance_to(body) < BOT_REVIVE_CROWD:
 			count += 1
 	return count
 
@@ -1682,18 +1781,7 @@ func _bot_replan(bot: Dictionary, pos: Vector3, goal: Vector3, delta: float) -> 
 ## Scanning DOWN from just above the bot is also cheaper than surface_y,
 ## which starts at the top of the world.
 func walk_y(wx: int, wz: int, from_y: float) -> int:
-	var top := mini(int(from_y) + 2, WorldGen.CHUNK_H - 3)
-	for y in range(top, 0, -1):
-		var here := world.store.get_block(Vector3i(wx, y, wz))
-		if here == Blocks.AIR or Blocks.is_liquid(here):
-			continue
-		# Two blocks of headroom, or it is not somewhere a body fits.
-		if world.store.get_block(Vector3i(wx, y + 1, wz)) != Blocks.AIR:
-			return -1
-		if world.store.get_block(Vector3i(wx, y + 2, wz)) != Blocks.AIR:
-			return -1
-		return y
-	return -1
+	return world.store.walkable_y(wx, wz, from_y)
 
 func _water_at(wx: int, wz: int) -> bool:
 	return world.store.get_block(Vector3i(wx, WorldGen.SEA_LEVEL, wz)) == Blocks.WATER
@@ -2284,20 +2372,37 @@ const POS_PER_PACKET := 48
 var _pk := 0
 var _ent := 0
 var _pk_t := 0.0
+var _pk_frames := 0
+var _pk_worst := 0.0
 
 func _flush_positions() -> void:
 	if OS.get_environment("WORLD_NETSTAT") == "1":
 		_ent += _pending.size()
 		_pk += int(ceil(float(_pending.size()) / float(POS_PER_PACKET)))
-		_pk_t += get_process_delta_time()
+		var dt := get_process_delta_time()
+		_pk_t += dt
+		_pk_frames += 1
+		_pk_worst = maxf(_pk_worst, dt)
 		if _pk_t >= 5.0:
-			print("NET packets/s=%.0f entries/s=%.0f fps=%.1f bots=%d phase=%s"
-				% [_pk / _pk_t, _ent / _pk_t,
-					1.0 / maxf(get_process_delta_time(), 0.0001),
-					roster.size(), world.match_phase])
+			# The AVERAGE frame rate over the window and the LONGEST frame
+			# in it, not the rate of whichever frame the window happened
+			# to end on. One frame is a coin toss: it read 7 fps on a
+			# server that was fine and 75 on one that was stalling every
+			# second, and neither number said anything about the other
+			# three hundred frames in the window.
+			print("NET packets/s=%.0f entries/s=%.0f fps=%.1f worst=%dms bots=%d phase=%s"
+				% [_pk / _pk_t, _ent / _pk_t, _pk_frames / _pk_t,
+					int(_pk_worst * 1000.0), roster.size(), world.match_phase])
+			# ...and where the frame went, in milliseconds per second of
+			# wall clock: "bots=610 chunks=90" says the bots are most of
+			# a frame, which is a thing somebody can go and fix.
+			for line: String in world.stats.report(_pk_t):
+				print(line)
 			_pk = 0
 			_ent = 0
 			_pk_t = 0.0
+			_pk_frames = 0
+			_pk_worst = 0.0
 	while not _pending.is_empty():
 		var take: int = mini(POS_PER_PACKET, _pending.size())
 		world.cl_pos_batch.rpc(_pending.slice(0, take))
@@ -2309,6 +2414,8 @@ var _pending: Array = []
 ## test the people use: a downed team-mate with a revive already running,
 ## close enough that this bot is what is keeping it running.
 func _bot_holding_a_revive(id: String, pos: Vector3) -> bool:
+	if world.battle.revive_progress.is_empty():
+		return false
 	for rid: String in world.battle.revive_progress.keys():
 		if rid == id or not world.downed_ids.has(rid) or world.teams_differ(id, rid):
 			continue
@@ -2323,18 +2430,54 @@ func tick(delta: float) -> void:
 	# THE TEAM PICTURE FIRST, so every bot in this step reads the same one.
 	# Rebuilt on its own timer inside; this call is an integer compare on
 	# the frames it does nothing.
+	_lap_start()
 	_refresh_intel(delta)
+	_lap("bots_intel")
 	_tick_bots(delta)
 	# One packet for everything that moved, at the END of the step — so a
 	# bot that moves and then a second one that moves share a packet
 	# rather than each buying their own.
+	_lap_start()
 	_flush_positions()
+	_lap("bots_net")
 
-func _tick_bots(delta: float) -> void:
+## WHERE THE BOT STEP GOES, for WORLD_NETSTAT=1 — the same clock the
+## world keeps for its own subsystems (TickStats), split by what a
+## computer player was doing. "bots=600" says nothing; "bots_look=400"
+## says which hundred lines to read.
+func _lap_start() -> void:
+	world.stats.start()
+
+func _lap(what: String) -> void:
+	world.stats.lap(what)
+
+## HALF THE COMPUTER PLAYERS A FRAME. Their positions go out at fifteen a
+## second whatever the server's frame rate is, and everything a bot does
+## between decisions — cooldowns, the ground under it, a step forward —
+## is per-frame overhead that buys nothing above that rate. So each bot
+## is stepped every other frame with the time that has passed since its
+## last step, which at thirty ticks a second is the fifteen it sends at.
+## Clients smooth between positions, and nothing anybody can see is
+## different; what is different is half the bot step, which at a hundred
+## seats is the difference between a server that keeps up and one that
+## does not.
+const BOT_STRIDE := 2
+var _bot_frame := 0
+
+func _tick_bots(frame_delta: float) -> void:
+	_bot_frame += 1
+	var i := 0
 	for id: String in roster.keys():
+		i += 1
 		if not Game.roster.has(id):
 			continue
 		var bot: Dictionary = roster[id]
+		bot.dt = float(bot.get("dt", 0.0)) + frame_delta
+		if (i + _bot_frame) % BOT_STRIDE != 0:
+			continue
+		var delta: float = bot.dt
+		bot.dt = 0.0
+		_lap_start()
 		_ensure_skill(bot)
 		# A LAST LINE OF DEFENCE, not a substitute for placing them
 		# properly: whatever put a computer player outside the world, it
@@ -2356,6 +2499,7 @@ func _tick_bots(delta: float) -> void:
 		bot.build_out_cd = maxf(0.0, float(bot.get("build_out_cd", 0.0)) - delta)
 		bot.build_cd = maxf(0.0, float(bot.get("build_cd", 0.0)) - delta)
 		bot.shield_cd = maxf(0.0, float(bot.get("shield_cd", 0.0)) - delta)
+		bot.look_cd = maxf(0.0, float(bot.get("look_cd", 0.0)) - delta)
 		bot.think = float(bot.think) - delta
 		var pos: Vector3 = bot.pos
 		var downed := world.downed_ids.has(id)
@@ -2385,14 +2529,17 @@ func _tick_bots(delta: float) -> void:
 				stood.pos = bot.pos
 			_bot_send_pos(id, bot, delta)
 			continue
+		_lap("bots_misc")
 		if bot.think <= 0.0:
 			bot.think = randf_range(0.35, 0.6)
 			bot.goal = _bot_pick_goal(id, bot)
+		_lap("bots_goal")
 		# The tunnel advances every tick, not only when the bot is stuck.
 		# That is the whole difference between a sapper and a bot that
 		# happens to be digging its way out of a hole.
 		if bool(bot.get("sapping", false)):
 			_bot_sap(id, bot, pos)
+		_lap("bots_dig")
 		var to_goal: Vector3 = Vector3(bot.goal) - pos
 		var flat := Vector2(to_goal.x, to_goal.z)
 		# ARRIVAL IS NOT A FLAT MEASUREMENT. Standing on a ledge with your
@@ -2576,6 +2723,7 @@ func _tick_bots(delta: float) -> void:
 					bot.wedged = 0
 				bot.stuck_t = 0.0
 				bot.moved = 0.0
+		_lap("bots_steer")
 		var gy := walk_y(floori(pos.x), floori(pos.z), pos.y)
 		if gy < 0:
 			gy = world.store.surface_y(floori(pos.x), floori(pos.z))
@@ -2606,6 +2754,7 @@ func _tick_bots(delta: float) -> void:
 		var state: Dictionary = world.player_state.get(id, {})
 		if not state.is_empty():
 			state.pos = pos
+		_lap("bots_ground")
 		# Fight whatever is in range.
 		#
 		# THE COOLDOWN IS CHECKED FIRST, and that ordering is the whole
@@ -2624,9 +2773,26 @@ func _tick_bots(delta: float) -> void:
 		#
 		# Nothing about the behaviour changes: a bot that cannot fire yet
 		# had no use for the answer.
+		#
+		# AND A LOOK THAT FOUND NOBODY IS NOT REPEATED NEXT FRAME. The
+		# cooldown above only holds a bot that has just FIRED; one with
+		# nobody in sight has nothing to fire at, so its cooldown stays at
+		# zero and it searched again every frame — six rays of up to
+		# fifty blocks each, for ninety-nine bots, sixty times a second.
+		# Measured at a hundred seats it was most of the frame, and the
+		# server ran at nine ticks a second for the whole of a battle. A
+		# bot that has just looked and seen nothing waits a beat before
+		# looking again; a third of a second is not a reaction anybody
+		# notices, and the alerted-by-a-shot path below is not gated by
+		# it, so being fired on still turns a head at once.
 		if world.match_phase == "BATTLE" and world.match_alive.has(id) \
-				and not downed and bot.shoot_cd <= 0.0:
+				and not downed and bot.shoot_cd <= 0.0 and bot.look_cd <= 0.0:
 			var enemy := _bot_nearest_enemy(id, pos, float(bot.get("sight", 48.0)))
+			# Whatever it saw, it does not look again for a beat: a shot
+			# below sets the longer weapon cooldown on top of this, and a
+			# sword-carrier that can see somebody twenty blocks off has
+			# nothing to do about it this frame either.
+			bot.look_cd = randf_range(0.22, 0.38)
 			# NOTHING IN SIGHT, BUT SOMEBODY IS SHOOTING AT ME.
 			#
 			# This is the other half of "you can zoom in and shoot at them
@@ -2695,6 +2861,7 @@ func _tick_bots(delta: float) -> void:
 					bot.shoot_cd = _bot_shot_delay(bot) * 0.7
 					world.cl_pos.rpc(id, pos, bot.yaw, 9)
 					world.match_hurt(enemy, 1, pos, id)
+		_lap("bots_look")
 		# A KEEPER WITH NOTHING TO SHOOT AT BUILDS. Only while it is
 		# actually minding its own flag, actually in the round, and there
 		# is nobody in sight — a bot laying blocks mid-firefight would be
@@ -2720,6 +2887,7 @@ func _tick_bots(delta: float) -> void:
 					and _bot_ctf_defends(id, my_team) \
 					and _bot_nearest_enemy(id, pos, 30.0) == "":
 				_bot_build_cover(id, bot, my_team, delta)
+		_lap("bots_build")
 		if bot.send_t <= 0.0:
 			bot.send_t = 1.0 / 15.0
 			_pending.append([id, pos, float(bot.yaw), 1])
@@ -2744,13 +2912,9 @@ func tick_orbs(delta: float) -> void:
 	# of orbs and a hundred players that was sixty thousand dictionary
 	# lookups a frame, which costs more than the arithmetic it feeds.
 	# Ninety-eight lookups now, and the filter reads a flat array.
-	var alive: Array = []
-	for pid: String in world.match_alive.keys():
-		if world.downed_ids.has(pid):
-			continue
-		var where: Vector3 = world.player_state.get(pid, {}).get("pos", Vector3.INF)
-		if where != Vector3.INF:
-			alive.append([pid, where])
+	# ...and now looked up not at all: the world took that picture at the
+	# top of the frame (refresh_picture), split by side, so each orb reads
+	# only the people it could hurt.
 	for i in range(orbs.size() - 1, -1, -1):
 		var orb: Dictionary = orbs[i]
 		orb.age = float(orb.age) + delta
@@ -2781,11 +2945,9 @@ func tick_orbs(delta: float) -> void:
 		# always empty and the inner loop below costs nothing.
 		var reach := travel + 2.0
 		var near: Array = []
-		for entry: Array in alive:
-			var who := str(entry[0])
-			if who == orb.shooter or not world.teams_differ(orb.shooter, who):
-				continue
-			if Vector3(entry[1]).distance_to(from) <= reach:
+		var shooter_side := side_of(orb.shooter)
+		for entry: Array in standing_near(from, reach):
+			if int(entry[2]) != shooter_side and str(entry[0]) != orb.shooter:
 				near.append(entry)
 		var dead := false
 		for _h in hops:

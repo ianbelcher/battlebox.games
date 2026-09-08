@@ -6,16 +6,14 @@ extends Control
 ## built at all; we just start listening.
 
 const TITLE := "BattleBox"
-## The reconnect screen's ground, matched to the front page's. It was a
-## blue that nothing else in the game used any more.
-const BG_TOP := Color("17151c")
-const BG_BOTTOM := Color("0a0a0c")
 ## The one accent, from the one place that defines it. It was a second
 ## copy of the old gold, so a change to the theme re-skinned every menu
 ## and left this screen's title, its Play button and every banner behind.
 const GOLD := UiTheme.ACCENT
 
 const LEAVE_HOLD_SECONDS := 1.2
+## See _ready: the server's frame rate.
+const SERVER_TICKS_PER_SECOND := 30
 
 ## The end-of-round card. See final_scores.gd.
 var final_scores: FinalScores
@@ -23,8 +21,6 @@ var _lobby_screen: LobbyScreen
 var _connect_screen: Control
 var _game_screen: Control
 var _world_menu: WorldMenu
-## The world menu is opened for the host once, on their first join.
-var _showed_opening_menu := false
 var _split: SplitScreen
 var _address_edit: LineEdit
 var _play_button: Button
@@ -50,6 +46,14 @@ var _loading_label: Label
 var _prev_pressed: Dictionary = {}
 var _leave_hold: Dictionary = {}
 var _in_world := false
+## Connected, but the world screen is not up yet: the first chunks are
+## still on their way. See _on_connected and _arrive.
+var _arrived := false
+var _loading_bar: ProgressBar
+## How long the loading screen waits for the world before showing it
+## anyway. A world that never says it is ready is a bug, and the answer
+## to a bug is not a screen nobody can get past.
+const LOADING_GRACE_SECONDS := 15.0
 
 # --- Connection keep-alive -----------------------------------------
 ## Nobody should ever have to click Connect. The client dials the default
@@ -82,6 +86,14 @@ func _ready() -> void:
 		if Net.start_server() != OK:
 			get_tree().quit(1)
 			return
+		# THIRTY TICKS A SECOND, and no more. Uncapped, a headless server
+		# spins as fast as the machine allows — a hundred and thirty times
+		# a second with ten seats — and everything the computer players do
+		# per frame (ground checks, cooldowns, steering) is done that many
+		# times, for positions that go out at fifteen a second. Capped, a
+		# frame has a known budget (33 ms), a hundred-seat room fits inside
+		# it, and eight rooms on one box are not eight processes racing.
+		Engine.max_fps = SERVER_TICKS_PER_SECOND
 		# What room this process is, and the watchdog that ends it when the
 		# last player leaves. See room.gd — a room IS a server process.
 		var room := Room.new()
@@ -218,8 +230,12 @@ func _is_server_mode() -> bool:
 ## SelfCheck so a headless run can tell "could not join" apart from
 ## "joined and then found an empty world" — which look identical from
 ## outside and have nothing in common.
+## "world" from the moment the socket is open and the world exists —
+## the loading screen that sits over it while the first chunks land is
+## still the world, joined; what the harness is telling apart is "could
+## not join" from "joined".
 func current_screen() -> String:
-	if _game_screen != null and _game_screen.visible:
+	if _in_world and Game.world != null:
 		return "world"
 	if _lobby_screen != null and _lobby_screen.visible:
 		return "lobby"
@@ -243,21 +259,6 @@ func _make_label(text: String, size: int, color := Color.WHITE, outline := 0) ->
 		label.add_theme_constant_override("outline_size", outline)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return label
-
-func _gradient_bg() -> TextureRect:
-	var grad := Gradient.new()
-	grad.colors = PackedColorArray([BG_TOP, BG_BOTTOM])
-	grad.offsets = PackedFloat32Array([0.0, 1.0])
-	var tex := GradientTexture2D.new()
-	tex.gradient = grad
-	tex.fill_from = Vector2(0, 0)
-	tex.fill_to = Vector2(0, 1)
-	var rect := TextureRect.new()
-	rect.texture = tex
-	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	rect.stretch_mode = TextureRect.STRETCH_SCALE
-	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	return rect
 
 ## Which room this client was launched into, if any.
 ##
@@ -331,6 +332,7 @@ func _web_loading_done_soon() -> void:
 func _back_to_lobby(message: String) -> void:
 	Net.go_offline()
 	_connecting = false
+	_arrived = false
 	_retry_at_ms = 0
 	_room_code = ""
 	Game.joined_code = ""
@@ -349,72 +351,78 @@ func _back_to_lobby(message: String) -> void:
 	_lobby_screen.refresh()
 	_lobby_screen.call("_set_status", message)
 
+## THE SCREEN BETWEEN THE FRONT PAGE AND THE WORLD.
+##
+## It is the same picture as the front page — the same backdrop, the same
+## sign — so pressing Play does not cut to a different-looking screen for
+## a second and then to a third. Under the sign: what is happening
+## ("Joining BattleBox…", "Loading the world… 38 of 90"), a bar that
+## fills as the first chunks arrive, and nothing else. The address box
+## and the manual Play are still here for a grown-up rescuing a wrong
+## address, hidden until the client has given up dialling by itself.
 func _build_connect_screen() -> void:
 	_connect_screen = Control.new()
 	_connect_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_connect_screen.add_child(_gradient_bg())
+	_connect_screen.add_child(TitleBackdrop.new())
 	add_child(_connect_screen)
-	# A slow drift of voxel blocks behind the title — first impressions.
-	_backdrop = Control.new()
-	_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_connect_screen.add_child(_backdrop)
-	var drift_ids := [Blocks.GRASS, Blocks.BRICK, Blocks.GOLD, Blocks.WOOL_RED,
-		Blocks.GLASS, Blocks.LEAVES, Blocks.WOOL_BLUE, Blocks.PUMPKIN,
-		Blocks.DIAMOND, Blocks.WOOL_PURPLE, Blocks.SANDSTONE, Blocks.ICE,
-		Blocks.LANTERN, Blocks.WOOL_TEAL]
-	for i in 14:
-		var cube := BlockIcon.new(drift_ids[i % drift_ids.size()])
-		var px := 30 + (i * 37) % 46
-		cube.size = Vector2(px, px)
-		cube.position = Vector2(fmod(i * 461.7, 1.0) * 1200.0 + 20.0,
-			fmod(i * 173.3, 1.0) * 700.0)
-		cube.modulate = Color(1, 1, 1, 0.16 + fmod(i * 0.618, 1.0) * 0.2)
-		cube.pivot_offset = cube.size / 2.0
-		cube.set_meta("speed", 8.0 + fmod(i * 0.37, 1.0) * 16.0)
-		cube.set_meta("spin", (fmod(i * 0.73, 1.0) - 0.5) * 0.5)
-		_backdrop.add_child(cube)
+	var sc := UiTheme.scale_for(get_viewport_rect().size)
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_connect_screen.add_child(center)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 18)
+	box.add_theme_constant_override("separation", UiTheme.px(14, sc))
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	center.add_child(box)
-	# A QUIET WORDMARK, not a title card. The name is already on the
-	# loading screen in front of this one (see export_presets.cfg's
-	# head_include), so a second, enormous BattleBox — shown for the
-	# fraction of a second between the download finishing and the socket
-	# opening — was the game introducing itself twice and delaying the
-	# world to do it. This screen earns its keep on a RECONNECT, where it
-	# has something to say; it does not need to shout on the way in.
-	box.add_child(_make_label(TITLE, 30, GOLD, 6))
-	box.add_child(_make_label("Build. Battle. Be the last one standing.",
-		17, Color(1, 1, 1, 0.7)))
+	# The sign, a little smaller than on the front page: this screen is
+	# a pause, not an introduction.
+	var mark := NeonWordmark.new().setup(sc * 0.72)
+	mark.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	box.add_child(mark)
+	_status_label = Label.new()
+	_status_label.text = "Finding the world…"
+	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_label.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY + 2, sc))
+	_status_label.add_theme_color_override("font_color", UiTheme.INK_DIM)
+	box.add_child(_status_label)
+	# A thin ember bar. Filled by _refresh_loading as chunks land; hidden
+	# while the client is still dialling, when there is nothing to count.
+	_loading_bar = ProgressBar.new()
+	_loading_bar.show_percentage = false
+	_loading_bar.min_value = 0.0
+	_loading_bar.max_value = 1.0
+	_loading_bar.value = 0.0
+	_loading_bar.custom_minimum_size = Vector2(UiTheme.px(360, sc), UiTheme.px(8, sc))
+	_loading_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_loading_bar.add_theme_stylebox_override("background",
+		UiTheme.flat(UiTheme.SURFACE_2, 999, sc, 1.0, UiTheme.LINE))
+	_loading_bar.add_theme_stylebox_override("fill",
+		UiTheme.flat(UiTheme.ACCENT, 999, sc))
+	_loading_bar.visible = false
+	box.add_child(_loading_bar)
 	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 10)
+	spacer.custom_minimum_size = Vector2(0, UiTheme.px(10, sc))
 	box.add_child(spacer)
 	# The address box and Play button are for a grown-up rescuing a wrong
 	# address — they stay hidden while the client is dialling by itself.
 	_address_edit = LineEdit.new()
 	_address_edit.text = Net.default_server_url()
-	_address_edit.add_theme_font_size_override("font_size", 22)
-	_address_edit.custom_minimum_size = Vector2(500, 0)
+	_address_edit.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, sc))
+	_address_edit.custom_minimum_size = Vector2(UiTheme.px(500, sc), UiTheme.px(48, sc))
 	_address_edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_address_edit.visible = false
 	box.add_child(_address_edit)
 	var button := Button.new()
 	button.focus_mode = Control.FOCUS_NONE
-	button.text = "  ▶  Play  "
-	button.add_theme_font_size_override("font_size", 34)
-	var play_style := StyleBoxFlat.new()
-	play_style.bg_color = GOLD
-	play_style.set_corner_radius_all(12)
-	play_style.content_margin_left = 44
-	play_style.content_margin_right = 44
-	play_style.content_margin_top = 10
-	play_style.content_margin_bottom = 10
+	button.text = "  Try again  "
+	button.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE - 6, sc))
+	button.add_theme_font_override("font", UiTheme.heavy(sc, 0.5, 1.0))
+	var play_style := UiTheme.flat(UiTheme.ACCENT, UiTheme.R_CARD, sc)
+	play_style.content_margin_left = UiTheme.px(36, sc)
+	play_style.content_margin_right = UiTheme.px(36, sc)
+	play_style.content_margin_top = UiTheme.px(10, sc)
+	play_style.content_margin_bottom = UiTheme.px(10, sc)
 	var play_hover: StyleBoxFlat = play_style.duplicate()
-	play_hover.bg_color = GOLD.lightened(0.15)
+	play_hover.bg_color = UiTheme.ACCENT.lightened(0.14)
 	button.add_theme_stylebox_override("normal", play_style)
 	button.add_theme_stylebox_override("hover", play_hover)
 	button.add_theme_stylebox_override("pressed", play_hover)
@@ -429,13 +437,22 @@ func _build_connect_screen() -> void:
 	# _play_button is the container, so hiding it hides the centring too.
 	_play_button = button
 	_play_holder = holder
-	_manual_hint = _make_label("Grown-ups: check the address above", 16,
-		Color(1, 1, 1, 0.5))
+	_manual_hint = Label.new()
+	_manual_hint.text = "Grown-ups: check the address above"
+	_manual_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_manual_hint.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_NOTE, sc))
+	_manual_hint.add_theme_color_override("font_color", UiTheme.INK_FAINT)
 	_manual_hint.visible = false
 	box.add_child(_manual_hint)
 	_address_edit.text_submitted.connect(func(_t: String) -> void: _on_connect_pressed())
-	_status_label = _make_label("Finding the world…", 18, Color(1, 1, 1, 0.75))
-	box.add_child(_status_label)
+
+## What the connect screen calls the place it is going.
+func _room_label() -> String:
+	if not _room_name.is_empty():
+		return _room_name
+	if _room_code.is_empty() or _room_code == Room.HOUSE_CODE:
+		return "BattleBox"
+	return _room_code
 
 func _build_game_screen() -> void:
 	_game_screen = Control.new()
@@ -484,7 +501,7 @@ func _build_game_screen() -> void:
 			if _in_world:
 				_split.update_layout())
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.05, 0.08, 0.85)
+	style.bg_color = Color(UiTheme.SURFACE, 0.85)
 	style.set_corner_radius_all(12)
 	style.set_content_margin_all(int(14 * ui_scale()))
 	# Reset vote panel.
@@ -554,7 +571,7 @@ func _build_game_screen() -> void:
 	_banner.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_banner.visible = false
 	var banner_bg := StyleBoxFlat.new()
-	banner_bg.bg_color = Color(0.05, 0.06, 0.1, 0.92)
+	banner_bg.bg_color = Color(UiTheme.SURFACE, 0.92)
 	banner_bg.set_corner_radius_all(18)
 	banner_bg.set_content_margin_all(int(26 * ui_scale()))
 	banner_bg.border_color = GOLD
@@ -599,7 +616,9 @@ func _dial() -> void:
 	_connecting = true
 	_connect_started_ms = Time.get_ticks_msec()
 	_retry_at_ms = 0
-	_set_status("Finding the world…" if _attempts <= 1 else _waiting_text())
+	_set_status("Joining %s…" % _room_label() if _attempts <= 1 else _waiting_text())
+	if _loading_bar != null:
+		_loading_bar.visible = false
 	Net.connect_to(_want_url)
 
 func _waiting_text() -> String:
@@ -718,9 +737,38 @@ func _on_connected() -> void:
 	_refresh_survival()
 	_in_world = true
 	_loading_label.visible = false
+	# THE WORLD SCREEN WAITS FOR THE WORLD. It used to come up here, on
+	# the socket opening, so what you saw first was a sky with nothing
+	# under it and the ground assembling itself in squares — the game's
+	# opening moment, every time, was watching it load. Now the connect
+	# screen stays up saying so, with a bar that fills as the first
+	# chunks land, and the world appears whole (_arrive). A world that
+	# never says it is ready is shown anyway after LOADING_GRACE_SECONDS.
+	_arrived = false
+	_show_screen(_connect_screen)
+	_set_status("Loading %s…" % _room_label())
+	if _loading_bar != null:
+		_loading_bar.value = 0.0
+		_loading_bar.visible = true
+	get_tree().create_timer(LOADING_GRACE_SECONDS).timeout.connect(func() -> void:
+		if Game.world == world and _in_world and not _arrived:
+			print("World took longer than %ds to say it was ready; showing it anyway"
+				% int(LOADING_GRACE_SECONDS))
+			_arrive())
+	# The scripted seats do not wait for the picture: the probes and the
+	# integration harness time themselves from the socket opening, as
+	# they always have.
+	_maybe_start_autotest()
+
+## The first chunks are here: on to the world, and into a seat.
+func _arrive() -> void:
+	if _arrived or not _in_world:
+		return
+	_arrived = true
 	# The browser's loading screen has been sitting over the top of all of
 	# this. THIS is the moment it has been waiting for — not the download
-	# finishing, which happened a while ago.
+	# finishing, which happened a while ago, and not the socket opening,
+	# which is a sky with no ground under it.
 	Game.web_loading_done()
 	_show_screen(_game_screen)
 	_split.update_layout()
@@ -733,7 +781,50 @@ func _on_connected() -> void:
 			Game.join_local(input as InputSlot)
 		_split.update_layout()
 		_news("Back in the world!")
-	_maybe_start_autotest()
+	elif _should_seat_the_keyboard():
+		# STRAIGHT INTO THE GAME. Pressing Play and then being asked to
+		# "press SPACE to jump in" is being asked to join twice; no game
+		# of this kind does that. The person at the keyboard is seated
+		# the moment the world is up. Controllers still hop in with Ⓐ —
+		# and when one is plugged in this stays out of the way, because
+		# then the keyboard may belong to nobody and the prompt is for
+		# whoever is holding the pad.
+		Game.join_local(InputSlot.new(InputSlot.Kind.KEYBOARD_WASD))
+		_split.update_layout()
+
+func _should_seat_the_keyboard() -> bool:
+	if not Game.local_inputs.is_empty():
+		return false
+	var scripted := OS.get_environment("WORLD_AUTOTEST")
+	if scripted.is_valid_int() and scripted.to_int() > 0:
+		return false
+	if not OS.get_environment("WORLD_FAKE_PADS").is_empty():
+		return false
+	return Input.get_connected_joypads().is_empty()
+
+## "Loading BattleBox… 38 of 90", as the chunks land.
+func _refresh_loading() -> void:
+	if _arrived or not _in_world or Game.world == null or Game.world.chunks == null:
+		return
+	var chunks: ChunkView = Game.world.chunks
+	var wanted := chunks.wanted_count()
+	var here := chunks.wanted_here()
+	if wanted <= 0:
+		return
+	# In sight and on screen: everything the view asked for is here and
+	# meshed. That is the moment, not the mesh queue draining, which the
+	# prefetch keeps refilling for the first twenty seconds.
+	if chunks.view_ready():
+		_arrive()
+		return
+	if _loading_bar != null:
+		_loading_bar.value = clampf(float(here) / float(wanted), 0.0, 1.0)
+	# Everything has arrived and the world is still not up: it is being
+	# meshed. Saying so beats a bar sitting full under "213 of 213".
+	if here >= wanted:
+		_set_status("Building %s…" % _room_label())
+	else:
+		_set_status("Loading %s…  %d of %d" % [_room_label(), here, wanted])
 
 ## WORLD_AUTOTEST=<n>: join n bot players who wander, dig and build — lets a
 ## headless client soak-test a full world session.
@@ -851,6 +942,7 @@ func _on_server_lost() -> void:
 	_want_url = _target_url()
 	Game.reset_to_disconnected()
 	_in_world = false
+	_arrived = false
 	# The menu node survives and gets re-pointed at the new world in
 	# _on_connected, exactly like the first connection does.
 	_attempts = 0
@@ -879,6 +971,14 @@ func _set_status(text: String) -> void:
 func _update_minimap() -> void:
 	if not _in_world or Game.world == null or Game.world.chunks == null \
 			or Game.world.players == null:
+		return
+	# NOTHING TO DRAW IT ON, most of the time: the corner map is retired
+	# and the big one only exists in the three-player layout. Nine
+	# thousand block reads and a texture upload every second and a half,
+	# for a picture nobody was shown.
+	var big_map_up: bool = _split != null and _split.big_map != null \
+		and is_instance_valid(_split.big_map)
+	if not _minimap.visible and not big_map_up:
 		return
 	var center := Vector3(Game.world.spawn_pos)
 	var locals: Array = []
@@ -1148,19 +1248,13 @@ func _on_roster_changed() -> void:
 		_rebuild_team_rows()
 	# Only rebuild the split screen when the set of local players actually
 	# changed - name/style/team edits must not tear down open menus.
-	# THE FIRST PERSON IN GETS THE MENU OPENED FOR THEM, once. Both menus
-	# were undiscoverable until this round, and the world menu is where the
-	# mode, the map and the computer players live — the things somebody
-	# arriving on an empty server actually wants. Only for the host (the
-	# first human), only once, and never on top of a round in progress.
-	if not _showed_opening_menu and Game.local_inputs.size() > 0 \
-			and _world_menu != null and Game.world != null \
-			and Game.host_peer == multiplayer.get_unique_id() \
-			and str(Game.world.match_phase) == "IDLE":
-		_showed_opening_menu = true
-		_split.close_all_menus()
-		_world_menu.open()
-		_update_cursor_release()
+	# NO MENU ON ARRIVAL. The host used to get the world menu opened for
+	# them on their first join, back when it held the mode, the map and
+	# the computer players and a fresh server was an empty field nobody
+	# could do anything with. Every one of those is chosen on the front
+	# page now and the room arrives already made, so the first thing a
+	# new player saw was a settings screen with nothing left to set —
+	# over the game they had just pressed Play to get into.
 	var sig := str(Game.local_inputs.keys())
 	if _split != null and sig != _last_local_sig:
 		_last_local_sig = sig
@@ -1173,30 +1267,24 @@ func _on_roster_changed() -> void:
 # ------------------------------------------------------------------
 
 var _connect_a_latch := true
-var _backdrop: Control
 
 func _process(_delta: float) -> void:
 	if Net.is_server:
 		return
 	_poll_connection()
 	if _connect_screen != null and _connect_screen.visible:
-		# Blocks drift gently up the title screen; Ⓐ on any pad connects.
-		if _backdrop != null:
-			var view_h := float(DisplayServer.window_get_size().y)
-			for cube: Control in _backdrop.get_children():
-				cube.position.y -= float(cube.get_meta("speed")) * _delta
-				cube.rotation += float(cube.get_meta("spin")) * _delta
-				if cube.position.y < -90.0:
-					cube.position.y = view_h + 40.0
+		_refresh_loading()
+		# Ⓐ on any pad presses the manual Try again.
 		var a_down := false
 		for pad in Input.get_connected_joypads():
 			if Input.is_joy_button_pressed(pad, JOY_BUTTON_A):
 				a_down = true
 				break
-		if a_down and not _connect_a_latch:
+		if a_down and not _connect_a_latch and _play_holder != null \
+				and _play_holder.visible:
 			_on_connect_pressed()
 		_connect_a_latch = a_down
-	if not _in_world:
+	if not _in_world or not _arrived:
 		return
 	_poll_join_leave(_delta)
 	final_scores.poll_dismiss()

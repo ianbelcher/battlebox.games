@@ -206,8 +206,7 @@ func tick(delta: float) -> void:
 				# the round ended while the clock still read half of what
 				# was left. Reported as "counts down from 10 minutes but
 				# ends at 4 minutes — a really bad problem".
-				_tick_regen()
-				_tick_fire()
+				_tick_slow(delta)
 				world.bots.tick_orbs(delta)
 				tick_revives(delta)
 				world.ctf.tick(delta)
@@ -222,8 +221,7 @@ func tick(delta: float) -> void:
 				# somebody reaches the target score.
 				_timer = 9999.0
 				world.storm_radius = -1.0
-				_tick_regen()
-				_tick_fire()
+				_tick_slow(delta)
 				world.bots.tick_orbs(delta)
 				tick_revives(delta)
 				world.ctf.tick(delta)
@@ -240,13 +238,17 @@ func tick(delta: float) -> void:
 			if world.storm_radius >= 0.0:
 				_storm_damage()
 				_storm_bite()
-			_tick_regen()
-			_tick_fire()
+			world.stats.lap("match_storm")
+			_tick_slow(delta)
 			if int(_timer) % 2 == 0 and _timer - floorf(_timer) < 0.02:
 				_tick_crate_gravity()
+			world.stats.lap("match_regen")
 			world.bots.tick_orbs(delta)
+			world.stats.lap("match_orbs")
 			tick_revives(delta)
+			world.stats.lap("match_revives")
 			check_win()
+			world.stats.lap("match_win")
 		"END":
 			if _timer <= 0.0:
 				# Only while somebody is HERE. It used to chain rounds with
@@ -702,6 +704,21 @@ func _tick_fire() -> void:
 			_burn_ms[id] = now + 1400
 			hurt(id, 1, foot)
 
+## FOUR TIMES A SECOND, not every frame. A heart comes back every three
+## seconds and a burn bites every 1.4, so asking sixty times a second —
+## two block reads and a handful of dictionary hits per player each time
+## — was most of the match tick for an answer that was "not yet".
+const SLOW_TICK_SECONDS := 0.25
+var _slow_accum := 0.0
+
+func _tick_slow(delta: float) -> void:
+	_slow_accum += delta
+	if _slow_accum < SLOW_TICK_SECONDS:
+		return
+	_slow_accum = 0.0
+	_tick_regen()
+	_tick_fire()
+
 func _tick_regen() -> void:
 	var now := Time.get_ticks_msec()
 	for id: String in world.match_alive.keys():
@@ -752,24 +769,22 @@ func tick_revives(delta: float) -> void:
 		# It used to be both — no rescuer OR forty-five seconds on the
 		# floor — and the timer was the part that made being knocked out
 		# feel like waiting to be told off. It has gone.
+		# WHO IS STANDING ON THIS SIDE, from the picture the world took at
+		# the top of the frame (BotDirector.refresh_picture) rather than
+		# two walks of everybody alive per downed player per frame. With
+		# thirty on the floor in a hundred-seat round that was six
+		# thousand roster reads a frame for an answer that is a list.
 		var team := int(Game.roster.get(id, {}).get("team", -1))
-		var rescuer := false
-		for other: String in world.match_alive.keys():
-			if other != id and not world.downed_ids.has(other) \
-					and int(Game.roster.get(other, {}).get("team", -2)) == team:
-				rescuer = true
-				break
-		if not rescuer:
+		var mates: Array = world.bots.standing_on(team)
+		if mates.is_empty():
 			put_out(id)
 			continue
 		var pos: Vector3 = world.player_state.get(id, {}).get("pos", Vector3.ZERO)
 		var mate_close := false
-		for other: String in world.match_alive.keys():
-			if other == id or world.downed_ids.has(other):
-				continue
-			if int(Game.roster.get(other, {}).get("team", -2)) == team \
-					and Vector3(world.player_state.get(other, {}).get("pos", Vector3.INF)).distance_to(pos) < world.REVIVE_RADIUS:
+		for entry: Array in mates:
+			if Vector3(entry[1]).distance_to(pos) < world.REVIVE_RADIUS:
 				mate_close = true
+				break
 		if mate_close:
 			# REVIVE_SECONDS of standing there, measured in real time. This
 			# used to add a fixed amount per server tick, so it finished in
@@ -850,7 +865,7 @@ func finish(winner: int) -> void:
 		what = "Capture the flag"
 	print("%s over: team %d" % [what, winner])
 	record_result(winner)
-	world.cl_match_end.rpc(winner)
+	world.cl_match_end.rpc(winner, _timer)
 
 ## HOW LONG A ROUND OF LAST FLAG STANDING RUNS.
 ##

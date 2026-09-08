@@ -82,3 +82,27 @@ func test_layers_name_the_seats_that_saw_you_plus_the_spectator() -> void:
 		"nobody saw them: only the spectator layer is left")
 	equal(OverheadSight.layers_for([-1, 9]), RenderLayers.OVERHEAD_SPECTATOR,
 		"a slot that is not a seat is ignored")
+
+func test_a_body_behind_a_first_person_camera_is_not_worth_walking_to() -> void:
+	var cam := Vector3(0, 1.6, 0)
+	var forward := Vector3(0, 0, -1)
+	check(OverheadSight.worth_checking(cam, forward, false, Vector3(3, 0, -20)),
+		"twenty blocks ahead: yes")
+	equal(OverheadSight.worth_checking(cam, forward, false, Vector3(0, 0, 20)), false,
+		"twenty blocks behind: no")
+	equal(OverheadSight.worth_checking(cam, forward, false,
+		Vector3(0, 0, -OverheadSight.RANGE - 5.0)), false,
+		"past the range the tag could be read at: no")
+
+func test_an_orthographic_camera_measures_off_its_axis_not_from_its_position() -> void:
+	# The orbit camera sits fifty-odd blocks off to one side looking down
+	# at a slant; a body under it is close to the view axis however far it
+	# is from the camera's own position.
+	var cam := Vector3(-40, 37, 40)
+	var forward := Vector3(0.6, -0.55, -0.6).normalized()
+	check(OverheadSight.worth_checking(cam, forward, true, Vector3(0, 0, 0), 30.0),
+		"the body the camera is looking at is on its axis")
+	equal(OverheadSight.worth_checking(cam, forward, true, Vector3(0, 0, -200), 30.0), false,
+		"a body far off the axis is off the screen")
+	equal(OverheadSight.worth_checking(cam, forward, true, Vector3(-60, 70, 60), 30.0), false,
+		"a body behind the camera plane is not in the picture")

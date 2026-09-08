@@ -266,7 +266,8 @@ var probes: WorldProbes = null
 ##
 ## id -> {pos: Vector3, yaw: float, treasures: int, name: String, ...}
 var player_state: Dictionary = {}
-var _chunk_send_queues: Dictionary = {}  # peer -> Array[Vector2i]
+## What each client has asked for, and the slab made ready. See ChunkFeed.
+var feed := ChunkFeed.new(self)
 ## Survival ("the attack"): server-side monster sim.
 var monsters_by_id: Dictionary = {}       # id -> {pos, hp, next_bonk_ms}
 var _downed: Dictionary = {}
@@ -371,15 +372,22 @@ func _process(delta: float) -> void:
 		if match_phase == "IDLE" and not is_equal_approx(day_length, idle_rate):
 			day_length = idle_rate
 			cl_clock.rpc(clock, day_length)
-		_drain_chunk_queues()
+		stats.start()
+		bots.refresh_picture()
+		stats.lap("picture")
+		feed.drain()
+		stats.lap("chunks")
 		terrain.dawn_check()
 		terrain.tick_bombs()
 		terrain.tick_smoke()
 		probes.tick(delta)
 		terrain.tick_boom_traps()
+		stats.lap("terrain")
 		battle.tick(delta)
 		battle.watch_for_nobody(delta)
+		stats.lap("match")
 		bots.tick(delta)
+		stats.lap("bots")
 		terrain._water_accum += delta
 		if terrain._water_accum > 0.3:
 			terrain._water_accum = 0.0
@@ -388,6 +396,12 @@ func _process(delta: float) -> void:
 		if terrain._fire_accum > 0.8:
 			terrain._fire_accum = 0.0
 			terrain.tick_fire()
+		stats.lap("water_fire")
+		feed.warm()
+		stats.lap("warm")
+
+## Where the server's frame goes, for WORLD_NETSTAT=1. See TickStats.
+var stats := TickStats.new(Net.netstat)
 
 ## Drop chunks that can be regenerated exactly, so a server left up for
 ## days does not hold every chunk anyone ever walked through.
@@ -402,7 +416,7 @@ func _server_trim_cache() -> void:
 		return  # nothing gets dropped out from under a live match
 	var dropped := store.trim_cache()
 	if dropped > 0:
-		print("World: dropped %d regenerable chunks from cache" % dropped)
+		print("World: dropped %d border chunks from cache" % dropped)
 
 func _server_on_roster_changed() -> void:
 	# Forget players whose roster entries vanished. NOTHING about a player
@@ -441,9 +455,6 @@ func sv_hello() -> void:
 	# been up all night walks into.
 	cl_match_state.rpc_id(peer, match_phase, battle._timer,
 		match_alive.keys(), downed_ids.keys(), out_ids.keys())
-	# A room created as a battle has been sitting IDLE waiting for the
-	# person who created it. This is them.
-	_open_round_if_waiting()
 	if ctf.active() and not ctf._flags.is_empty():
 		cl_flags.rpc_id(peer, ctf._flag_payload(), ctf_scores, ctf_target,
 			ctf_caps, ctf_lost, ctf_player_caps)
@@ -452,31 +463,7 @@ func sv_hello() -> void:
 func sv_request_chunks(list: Array) -> void:
 	if not multiplayer.is_server():
 		return
-	var peer := multiplayer.get_remote_sender_id()
-	var queue: Array = _chunk_send_queues.get(peer, [])
-	for item in list:
-		if item is Vector2i and queue.size() < 400:
-			queue.append(item)
-	_chunk_send_queues[peer] = queue
-
-## Sending is spread over frames so a join burst (~90 chunks) doesn't stall
-## the server or overflow the socket buffer.
-func _drain_chunk_queues() -> void:
-	for peer: int in _chunk_send_queues.keys():
-		if not (peer in multiplayer.get_peers()):
-			_chunk_send_queues.erase(peer)
-			continue
-		var queue: Array = _chunk_send_queues[peer]
-		var batch: Array = []
-		while batch.size() < 6 and not queue.is_empty():
-			var cpos: Vector2i = queue.pop_front()
-			batch.append([cpos.x, cpos.y, store.get_chunk_compressed(cpos)])
-		if batch.size() == 1:
-			cl_chunk.rpc_id(peer, batch[0][0], batch[0][1], batch[0][2])
-		elif not batch.is_empty():
-			cl_chunk_batch.rpc_id(peer, batch)
-		if queue.is_empty():
-			_chunk_send_queues.erase(peer)
+	feed.enqueue(multiplayer.get_remote_sender_id(), list)
 
 ## Relay one packet of somebody's voice to everyone else.
 ##
@@ -1545,7 +1532,14 @@ func cl_teams(names: Array) -> void:
 ## So the first `sv_hello` opens it. Idempotent, because every client
 ## sends one: only an IDLE phase is opened, and only in a mode that has
 ## rounds.
-func _open_round_if_waiting() -> void:
+## A room created as a battle has been sitting IDLE waiting for somebody.
+## Called when a PERSON TAKES A SEAT (Game.sv_register_player), not when
+## their machine connects: the seat comes a few seconds after the socket
+## now, once the world has loaded, and a round opened on the socket had
+## counted down, dropped everybody and put the storm up before the person
+## it was opened for was standing anywhere — so the first thing they saw
+## of their own game was "In the next one!".
+func open_round_if_waiting() -> void:
 	if game_mode == "creative" or match_phase != "IDLE" or battle == null:
 		return
 	battle.open_lobby()
@@ -2012,6 +2006,12 @@ signal scoreboard_changed
 ## Can a shot get from `from` to `to` without a block in the way? Walked
 ## in short steps rather than a proper DDA — plenty for deciding whether
 ## a computer player can see you, and cheap enough to run per shot.
+## THE HOT LOOP OF THE WHOLE SERVER. Every computer player's "can I see
+## you" is one of these per candidate, several times a second, and every
+## sample along the ray was a full get_block(): a bounds check, a division,
+## two modulos and a dictionary hit. Now a ray holds on to the chunk it is
+## in and only looks another one up when it crosses a boundary — most
+## rays never leave the chunk they started in.
 func clear_shot(from: Vector3, to: Vector3) -> bool:
 	if store == null:
 		return true
@@ -2022,10 +2022,20 @@ func clear_shot(from: Vector3, to: Vector3) -> bool:
 	var steps := int(dist * 2.0)
 	var step := span / float(maxi(steps, 1))
 	var at := from
+	var last_cpos := Vector2i(1 << 30, 1 << 30)
+	var data := PackedByteArray()
 	for i in range(1, steps):
 		at += step
-		var cell := Vector3i(floori(at.x), floori(at.y), floori(at.z))
-		var block := store.get_block(cell)
+		var cy := floori(at.y)
+		if cy < 0 or cy >= WorldGen.CHUNK_H:
+			continue
+		var cx := floori(at.x)
+		var cz := floori(at.z)
+		var cpos := Vector2i(cx >> 4, cz >> 4)
+		if cpos != last_cpos:
+			data = store.get_chunk(cpos)
+			last_cpos = cpos
+		var block := data[WorldGen.idx(cx & 15, cy, cz & 15)]
 		if block != Blocks.AIR and not Blocks.is_liquid(block) \
 				and not Blocks.is_cross(block):
 			return false
@@ -2359,8 +2369,11 @@ func cl_eliminated(id: String) -> void:
 signal match_won(winner: int)
 
 @rpc("authority", "reliable")
-func cl_match_end(winner: int) -> void:
+func cl_match_end(winner: int, seconds := 0.0) -> void:
 	match_phase = "END"
+	# How long the table is up before the next round opens, so the card
+	# can say so. Ticked down locally like every other phase.
+	match_seconds = seconds
 	match_changed.emit()
 	match_won.emit(winner)
 	Sfx.play("cheer")

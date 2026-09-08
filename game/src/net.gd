@@ -17,6 +17,10 @@ signal connection_failed
 signal server_disconnected
 
 var is_server := false
+## WORLD_NETSTAT=1: the server reports its packets, its tick rate and
+## where each frame went, every five seconds. Read once — it is asked
+## about several times a frame, and an environment lookup is a syscall.
+var netstat := EnvConfig.flag("WORLD_NETSTAT")
 
 func _ready() -> void:
 	multiplayer.connected_to_server.connect(func() -> void: connected_to_server.emit())

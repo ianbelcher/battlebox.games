@@ -49,6 +49,30 @@ var _inflight: Dictionary = {}      # cpos -> submit time msec
 func loaded_count() -> int:
 	return _data.size()
 
+## How many chunks the current view wants, and how many of those are
+## here — so a loading screen can say "38 of 90" rather than spin.
+var _wanted_count := 0
+var _wanted_here := 0
+var _wanted_meshed := 0
+
+func wanted_count() -> int:
+	return _wanted_count
+
+func wanted_here() -> int:
+	return _wanted_here
+
+## ...and how many of those have been meshed at least once — which is
+## what "the world is on screen" actually means. `first_chunks_ready`
+## waits for the WHOLE mesh queue to drain, and the queue is refilled by
+## the prefetch for the first twenty seconds, so gating arrival on it
+## kept the loading screen up long after the ground under the player was
+## drawn. This counts only what the view asked for.
+func wanted_meshed() -> int:
+	return _wanted_meshed
+
+func view_ready() -> bool:
+	return _wanted_count > 0 and _wanted_meshed >= _wanted_count
+
 func _exit_tree() -> void:
 	_mesh_exit = true
 	for i in _mesh_threads.size():
@@ -129,8 +153,14 @@ func _refresh_interest() -> void:
 	# Request whatever is missing, nearest first.
 	var missing: Array[Vector2i] = []
 	var now := Time.get_ticks_msec()
+	_wanted_count = wanted.size()
+	_wanted_here = 0
+	_wanted_meshed = 0
 	for cpos: Vector2i in wanted.keys():
 		if _data.has(cpos):
+			_wanted_here += 1
+			if _holders.has(cpos):
+				_wanted_meshed += 1
 			continue
 		if _pending.has(cpos) and now - _pending[cpos] < REQUEST_RETRY_SECONDS * 1000.0:
 			continue
