@@ -832,20 +832,24 @@ func _add_player_row(grid: GridContainer, id: String, team_count: int,
 	# "the little one gets eight and the rest of us get two".
 	var hearts_btn := Button.new()
 	hearts_btn.focus_mode = Control.FOCUS_ALL
-	var current: int = int(world.hearts_max.get(id, WorldNode.MATCH_HP)) if world != null \
-		else int(WorldNode.MATCH_HP)
-	hearts_btn.text = "♥ %d" % current
+	# THE COUNT LIVES ON THE BUTTON, not in a local: a GDScript lambda
+	# captures by value at creation, so a local `current` was eight on
+	# every press, every press computed four, and the button was stuck.
+	hearts_btn.set_meta("hearts", int(world.hearts_max.get(id, WorldNode.MATCH_HP))
+		if world != null else int(WorldNode.MATCH_HP))
+	hearts_btn.text = "♥ %d" % int(hearts_btn.get_meta("hearts"))
 	hearts_btn.tooltip_text = "How many hearts %s starts a round with" % str(entry.name)
 	_min(hearts_btn, 64, 44)
 	_font(hearts_btn, UiTheme.T_BODY)
 	hearts_btn.pressed.connect(func() -> void:
 		var ladder: Array = GameSetup.HEARTS
-		var at := ladder.find(current)
-		current = int(ladder[(at - 1 + ladder.size()) % ladder.size()]) if at >= 0 \
+		var at := ladder.find(int(hearts_btn.get_meta("hearts")))
+		var next: int = int(ladder[(at - 1 + ladder.size()) % ladder.size()]) if at >= 0 \
 			else int(GameSetup.DEFAULT_HEARTS)
-		hearts_btn.text = "♥ %d" % current
+		hearts_btn.set_meta("hearts", next)
+		hearts_btn.text = "♥ %d" % next
 		if world != null:
-			world.sv_set_hearts.rpc_id(1, id, current)
+			world.sv_set_hearts.rpc_id(1, id, next)
 		Sfx.play("tick", -8.0))
 	who.add_child(hearts_btn)
 	name_edit.text_submitted.connect(func(text: String) -> void:

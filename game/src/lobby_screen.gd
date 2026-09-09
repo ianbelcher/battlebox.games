@@ -53,7 +53,7 @@ const CONTROL_HEIGHT := 52
 const HERO_WIDTH := 620
 const LIST_WIDTH := 560
 ## The setup screen's panel.
-const SETUP_WIDTH := 940
+const SETUP_WIDTH := 1040
 ## The bar pinned to the bottom of the setup screen: the button in it, and
 ## the air above and below. Its HEIGHT is these added up rather than a
 ## number of its own — it was 96, which is not 60 plus 18 twice, so the
@@ -94,10 +94,9 @@ var _list_offset: Control
 # --- new game ---
 var _name_edit: LineEdit
 var _create_button: Button
-## The settings most people never touch, folded under one row.
-var _more_box: VBoxContainer
-var _more_toggle: Button
-var _more_summary: Label
+## The cards the settings are grouped into, each with its fields, so a
+## card the mode has emptied can be hidden whole.
+var _setup_cards: Array = []
 var _wanted: Dictionary = {}
 ## field name -> {value: Button}. Repainted, never rebuilt.
 var _choices: Dictionary = {}
@@ -197,6 +196,10 @@ func _build() -> void:
 	_home = _build_home()
 	add_child(_home)
 	_setup = _build_setup()
+	# The dropdowns and their menus take their clothes from the theme
+	# rather than from per-control overrides; the sheet is the one screen
+	# here with controls that have a menu.
+	_setup.theme = UiTheme.build(_scale)
 	_setup.visible = false
 	add_child(_setup)
 	_code_panel = _build_code_panel()
@@ -622,100 +625,72 @@ func _build_setup() -> Control:
 	_name_edit.max_length = 32
 	_name_edit.text_submitted.connect(func(_t: String) -> void: _create())
 	name_row.add_child(_name_edit)
-	name_card.add_child(_gap(2))
-	# TWO CHOICES SIDE BY SIDE, like every other setting on this screen.
-	#
-	# It was one button with the current state written on it, which is a
-	# control nobody can read: "Anyone can join" is equally plausibly what
-	# is true now and what pressing it will do. Every other answer on this
-	# page is a row you pick from, and this is an answer like any other.
-	_build_choice_field(name_card, "private", "Who can join?", [
-		{"value": false, "label": "Anyone can join"},
-		{"value": true, "label": "Private — only with the code"}], "")
+	_build_choice_row(name_card, "private", "Who can join", [
+		{"value": false, "label": "Anyone"},
+		{"value": true, "label": "Only with the code"}], "")
 
 	# --- the mode, and then everything the mode implies ---------------
 	_build_mode_field(column)
-	_build_map_field(column)
-	_build_choice_field(column, "minutes", "How long is a round?",
-		_length_options(), "")
-	_build_choice_field(column, "target", "Captures to win",
-		_target_options(), "")
-	_build_choice_field(column, "teams", "How many teams?", _team_options(), "")
-	_build_choice_field(column, "players", "How many players?",
-		_player_options(), GameSetup.seats_note(GameSetup.DEFAULT_PLAYERS))
 
-	# --- and the rest, folded away --------------------------------------
-	# Ten rows of questions is a form, and a form is what this screen
-	# was: on a 1280x800 window the teams row was already off the bottom.
-	# The four that decide what the game IS stay up; the four that tune
-	# it sit under one line that says what they are currently set to, so
-	# nothing is hidden, only folded.
-	column.add_child(_build_more_toggle())
-	_more_box = VBoxContainer.new()
-	_more_box.add_theme_constant_override("separation", _px(26))
-	_more_box.visible = false
-	column.add_child(_more_box)
-	_build_choice_field(_more_box, "size", "How big is the world?",
-		_size_options(), "")
-	_build_choice_field(_more_box, "fly", "Who can fly?", _fly_options(), "")
-	_build_choice_field(_more_box, "revive", "Getting back up",
-		_revive_options(), "")
-	_build_choice_field(_more_box, "drop", "When you are knocked out",
-		_drop_options(), "")
-	_build_choice_field(_more_box, "hearts", "Hearts for people", _hearts_options(), "")
-	_build_choice_field(_more_box, "bot_hearts", "Hearts for computer players",
-		_hearts_options(), "")
-	_build_choice_field(_more_box, "enemies", "Who shows on the map?", [
+	# EVERY SETTING ON THE PAGE, IN GROUPS, IN TWO COLUMNS. There was a
+	# fold — "More options", with the folded rows summarised in a line
+	# beside it — and it was the worst thing on the sheet: half the game
+	# hidden behind a button, and a row of chips per setting that ran to
+	# ten buttons for the teams. A dropdown holds ten answers in the
+	# space of one, so the whole sheet fits on a laptop screen with
+	# nothing tucked away, grouped by what it is about.
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", _px(20))
+	grid.add_theme_constant_override("v_separation", _px(20))
+	column.add_child(grid)
+
+	# Four cards of a size: the world and the players across the top,
+	# the round and the knockout rules underneath.
+	var world_card := _setup_group(grid, "The world", ["map", "size", "fly"])
+	_build_map_field(world_card)
+	_build_choice_row(world_card, "size", "How big", _size_options(), "")
+	_build_choice_row(world_card, "fly", "Flying", _fly_options(), "")
+
+	var people_card := _setup_group(grid, "The players",
+		["players", "teams", "hearts", "bot_hearts"])
+	_build_choice_row(people_card, "players", "How many", _player_options(),
+		GameSetup.seats_note(GameSetup.DEFAULT_PLAYERS))
+	_build_choice_row(people_card, "teams", "Teams", _team_options(), "")
+	_build_choice_row(people_card, "hearts", "Hearts, people", _hearts_options(), "")
+	_build_choice_row(people_card, "bot_hearts", "Hearts, computers", _hearts_options(), "")
+
+	var round_card := _setup_group(grid, "The round", ["minutes", "target", "enemies"])
+	_build_choice_row(round_card, "minutes", "Round length", _length_options(), "")
+	_build_choice_row(round_card, "target", "Captures to win", _target_options(), "")
+	_build_choice_row(round_card, "enemies", "On the map", [
 		{"value": true, "label": GameSetup.enemies_label(true)},
 		{"value": false, "label": GameSetup.enemies_label(false)}], "")
+
+	var rules_card := _setup_group(grid, "Being knocked out", ["revive", "drop"])
+	_build_choice_row(rules_card, "revive", "Getting back up", _revive_options(), "")
+	_build_choice_row(rules_card, "drop", "Your weapons", _drop_options(), "")
 
 	root.add_child(_build_action_bar())
 	_refresh_setup()
 	return root
 
-## The row that opens the folded settings: a button, and beside it what
-## they are set to right now.
-func _build_more_toggle() -> Control:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", _px(14))
-	_more_toggle = _ghost_button("More options", UiTheme.T_LABEL)
-	_more_toggle.custom_minimum_size = Vector2(_px(180), _px(46))
-	_more_toggle.pressed.connect(_toggle_more)
-	row.add_child(_more_toggle)
-	_more_summary = _text("", UiTheme.T_NOTE, UiTheme.INK_FAINT)
-	_more_summary.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_more_summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_more_summary.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	row.add_child(_more_summary)
-	return row
-
-func _toggle_more() -> void:
-	if _more_box == null:
-		return
-	_more_box.visible = not _more_box.visible
-	_more_toggle.text = "  %s  " % ("Fewer options" if _more_box.visible else "More options")
-	_more_summary.visible = not _more_box.visible
-	Sfx.play("tick", -8.0)
-
-## What the folded rows say, in one line, for the mode in play: the
-## rows a mode does not ask are left out of it too.
-func _more_summary_text() -> String:
-	var mode := str(_wanted.get("mode", GameSetup.DEFAULT_MODE))
-	var parts: Array = [GameSetup.size_label(int(_wanted.get("size", GameSetup.DEFAULT_SIZE))),
-		GameSetup.fly_label(str(_wanted.get("fly", "nobody")))]
-	if GameSetup.uses("revive", mode):
-		parts.append(ReviveRule.label(int(_wanted.get("revive", ReviveRule.MATES_AND_FLAG))))
-	if GameSetup.uses("drop", mode):
-		parts.append("Drop your weapons" if bool(_wanted.get("drop", false))
-			else "Keep your weapons")
-	if GameSetup.uses("hearts", mode):
-		parts.append("%s · computers %s" % [
-			GameSetup.hearts_label(int(_wanted.get("hearts", GameSetup.DEFAULT_HEARTS))),
-			GameSetup.hearts_label(int(_wanted.get("bot_hearts", GameSetup.DEFAULT_HEARTS)))])
-	if GameSetup.uses("enemies", mode):
-		parts.append("Everybody on the map" if bool(_wanted.get("enemies", true))
-			else "Only your team on the map")
-	return "  ·  ".join(parts)
+## One card in the grid: a heading and the rows that belong under it.
+## Remembered with its fields, so a card whose every row the mode has
+## hidden goes with them rather than standing there empty.
+func _setup_group(grid: Control, title: String, fields: Array) -> VBoxContainer:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UiTheme.card_box(_scale))
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.size_flags_vertical = Control.SIZE_FILL
+	grid.add_child(card)
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", _px(10))
+	card.add_child(inner)
+	inner.add_child(_eyebrow(title))
+	inner.add_child(_gap(2))
+	_setup_cards.append({"card": card, "fields": fields})
+	return inner
 
 ## What you are about to make, and the button that makes it. Pinned to
 ## the bottom of the screen, so it is on screen whatever the window is
@@ -766,7 +741,15 @@ func _build_action_bar() -> Control:
 ## The mode: bigger than the rest, because it decides which of the rest
 ## are even asked.
 func _build_mode_field(parent: Control) -> void:
-	var group := _group(parent, "mode", "How are we playing?", "")
+	# Its own layout: an eyebrow over a row of tiles. The labelled-row
+	# helper the dropdowns use would put the tiles beside the caption in
+	# the space a dropdown takes, and four tiles in that space is four
+	# vertical slivers with one letter per line.
+	var group := VBoxContainer.new()
+	group.add_theme_constant_override("separation", _px(8))
+	parent.add_child(group)
+	group.add_child(_eyebrow("How are we playing?"))
+	_groups["mode"] = group
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", _px(10))
 	group.add_child(row)
@@ -783,26 +766,28 @@ func _build_map_field(parent: Control) -> void:
 	var options: Array = []
 	for spec: Dictionary in GameSetup.MAPS:
 		options.append({"value": str(spec["key"]), "label": str(spec["label"])})
-	_build_choice_field(parent, "map", "Which world?", options, "")
+	_build_choice_row(parent, "map", "Which world", options, "")
 
-## A labelled row of one-out-of-several buttons. Every field below the
-## mode is one of these, which is what keeps them all the same size, the
-## same shape and the same distance apart.
-func _build_choice_field(parent: Control, field: String, title: String,
+## A labelled DROPDOWN: the setting's name on the left, an OptionButton
+## holding every answer on the right. One row per setting, all the same
+## height, which is what lets fourteen of them share a screen.
+func _build_choice_row(parent: Control, field: String, title: String,
 		options: Array, note: String) -> void:
-	var group := _group(parent, field, title, note)
-	var row := HFlowContainer.new()
-	row.add_theme_constant_override("h_separation", _px(8))
-	row.add_theme_constant_override("v_separation", _px(8))
-	group.add_child(row)
-	var buttons: Dictionary = {}
+	var row := _group(parent, field, title, note)
+	var pick := OptionButton.new()
+	pick.custom_minimum_size = Vector2(0, _px(46))
+	pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pick.focus_mode = Control.FOCUS_ALL
+	pick.fit_to_longest_item = false
+	var values: Array = []
 	for option: Dictionary in options:
-		var value: Variant = option["value"]
-		var chip := _chip(str(option["label"]))
-		chip.pressed.connect(func() -> void: _pick(field, value))
-		row.add_child(chip)
-		buttons[value] = chip
-	_choices[field] = buttons
+		pick.add_item(str(option["label"]))
+		values.append(option["value"])
+	pick.set_meta("values", values)
+	pick.item_selected.connect(func(index: int) -> void:
+		_pick(field, values[index]))
+	row.add_child(pick)
+	_choices[field] = pick
 
 func _size_options() -> Array:
 	var out: Array = []
@@ -893,18 +878,26 @@ func _refresh_setup() -> void:
 			# game's, so GameSetup has no opinion about it and it is
 			# always asked.
 			group.visible = field == "private" or GameSetup.uses(field, mode)
-		var buttons: Dictionary = _choices[field]
-		for value: Variant in buttons:
-			_paint_choice(buttons[value], value == _wanted.get(field))
-	# The length row is shared between the two clocked modes, so the
-	# lengths the OTHER one offers are disabled rather than removed: a row
-	# that changes width when you pick a mode is a row that moves the
-	# button under your finger.
-	if _choices.has("minutes"):
-		var allowed := GameSetup.lengths_for(mode)
-		for value: Variant in _choices["minutes"]:
-			var btn: Button = _choices["minutes"][value]
-			btn.disabled = not (int(value) in allowed)
+		# The mode is a row of tiles, painted; everything else is a
+		# dropdown, selected.
+		var control: Variant = _choices[field]
+		if control is Dictionary:
+			for value: Variant in control:
+				_paint_choice(control[value], value == _wanted.get(field))
+			continue
+		var pick: OptionButton = control
+		var values: Array = pick.get_meta("values", [])
+		var at := values.find(_wanted.get(field))
+		if at >= 0 and pick.selected != at:
+			pick.select(at)
+	# A card with nothing left in it for this mode goes too.
+	for entry: Dictionary in _setup_cards:
+		var any := false
+		for field: String in entry["fields"]:
+			var group: Control = _groups.get(field)
+			if group != null and group.visible:
+				any = true
+		(entry["card"] as Control).visible = any
 	# HOW MANY EACH SIDE GETS. The number of players and the number of
 	# teams are two rows apart and only mean anything together, so the
 	# players row is re-labelled whenever the teams change rather than
@@ -915,8 +908,6 @@ func _refresh_setup() -> void:
 		var note: Label = _notes.get("players")
 		if note != null:
 			note.text = GameSetup.seats_note(int(_wanted.get("players", 0)), split)
-	if _more_summary != null:
-		_more_summary.text = _more_summary_text()
 
 
 ## Back to the front, from outside. main.gd calls this when somebody
@@ -1206,25 +1197,31 @@ func _dot(color: Color) -> Control:
 	pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return pill
 
-## A titled block on the setup screen, remembered so the mode can hide it.
+## A titled ROW on the setup screen: the setting's name on the left in
+## a fixed column so every dropdown in a card lines up, the control
+## beside it in the HBox this returns, and a note underneath when there
+## is one. Remembered by field so the mode can hide it.
 func _group(parent: Control, field: String, title: String,
-		note: String) -> VBoxContainer:
+		note: String) -> HBoxContainer:
 	var group := VBoxContainer.new()
-	group.add_theme_constant_override("separation", _px(8))
+	group.add_theme_constant_override("separation", _px(4))
 	parent.add_child(group)
-	group.add_child(_eyebrow(title))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _px(12))
+	group.add_child(row)
+	var caption := _text(title, UiTheme.T_LABEL, UiTheme.INK_DIM)
+	caption.custom_minimum_size = Vector2(_px(150), 0)
+	caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(caption)
 	if not note.is_empty():
 		var note_label := _text(note, UiTheme.T_NOTE, UiTheme.INK_FAINT, true)
 		group.add_child(note_label)
 		_notes[field] = note_label
-	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", _px(8))
-	group.add_child(body)
 	# Keyed by the FIELD, which is what _refresh_setup hides it by. Keyed
 	# by its title it looked right and never hid anything, because no mode
 	# has a setting called "How long is a round?".
 	_groups[field] = group
-	return body
+	return row
 
 func _card(parent: Control) -> VBoxContainer:
 	var card := PanelContainer.new()
@@ -1323,12 +1320,6 @@ func _ghost_button(label: String, size: int) -> Button:
 		button.add_theme_stylebox_override(state,
 			UiTheme.flat(UiTheme.SURFACE_3, UiTheme.R_CONTROL, _scale, 1.0,
 				UiTheme.ACCENT))
-	return button
-
-## One choice out of a row of them.
-func _chip(label: String) -> Button:
-	var button := _ghost_button(label, UiTheme.T_LABEL)
-	button.custom_minimum_size = Vector2(0, _px(46))
 	return button
 
 ## A mode: a name, and one line saying what it is. Bigger than a chip

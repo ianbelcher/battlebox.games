@@ -315,6 +315,39 @@ static func build(sc: float) -> Theme:
 	t.set_color("font_disabled_color", "Button", INK_FAINT)
 	t.set_constant("h_separation", "Button", px(8, sc))
 
+	# ---- OptionButton: a Button with a menu, in the same clothes. Its
+	# theme type does NOT inherit Button's, so every stylebox is set again.
+	for spec in [["normal", b_normal], ["hover", b_hover], ["pressed", b_pressed],
+			["disabled", b_disabled], ["focus", b_focus]]:
+		t.set_stylebox(str(spec[0]), "OptionButton", spec[1])
+	t.set_font_size("font_size", "OptionButton", px(T_BODY, sc))
+	t.set_color("font_color", "OptionButton", INK)
+	t.set_color("font_hover_color", "OptionButton", Color.WHITE)
+	t.set_color("font_pressed_color", "OptionButton", ON_ACCENT)
+	t.set_color("font_focus_color", "OptionButton", INK)
+	t.set_color("font_disabled_color", "OptionButton", INK_FAINT)
+	t.set_constant("arrow_margin", "OptionButton", px(10, sc))
+	t.set_constant("modulate_arrow", "OptionButton", 1)
+
+	# ---- PopupMenu: the dropped-down list. A raised card with the rows
+	# lit in ember on hover, so it reads as the same surface family as
+	# the panel it fell out of rather than an operating-system menu.
+	var menu := flat(SURFACE_2, R_CARD, sc, 1.0, LINE)
+	menu.set_content_margin_all(px(6, sc))
+	menu.shadow_color = Color(0, 0, 0, 0.6)
+	menu.shadow_size = px(18, sc)
+	menu.shadow_offset = Vector2(0, px(6, sc))
+	t.set_stylebox("panel", "PopupMenu", menu)
+	var item_hover := flat(ACCENT_SOFT, R_CONTROL, sc, 1.0, Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.6))
+	t.set_stylebox("hover", "PopupMenu", item_hover)
+	t.set_font_size("font_size", "PopupMenu", px(T_BODY, sc))
+	t.set_color("font_color", "PopupMenu", INK)
+	t.set_color("font_hover_color", "PopupMenu", INK)
+	t.set_color("font_disabled_color", "PopupMenu", INK_FAINT)
+	t.set_constant("v_separation", "PopupMenu", px(6, sc))
+	t.set_constant("item_start_padding", "PopupMenu", px(14, sc))
+	t.set_constant("item_end_padding", "PopupMenu", px(14, sc))
+
 	# ---- LineEdit
 	var e_normal := flat(Color(0, 0, 0, 0.35), R_CONTROL, sc, 1.0, LINE)
 	e_normal.content_margin_left = px(12, sc)
