@@ -141,6 +141,10 @@ func open_lobby() -> void:
 			and not (world.selected_map == world.store.theme and world.store.current_map_key.is_empty()):
 		world._do_world_reset(world.selected_map)
 	_assign_stray_humans()
+	# AT THE LOBBY TOO, not only at the drop: the card that counts the
+	# round down reads the roster, and a survivor bitten last round was
+	# still on the horde's side until the drop re-dealt them.
+	_let_the_mode_deal()
 	world.monsters_by_id.clear()
 	# Nobody is moved for the LOBBY. Herding every player and computer
 	# player onto the spawn point between battles put the whole table in
@@ -149,7 +153,7 @@ func open_lobby() -> void:
 	# battle actually starts, which is the only placement that matters.
 	world.match_phase = "LOBBY"
 	_timer = world.LOBBY_SECONDS
-	print("%s lobby open" % ("Capture the flag" if world.ctf.active() else "Battle royale"))
+	print("%s lobby open" % world.rules.label)
 	world.cl_match.rpc("LOBBY", world.LOBBY_SECONDS)
 
 func _assign_stray_humans() -> void:
@@ -184,59 +188,20 @@ func tick(delta: float) -> void:
 		"SETUP":
 			if _timer <= 0.0:
 				world.match_phase = "BATTLE"
-				# Last flag standing has a round length of its own: it is
-				# not a storm closing in, it is how long you have to hold
-				# what you built.
-				_timer = holdout_seconds() \
-					if world.ctf.elimination() else world.storm_minutes * 60.0
-				if world.ctf.elimination():
-					print("HOLDOUT: round is %.0f seconds" % _timer)
+				# How long a round runs is the mode's to say: a storm's
+				# closing, a clock, or forever.
+				_timer = world.rules.round_seconds(world)
+				if world.rules.has_clock() and not world.rules.has_storm():
+					print("%s: round is %.0f seconds" % [world.rules.label, _timer])
 				world.cl_match.rpc("BATTLE", _timer)
 		"BATTLE":
-			if world.ctf.elimination():
-				# LAST FLAG STANDING runs on a clock, because two teams
-				# properly dug in will never finish each other off — and
-				# that stalemate is a real result here rather than a
-				# failure, so it has to be allowed to end and score.
-				world.storm_radius = -1.0
-				# NO SECOND SUBTRACTION. `_timer -= delta` already ran at
-				# the top of this function, for every phase — so taking it
-				# off again here ran the round clock at DOUBLE SPEED. Ten
-				# minutes on the display elapsed in five of playing, and
-				# the round ended while the clock still read half of what
-				# was left. Reported as "counts down from 10 minutes but
-				# ends at 4 minutes — a really bad problem".
-				_tick_slow(delta)
-				world.bots.tick_orbs(delta)
-				tick_revives(delta)
-				world.ctf.tick(delta)
-				world.match_seconds = maxf(0.0, _timer)
-				if _timer <= 0.0:
-					end_holdout()
-				else:
-					check_holdout_over()
-				return
-			if world.ctf.active():
-				# No storm and no clock — capture the flag runs until
-				# somebody reaches the target score.
-				_timer = 9999.0
-				world.storm_radius = -1.0
-				_tick_slow(delta)
-				world.bots.tick_orbs(delta)
-				tick_revives(delta)
-				world.ctf.tick(delta)
-				check_win()
-				return
-			if world.storm_minutes >= 59.0:
-				# Unlimited: the storm never closes and the match only ends
-				# when one team is left standing.
-				_timer = 9999.0
-			var storm := StormClock.at(_timer, world.storm_minutes * 60.0, storm_start_radius())
-			world.storm_radius = float(storm.radius)
-			world.cl_storm.rpc(world.storm_radius, world.storm_center, float(storm.seconds))
-			_say_storm_stage()
-			if world.storm_radius >= 0.0:
-				_storm_damage()
+			# THE MODE SAYS WHAT A TICK IS. Storm, clock, flags and the win
+			# are each asked of it rather than of its name, and the order
+			# is the one every mode shares: the world moves, the flags
+			# move, the clock or the storm does its thing, and then
+			# somebody may have won.
+			var rules: GameMode = world.rules
+			if rules.flag_loss_is_out():
 				_storm_bite()
 			world.stats.lap("match_storm")
 			_tick_slow(delta)
@@ -247,6 +212,32 @@ func tick(delta: float) -> void:
 			world.stats.lap("match_orbs")
 			tick_revives(delta)
 			world.stats.lap("match_revives")
+			if rules.has_flags():
+				world.ctf.tick(delta)
+			if rules.has_storm():
+				if world.storm_minutes >= 59.0:
+					# Unlimited: the storm never closes and the match only
+					# ends when one team is left standing.
+					_timer = 9999.0
+				var storm := StormClock.at(_timer, world.storm_minutes * 60.0, storm_start_radius())
+				world.storm_radius = float(storm.radius)
+				world.cl_storm.rpc(world.storm_radius, world.storm_center, float(storm.seconds))
+				_say_storm_stage()
+				if world.storm_radius >= 0.0:
+					_storm_damage()
+					_storm_bite()
+				world.stats.lap("match_storm")
+			elif rules.has_clock():
+				# NO SECOND SUBTRACTION. `_timer -= delta` already ran at
+				# the top of this function, for every phase — so taking it
+				# off again here ran the round clock at DOUBLE SPEED.
+				world.match_seconds = maxf(0.0, _timer)
+				if _timer <= 0.0:
+					rules.on_time_up(world)
+					return
+			else:
+				# No clock: the round runs until the mode says it is won.
+				_timer = 9999.0
 			check_win()
 			world.stats.lap("match_win")
 		"END":
@@ -261,12 +252,23 @@ func tick(delta: float) -> void:
 				# (see _open_round_if_waiting).
 				if world.match_loop and people_present():
 					open_lobby()
-					print("%s loop: fresh lobby open" % ("Capture the flag" if world.ctf.active() else "Battle royale"))
+					print("%s loop: fresh lobby open" % world.rules.label)
 				else:
 					world.match_phase = "IDLE"
 					world.cl_match.rpc("IDLE", 0.0)
 					if not people_present():
 						print("%s over and nobody here: waiting for somebody" % what_this_is())
+
+## The mode has the last word on who is on which side, and may name the
+## sides — zombies puts the people on one and the horde on the other,
+## whatever the balance came to.
+func _let_the_mode_deal() -> void:
+	world.rules.deal_teams(world)
+	var names: Array = world.rules.team_names()
+	if not names.is_empty():
+		world.team_names = names.duplicate()
+		world.cl_teams.rpc(world.team_names)
+	Game.cl_roster.rpc(Game.roster)
 
 ## Everyone gets a team (auto-balanced if unpicked), full hearts, and a drop
 ## point high above a spread ring. Gliding down is automatic.
@@ -312,6 +314,8 @@ func drop_everyone() -> void:
 					best = t
 			e.team = best
 			counts[best] += 1
+
+	_let_the_mode_deal()
 
 	# Seat order, fixed by SORTED id rather than by roster order. Roster
 	# order changes whenever somebody joins, leaves or rejoins, so using it
@@ -369,7 +373,7 @@ func drop_everyone() -> void:
 		var seat := maxi(seats_here.find(id), 0)
 		var drop := world.ctf.home_spot(team_i, seat) if world.ctf.active() \
 			else team_start_spot(team_i, seat)
-		world.cl_stand.rpc(id, drop, world.loot_only, Weapons.starting_kit(world.game_mode), true)
+		world.cl_stand.rpc(id, drop, world.loot_only, world.rules.kit(world, id), true)
 		if world.bots.roster.has(id):
 			world.bots.roster[id].pos = drop
 			# WORLD_BOT_WEAPON=<id>: hand every computer player that weapon
@@ -451,7 +455,14 @@ func drop_everyone() -> void:
 	print("Battle loot: %d/%d crates placed (%d attempts)" % [placed, crate_count, attempts])
 	world.survival.broadcast_crates()
 	Game.cl_roster.rpc(Game.roster)
-	world.storm_radius = storm_start_radius()
+	# NO STORM IN A MODE THAT HAS NONE, and everybody told so. This was
+	# set for every mode and sent to every client on its hello, and the
+	# flag modes cleared it on the server every tick without ever saying
+	# so — a capture the flag round went red to the horizon on screen
+	# while nobody lost a heart to it.
+	world.storm_radius = storm_start_radius() if world.rules.has_storm() else -1.0
+	if not world.rules.has_storm():
+		world.cl_storm.rpc(-1.0, Vector3.ZERO, 0.0)
 	# The circle closes on a RANDOM spot each battle, and the wall starts
 	# beyond the arena edge so no red is visible at the drop.
 	var storm_angle := randf() * TAU
@@ -560,6 +571,14 @@ func eliminate(id: String, attacker := "") -> void:
 	# Every knockout, downed or out — the computer players read this to
 	# work out which approaches have been turning into trenches.
 	world.remember_scar(fell_at)
+	# THE MODE MAY HAVE OTHER IDEAS than the revive ladder: a zombie
+	# stands straight back up with the horde, a bitten survivor stands
+	# up as one of them.
+	var verdict := world.rules.on_knockout(world, id)
+	if verdict == "convert" or verdict == "respawn":
+		_emit_feed(id, attacker)
+		_stand_again(id, verdict == "convert")
+		return
 	# Reviving is a mode setting in capture the flag: with it off, a
 	# knockout puts you straight OUT and the only way back is
 	# your own flag.
@@ -580,6 +599,35 @@ func eliminate(id: String, attacker := "") -> void:
 	world.out_ids[id] = true
 	world.cl_eliminated.rpc(id)
 	_emit_feed(id, attacker)
+	check_win()
+
+## Back on your feet where your side starts, with its kit and its
+## hearts — and on the OTHER side, if the mode has just taken you.
+func _stand_again(id: String, switch_sides: bool) -> void:
+	if switch_sides:
+		var was := int(Game.roster.get(id, {}).get("team", 0))
+		var to := 0
+		for t in world.team_count:
+			if t != was:
+				to = t
+				break
+		Game.roster[id].team = to
+		var seats: PackedStringArray = team_seats.get(to, PackedStringArray())
+		if seats.find(id) < 0:
+			seats.append(id)
+			team_seats[to] = seats
+		Game.cl_roster.rpc(Game.roster)
+	var team := int(Game.roster.get(id, {}).get("team", 0))
+	var seats_here: PackedStringArray = team_seats.get(team, PackedStringArray())
+	var spot := team_start_spot(team, maxi(seats_here.find(id), 0))
+	var state: Dictionary = world.player_state.get(id, {})
+	if not state.is_empty():
+		state.hp = world.max_hp(id)
+		state.pos = spot
+	if world.bots.roster.has(id):
+		world.bots.roster[id].pos = spot
+	world.send_hearts(id)
+	world.cl_stand.rpc(id, spot, world.loot_only, world.rules.kit(world, id), true)
 	check_win()
 
 ## One feed line per knockout — downs included (that IS the kill as far
@@ -729,7 +777,7 @@ func _tick_regen() -> void:
 		var state: Dictionary = world.player_state.get(id, {})
 		if state.is_empty() or int(state.get("hp", world.MATCH_HP)) >= world.max_hp(id):
 			continue
-		if now - int(_last_regen_ms.get(id, 0)) < 3000:
+		if now - int(_last_regen_ms.get(id, 0)) < world.rules.regen_ms(world, id):
 			continue
 		_last_regen_ms[id] = now
 		state.hp = int(state.get("hp", world.MATCH_HP)) + 1
@@ -841,16 +889,11 @@ func check_win() -> void:
 	if Game.roster.is_empty():
 		finish(-2)
 		return
-	# Capture the flag is decided ON THE SCOREBOARD, never by clearing the
-	# other team out: knocking someone down only buys you the time it takes
-	# them to get home. Ending it here would turn it back into a battle.
-	if world.ctf.active():
-		return
-	if teams_alive.size() <= 1:
-		var winner := -1
-		for t in teams_alive.keys():
-			winner = t
-		finish(winner)
+	# The mode decides. Capture the flag is settled on the scoreboard and
+	# says "keep going" here; a battle ends when one side is left.
+	var verdict := world.rules.winner(world, teams_alive.keys())
+	if verdict != GameMode.CONTINUE:
+		finish(verdict)
 
 func finish(winner: int) -> void:
 	world.match_phase = "END"
@@ -858,12 +901,7 @@ func finish(winner: int) -> void:
 	# next battle places everyone properly at their team's site, so there
 	# is nothing to see in between.
 	_timer = 14.0
-	var what := "Battle royale"
-	if world.ctf.elimination():
-		what = "Last flag standing"
-	elif world.ctf.active():
-		what = "Capture the flag"
-	print("%s over: team %d" % [what, winner])
+	print("%s over: team %d" % [world.rules.label, winner])
 	record_result(winner)
 	world.cl_match_end.rpc(winner, _timer)
 

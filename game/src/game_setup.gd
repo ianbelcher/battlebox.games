@@ -39,14 +39,10 @@ const FIELDS := ["mode", "map", "size", "minutes", "players", "target",
 const HEARTS := [1, 2, 4, 8]
 const DEFAULT_HEARTS := 8
 
-## HOW ARE WE PLAYING. `note` is the one line under the name on the tile —
-## what the mode IS, in the words a child would use, not its rules.
-const MODES := [
-	{"key": "creative", "label": "Just building", "note": "No rounds, nobody gets knocked out"},
-	{"key": "battle", "label": "Battle royale", "note": "Last one standing wins the round"},
-	{"key": "ctf", "label": "Capture the flag", "note": "Take theirs, keep hold of yours"},
-	{"key": "holdout", "label": "Last flag", "note": "Lose your flag and your team is out"},
-]
+## HOW ARE WE PLAYING. Read from the registry (GameModes), which is the
+## one place a mode is described: key, label, and the one line under the
+## name on the tile — what the mode IS, in the words a child would use.
+static var MODES: Array = GameModes.table()
 
 ## THE PROCEDURAL THEMES, and only those. A world imported from a
 ## Minecraft save (see mca.gd) lives in the SERVER's maps/ directory, so
@@ -190,44 +186,42 @@ static func opening_choice() -> Dictionary:
 # Which settings a mode actually has
 # ------------------------------------------------------------------
 
-## Does this mode have knockouts at all? Everything about being put on
-## the floor — reviving, dropping your weapons — is meaningless without
-## them, and showing those settings in creative is offering an answer to
-## a question the mode never asks.
+## The questions a mode answers about itself, asked of the mode rather
+## than of its name. Everything about being put on the floor — reviving,
+## dropping your weapons — is meaningless without knockouts, and showing
+## those settings in creative is offering an answer to a question the
+## mode never asks.
 static func has_knockouts(mode: String) -> bool:
-	return mode != "creative"
+	return GameModes.by_key(mode).has_knockouts()
 
-## Does this mode have flags?
 static func has_flags(mode: String) -> bool:
-	return mode == "ctf" or mode == "holdout"
+	return GameModes.by_key(mode).has_flags()
 
-## Does a round of this mode run on a clock?
 static func has_clock(mode: String) -> bool:
-	return mode == "battle" or mode == "holdout"
+	return GameModes.by_key(mode).has_clock()
 
-## Is there a score to reach? Capture the flag alone: last flag standing
-## is won by being the team still holding one, not by a total.
 static func has_target(mode: String) -> bool:
-	return mode == "ctf"
+	return GameModes.by_key(mode).has_target()
 
 ## Is `field` worth showing for this mode?
 static func uses(field: String, mode: String) -> bool:
+	var rules: GameMode = GameModes.by_key(mode)
 	match field:
 		"minutes":
-			return has_clock(mode)
+			return rules.has_clock()
 		"target":
-			return has_target(mode)
-		"revive", "drop":
-			return has_knockouts(mode)
+			return rules.has_target()
+		"revive", "drop", "hearts":
+			return rules.has_knockouts()
+		"bot_hearts":
+			return rules.uses_bot_hearts()
 		"enemies":
-			# Nobody is an opponent in creative.
-			return mode != "creative"
-		"hearts", "bot_hearts":
-			return has_knockouts(mode)
+			# Nobody is an opponent without rounds.
+			return rules.has_rounds()
 		"teams":
-			# Nobody is on a side in creative: there is nothing to be on a
-			# side FOR, and the colours are just colours.
-			return mode != "creative"
+			# Nobody is on a side in creative, and a mode with fixed sides
+			# does not ask.
+			return rules.picks_teams()
 		"fly":
 			return true
 		_:

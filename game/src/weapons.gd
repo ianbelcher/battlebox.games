@@ -70,7 +70,8 @@ const WEAPONS := [
 ## no scramble here — you start in your own base, on the ground, and the
 ## fight comes to you — so starting unable to shoot back is just a player
 ## standing in a doorway losing.
-const STARTING_KIT := [13, 14, 19]          # sword, flare gun, smoke bomb
+const SWORD := 13
+const STARTING_KIT := [SWORD, 14, 19]       # sword, flare gun, smoke bomb
 const STARTING_KIT_CTF := [0, 13, 14, 19]   # + little shooter, held
 
 ## THE ORDER OF THE TOOLS PAGE, which is not the order of this file.

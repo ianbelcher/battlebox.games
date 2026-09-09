@@ -135,13 +135,13 @@ func guarded(id: String) -> bool:
 
 ## Bases, poles and flags — the machinery both flag modes are built on.
 func active() -> bool:
-	return world.game_mode == "ctf" or world.game_mode == "holdout"
+	return world.rules.has_flags()
 
 ## LAST FLAG STANDING: the same board, one rule different. Losing your
 ## flag does not cost you a point, it costs you the round. See
 ## HoldoutRules.
 func elimination() -> bool:
-	return world.game_mode == "holdout"
+	return world.rules.flag_loss_is_out()
 
 ## Put a block down as part of building a base, remembering it for one
 ## bulk broadcast. Skips anything already correct so the payload is walls

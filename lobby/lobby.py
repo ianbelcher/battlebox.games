@@ -138,7 +138,7 @@ def free_port() -> int:
 # not work.
 # ---------------------------------------------------------------------
 
-MODES = ("creative", "battle", "ctf", "holdout")
+MODES = ("creative", "battle", "ctf", "holdout", "zombies")
 MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space", "caverns")
 SIZES = (50, 100, 200, 400, 800)
 FLY_ANSWERS = ("everyone", "nobody", "computers", "humans")

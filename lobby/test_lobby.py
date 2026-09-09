@@ -220,7 +220,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(lobby.clean_settings(asked), asked)
 
     def test_a_mode_nobody_has_written_is_not_started(self):
-        self.assertEqual(lobby.clean_settings({"mode": "zombies"})["mode"],
+        self.assertEqual(lobby.clean_settings({"mode": "hopscotch"})["mode"],
                          lobby.DEFAULT_SETTINGS["mode"])
 
     def test_a_room_nobody_configured_is_still_a_world_to_build_in(self):

@@ -49,8 +49,22 @@ var client_mode := "creative"
 ## flag standing are the same board — bases, poles, flags, the panel that
 ## lists them — and everything that draws that board wants both. The
 ## server-side twin is CtfDirector.active().
+## THE GAME BEING PLAYED, as an object with the answers (GameMode); the
+## server's follows game_mode, the client's client_mode.
+var rules: GameMode = GameModes.by_key("creative")
+var client_rules: GameMode = GameModes.by_key("creative")
+
+func set_game_mode(mode: String) -> void:
+	game_mode = mode
+	rules = GameModes.by_key(mode)
+	match_loop = rules.has_rounds()
+
+## The roster, for the modes, which must not name the Game autoload.
+func roster() -> Dictionary:
+	return Game.roster
+
 func flag_mode() -> bool:
-	return client_mode == "ctf" or client_mode == "holdout"
+	return client_rules.has_flags()
 var map_list: Array = []
 ## Low-res whole-island backdrop for the radar (192x192, 4 blocks/px) so
 ## the map shows the world beyond what's rendered, even on slow machines.
@@ -542,6 +556,7 @@ func sv_where(slot: int) -> void:
 			for t in counts.size():
 				if counts[t] < counts[team]:
 					team = t
+			team = rules.joiner_team(self, id, team)
 			Game.roster[id].team = team
 			Game.cl_roster.rpc(Game.roster)
 		var seats: PackedStringArray = battle.team_seats.get(team, PackedStringArray())
@@ -569,7 +584,7 @@ func sv_where(slot: int) -> void:
 		cl_treasures.rpc(id, 0)
 		send_hearts(id)
 		cl_where.rpc_id(peer, slot, spot, 0)
-		cl_stand.rpc(id, spot, loot_only, Weapons.starting_kit(game_mode), true)
+		cl_stand.rpc(id, spot, loot_only, rules.kit(self, id), true)
 		return
 	var pos := _far_spawn()
 	player_state[id] = {"pos": pos, "treasures": 0, "name": str(entry.name)}
@@ -993,10 +1008,8 @@ func sv_orb_hit(slot: int, target_id: String, hit_pos: Vector3) -> void:
 		return
 	cl_bonk.rpc(target_id, hit_pos)
 
-## THE SWORD KILLS OUTRIGHT: one heart a swing at arm's length was a joke
-## against a gun, and landing one means you got inside somebody's guard.
-## Routed through `match_hurt` with the full bar so every rule downstream
-## still applies — downed-vs-out, the revive setting, the feed, the score.
+## THE SWORD KILLS OUTRIGHT — landing one means you got inside somebody's
+## guard. Routed through `match_hurt` so every rule downstream applies.
 @rpc("any_peer", "reliable")
 func sv_sword_hit(slot: int, target_id: String, hit_pos: Vector3) -> void:
 	if not multiplayer.is_server():
@@ -1113,12 +1126,10 @@ func _team_wool(id: String) -> int:
 ## water, no plants, and nothing you can see through. Painting glass or
 ## leaves turned a window or a canopy into solid wool, which looks
 ## exactly like the sprayer inventing blocks and filling in holes.
-## IS THIS BLOCK ALLOWED TO BE BROKEN, HERE? Its own `unbreakable` flag,
-## and whether it belongs to a flag: the whole COLUMN under a beacon is off
-## limits, or the first thing anybody does is mine the hill out from under
-## it. EVERYTHING that removes a block on the server comes through here —
-## digging, explosives, the sucker, fire, the bots' dig-out — or the flags
-## start disappearing again. Placing is still allowed.
+## IS THIS BLOCK ALLOWED TO BE BROKEN, HERE? Its `unbreakable` flag, and
+## the whole COLUMN under a beacon, or the first thing anybody does is mine
+## the hill out from under it. EVERYTHING that removes a block on the
+## server comes through here, or the flags start disappearing again.
 func can_carve(pos: Vector3i, block: int) -> bool:
 	if not Blocks.is_breakable(block):
 		return false
@@ -1385,12 +1396,10 @@ func sv_remove_bot(target_id: String = "") -> void:
 func sv_set_mode(mode: String) -> void:
 	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
 		return
-	if mode != "battle" and mode != "creative" and mode != "ctf" \
-			and mode != "holdout":
+	if not GameModes.has(mode):
 		return
 	var changed := game_mode != mode
-	game_mode = mode
-	match_loop = mode != "creative"
+	set_game_mode(mode)
 	if mode == "creative" and match_phase != "IDLE":
 		match_phase = "IDLE"
 		match_alive.clear()
@@ -1412,6 +1421,7 @@ func sv_set_mode(mode: String) -> void:
 @rpc("authority", "call_local", "reliable")
 func cl_mode(mode: String) -> void:
 	client_mode = mode
+	client_rules = GameModes.by_key(mode)
 	if not multiplayer.is_server():
 		battle_config_changed.emit()
 
@@ -1503,12 +1513,9 @@ func open_round_if_waiting() -> void:
 		return
 	battle.open_lobby()
 
-## NOTHING IS KEPT ON DISK. Not where players stood, not the team layout,
-## not the game mode — the world itself is thrown away on every restart
-## and every resize, so anything remembered from the last one only ever
-## made nonsense of the new one, and every bug where somebody turned up
-## in the void traced back to state that outlived its world. A restart is
-## a clean table: default teams, no computer players, creative mode.
+## NOTHING IS KEPT ON DISK: the world is thrown away on every restart and
+## resize, and every "turned up in the void" bug traced back to state that
+## outlived its world. A restart is a clean table.
 func _save_battle_setup() -> void:
 	pass
 
@@ -3104,9 +3111,10 @@ var hearts_override: Dictionary = {}
 var hearts_max: Dictionary = {}
 
 func max_hp(id: String) -> int:
+	var base := hearts_bots if bool(Game.roster.get(id, {}).get("bot", false)) else hearts_people
 	if hearts_override.has(id):
-		return int(hearts_override[id])
-	return hearts_bots if bool(Game.roster.get(id, {}).get("bot", false)) else hearts_people
+		base = int(hearts_override[id])
+	return rules.max_hp(self, id, base)
 
 ## The one way hearts reach clients: what the server holds, and the bar
 ## they are out of, so the HUD draws the right number of them.

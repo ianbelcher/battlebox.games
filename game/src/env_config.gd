@@ -39,7 +39,7 @@ const KNOWN := {
 	# world is generated from its environment and never written to disk,
 	# so this is the difference between a room that IS a desert and a room
 	# that resets itself into one while somebody is standing in it.
-	"WORLD_MODE": "creative | battle | ctf | holdout — the mode a room starts in",
+	"WORLD_MODE": "creative | battle | ctf | holdout | zombies — the mode a room starts in (see GameModes)",
 	"WORLD_ROUND_MINUTES": "how long a round of battle royale or last flag standing runs",
 	"WORLD_PLAYERS": "how many seats the room has; computer players fill the ones people are not in",
 	"WORLD_CTF_TARGET": "captures needed to win capture the flag",

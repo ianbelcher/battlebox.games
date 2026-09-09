@@ -121,7 +121,7 @@ back-reference, none declaring an RPC:
 | Node | File | Owns |
 | --- | --- | --- |
 | `World/Bots` | `bot_director.gd` | Computer players: what each one sees, what its team knows, and everything it does about both |
-| `World/Match` | `match_director.gd` | Battle: lobby, drop, storm, revives, the league table |
+| `World/Match` | `match_director.gd` | The round: lobby, drop, revives, the league table — and it asks the mode what a tick is |
 | `World/Ctf` | `ctf_director.gd` | Both flag modes: bases, poles, carrying, scoring |
 | `World/Terrain` | `terrain_sim.gd` | Water, fire, growth, explosions |
 | `World/Critters` | `critter_director.gd` | Where animals live and where they wander |
@@ -161,6 +161,42 @@ it.** `match_phase` is on the world because a client draws it.
 `world.gd` was 6,255 lines before this split and is 2,749 after. If you
 find yourself adding a two-hundred-line subsystem to it, add a director
 instead.
+
+## The platform and the game on it
+
+The world is the **platform**: blocks, digging, building, running,
+shooting, vehicles, weather, the wire protocol. It never asks what game
+is being played. Everything that makes a round a round is a **mode** —
+one file in `game/src/modes/`, a `GameMode` — and the platform asks its
+mode at a handful of seams and does what it is told:
+
+| The seam | What the mode is asked |
+| --- | --- |
+| The front page (`game_setup.gd`) | its key, label and note; which settings it uses (`has_clock`, `has_target`, `picks_teams`, …) |
+| The drop (`MatchDirector.drop_everyone`) | `deal_teams`, `team_names`, `kit`, `max_hp` |
+| Every battle tick (`MatchDirector.tick`) | `has_storm`, `has_clock` / `round_seconds` / `on_time_up`, `has_flags`, `winner` |
+| A knockout (`MatchDirector.eliminate`) | `on_knockout`: the revive ladder, or convert, or respawn |
+| Hearts growing back | `regen_ms` |
+| A late joiner | `joiner_team` |
+| The HUD | the same predicates and `kicker`, through the client's copy (`world.client_rules`) |
+
+`GameModes` is the registry: the order there is the order on the front
+page. `lobby.py` keeps a twin of the key list because it validates a
+POST before any Godot is involved. To add a mode: one file extending
+`GameMode` with the hooks it has an opinion about, one line in
+`GameModes.ALL`, its key in `lobby.py`'s `MODES`, and it appears on the
+front page, survives validation, and plays. `zombies_mode.gd` is the
+worked example — uneven sides, one-heart respawning zombies, survivors
+who turn when bitten, a clock the survivors have to outlast — and it
+touches nothing outside its own file.
+
+It used to be strings: `game_mode == "ctf"` in one place,
+`ctf.elimination()` in another, `client_mode == "battle"` on the HUD,
+each a separate opinion about what the modes were. That is how the
+storm ended up over a capture the flag round — the drop set it for every
+mode and only the modes that knew about it cleared it. A mode that does
+not name the `Game` autoload is a mode the front page's unit tests can
+load; read the roster through `world.roster()`.
 
 ## Data, not code
 

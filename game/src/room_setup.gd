@@ -27,7 +27,6 @@ class_name RoomSetup
 ## enforces. Anything that is not an RPC belongs beside it rather than in
 ## it.
 
-const MODES := ["creative", "battle", "ctf", "holdout"]
 
 ## How many seats a room has, when nobody said. Computer players fill
 ## the ones people are not in, so this is the size of the game.
@@ -40,9 +39,8 @@ static func wanted_players(fallback: int) -> int:
 static func apply(world: Node) -> void:
 	world.battle_size = float(world.store.world_size)
 	var wanted := EnvConfig.text("WORLD_MODE", "")
-	if wanted in MODES:
-		world.game_mode = wanted
-		world.match_loop = wanted != "creative"
+	if GameModes.has(wanted):
+		world.set_game_mode(wanted)
 	var minutes := EnvConfig.number("WORLD_ROUND_MINUTES", 0)
 	if minutes > 0:
 		# One setting on the front page, two clocks behind it: battle

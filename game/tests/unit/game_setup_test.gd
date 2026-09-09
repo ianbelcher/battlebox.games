@@ -48,7 +48,7 @@ func test_the_other_sides_show_on_the_map_unless_told_not_to() -> void:
 	check(GameSetup.uses("enemies", "battle"), "but they are in a battle")
 
 func test_a_mode_nobody_has_written_falls_back() -> void:
-	equal(GameSetup.clean({"mode": "zombies"})["mode"], GameSetup.DEFAULT_MODE,
+	equal(GameSetup.clean({"mode": "hopscotch"})["mode"], GameSetup.DEFAULT_MODE,
 		"an unknown mode is the default mode, not an empty world")
 
 func test_a_size_off_the_list_is_refused_rather_than_clamped() -> void:
@@ -250,7 +250,7 @@ func test_every_map_offered_is_a_map_that_exists() -> void:
 ## And every mode offered has to be one sv_set_mode accepts, or picking it
 ## on the front page starts a room that ignores it.
 func test_every_mode_offered_is_a_mode_the_server_knows() -> void:
-	const SERVER_KNOWS := ["creative", "battle", "ctf", "holdout"]
+	var SERVER_KNOWS: Array = GameModes.keys()
 	for spec: Dictionary in GameSetup.MODES:
 		check(str(spec["key"]) in SERVER_KNOWS,
 			"%s is not a mode the server will accept" % str(spec["key"]))

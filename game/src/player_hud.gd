@@ -143,6 +143,7 @@ func _ready() -> void:
 	_build_round_card()
 	_build_storm_line()
 	_build_death_wash()
+	_build_fanfare()
 	_build_name_chip()
 	_build_score_column()
 	_build_capture_fade()
@@ -424,159 +425,13 @@ func _build_center_note() -> void:
 	_center_note.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_note_card.add_child(_center_note)
 
-## THE CARD BEFORE A ROUND: what is about to happen, to whom, and how
-## long until it does.
-##
-## A round used to open with "Next battle in 6" in the corner and, for
-## the host, a settings menu over the top of it. What every game of this
-## kind does instead is stop, say the name of the thing, count down, and
-## tell you whose side you are on — so that when you land you already
-## know who to run towards. That is this: the mode, a countdown, your
-## team in its colour and the team-mates you have.
-##
-## It goes when the round is live — or the moment you press anything
-## once you have landed. The server holds SETUP for six seconds after
-## the drop, so the card used to sit over a game people were already
-## playing; a click or a button from THIS seat takes it down for good.
-##
-## NO "CHANGE TEAM" HINT. It pointed at the player's own menu, which has
-## nothing in it that changes teams — the table is set on the front page
-## and by whoever opens the world menu.
-var _round_card: PanelContainer
-var _round_kicker: Label
-var _round_title: Label
-var _round_team: Label
-var _round_mates: Label
-var _round_t := 0.0
-## Pressed away for this round. Reset when the round is live.
-var _round_dismissed := false
+## The card before a round — see round_card.gd. Built here, ticked from
+## _refresh_notices, and asked whether it is up by the crosshair.
+var _round_card: RoundCard
 
 func _build_round_card() -> void:
-	var sc := _uscale()
-	_round_card = PanelContainer.new()
-	_round_card.add_theme_stylebox_override("panel", UiTheme.panel_box(sc))
-	_round_card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_round_card.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	_round_card.grow_vertical = Control.GROW_DIRECTION_BOTH
-	_round_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_round_card.visible = false
+	_round_card = RoundCard.new(self)
 	add_child(_round_card)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", UiTheme.px(8, sc))
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.custom_minimum_size = Vector2(UiTheme.px(380, sc), 0)
-	_round_card.add_child(box)
-	_round_kicker = Label.new()
-	_round_kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_round_kicker.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_NOTE, sc))
-	_round_kicker.add_theme_font_override("font", UiTheme.heavy(sc, 0.25, 1.6))
-	_round_kicker.add_theme_color_override("font_color", UiTheme.INK_FAINT)
-	box.add_child(_round_kicker)
-	_round_title = Label.new()
-	_round_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_round_title.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_TITLE + 12, sc))
-	_round_title.add_theme_font_override("font", UiTheme.heavy(sc, 0.7, -1.0))
-	_round_title.add_theme_color_override("font_color", UiTheme.INK)
-	box.add_child(_round_title)
-	_round_team = Label.new()
-	_round_team.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_round_team.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY + 4, sc))
-	_round_team.add_theme_font_override("font", UiTheme.heavy(sc, 0.5, 0.0))
-	box.add_child(_round_team)
-	_round_mates = Label.new()
-	_round_mates.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_round_mates.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_round_mates.custom_minimum_size = Vector2(UiTheme.px(380, sc), 0)
-	_round_mates.add_theme_font_size_override("font_size", UiTheme.px(UiTheme.T_BODY, sc))
-	_round_mates.add_theme_color_override("font_color", UiTheme.INK_DIM)
-	box.add_child(_round_mates)
-
-## Any press from THIS seat, once the drop has happened, takes the round
-## card down. This seat's, so one child clicking does not clear the card
-## from three other screens: the keyboard seat answers to keys and the
-## mouse, a pad seat to buttons on its own device.
-func _input(event: InputEvent) -> void:
-	if _round_card == null or not _round_card.visible or world == null:
-		return
-	if world.match_phase != "SETUP":
-		return
-	if not _press_from_this_seat(event):
-		return
-	_round_dismissed = true
-	_round_card.visible = false
-
-func _press_from_this_seat(event: InputEvent) -> bool:
-	if not event.is_pressed() or event.is_echo():
-		return false
-	var seat: InputSlot = Game.local_inputs.get(slot)
-	if seat == null:
-		return false
-	if seat.kind == InputSlot.Kind.GAMEPAD:
-		return event is InputEventJoypadButton and event.device == seat.device
-	return event is InputEventMouseButton or event is InputEventKey
-
-## What the mode is called on the card.
-func _round_kicker_text() -> String:
-	match str(world.client_mode):
-		"ctf":
-			return "CAPTURE THE FLAG"
-		"holdout":
-			return "LAST FLAG STANDING"
-		_:
-			return "BATTLE ROYALE"
-
-## Fill the card in for this phase. Cheap enough to call a few times a
-## second: it writes four labels and walks the roster once for the
-## team-mates.
-func _refresh_round_card(phase: String) -> void:
-	var secs := int(ceil(world.match_seconds))
-	_round_kicker.text = _round_kicker_text()
-	if phase == "LOBBY":
-		_round_title.text = ("Starting in %d" % secs) if secs > 0 else "Starting…"
-	else:
-		_round_title.text = "Get ready"
-	var me := _me()
-	var entry: Dictionary = Game.roster.get(me, {})
-	var team := int(entry.get("team", -1))
-	var names: Array = world.client_team_names
-	# Everyone for themselves: a side each, so the side needs no name
-	# and there is nobody to list.
-	var solo := names.size() >= 2 and names.size() >= Game.roster.size()
-	if team < 0 or team >= names.size():
-		_round_team.text = "Picking your team…"
-		_round_team.add_theme_color_override("font_color", UiTheme.INK_DIM)
-		_round_mates.text = ""
-		return
-	var tint: Color = WorldNode.TEAM_COLORS[team % WorldNode.TEAM_COLORS.size()]
-	if solo:
-		_round_team.text = "Everyone for themselves"
-		_round_team.add_theme_color_override("font_color", tint)
-		_round_mates.text = "You are %s. Good luck." % str(names[team])
-		return
-	_round_team.text = "You're on %s" % str(names[team])
-	_round_team.add_theme_color_override("font_color", tint)
-	# People first, then the computer players, and no more than a few
-	# names before "and N more": a side of twenty is not a sentence.
-	var people: Array = []
-	var bots: Array = []
-	for rid: String in Game.roster.keys():
-		if rid == me or int(Game.roster[rid].get("team", -2)) != team:
-			continue
-		if bool(Game.roster[rid].get("bot", false)):
-			bots.append(str(Game.roster[rid].name))
-		else:
-			people.append(str(Game.roster[rid].name))
-	people.sort()
-	bots.sort()
-	var mates: Array = people + bots
-	if mates.is_empty():
-		_round_mates.text = "On your own this round."
-		return
-	var shown: Array = mates.slice(0, 3)
-	var line := "with " + ", ".join(shown)
-	if mates.size() > shown.size():
-		line += " and %d more" % (mates.size() - shown.size())
-	_round_mates.text = line
 
 ## The storm countdown along the top of the screen.
 func _build_storm_line() -> void:
@@ -662,6 +517,37 @@ func _build_death_wash() -> void:
 	_death_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_death_note.visible = false
 	add_child(_death_note)
+
+## THE FANFARE: a big line across the top third of the screen for the
+## things a whole round turns on — somebody took a flag, a side is out.
+## It used to be a sound and a fade for the person who did it and nothing
+## at all for anybody else, so a captured flag was something you worked
+## out from the other team having vanished.
+var _fanfare: Label
+var _fanfare_t := 0.0
+
+func _build_fanfare() -> void:
+	_fanfare = Label.new()
+	_fanfare.add_theme_font_size_override("font_size", _us(40))
+	_fanfare.add_theme_font_override("font", UiTheme.display(_uscale(), 1.5, true))
+	_fanfare.add_theme_color_override("font_color", UiTheme.INK)
+	_fanfare.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.08, 0.9))
+	_fanfare.add_theme_constant_override("outline_size", 6)
+	_fanfare.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_fanfare.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_fanfare.offset_top = _us(120)
+	_fanfare.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_fanfare.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fanfare.visible = false
+	add_child(_fanfare)
+
+func fanfare(text: String, tint: Color, seconds := 3.5) -> void:
+	if _fanfare == null:
+		return
+	_fanfare.text = text
+	_fanfare.add_theme_color_override("font_color", tint)
+	_fanfare.visible = true
+	_fanfare_t = seconds
 
 ## The sliver of a chip saying whose screen this is.
 func _build_name_chip() -> void:
@@ -960,9 +846,23 @@ func _cap(what: String) -> String:
 ## happens behind the black so it is a scene change rather than a
 ## teleport. The server holds the same beat and makes us untouchable for
 ## it, so nothing can happen to us while we cannot see.
-func _on_flag_taken(id: String, _team: int, _from_team: int) -> void:
+func _on_flag_taken(id: String, team: int, from_team: int) -> void:
 	if world == null or _fade == null:
 		return
+	# EVERYBODY HEARS ABOUT IT. Who took whose flag, in the taker's
+	# colour — and in last flag standing, that the losing side is out,
+	# which is otherwise something you notice as a team going quiet.
+	var names: Array = world.client_team_names
+	var who := str(Game.roster.get(id, {}).get("name", "Somebody"))
+	var theirs := str(names[from_team]) if from_team >= 0 and from_team < names.size() \
+		else "the other side"
+	var line := "%s took %s's flag" % [who, theirs]
+	if world.client_rules.flag_loss_is_out():
+		line += "  ·  %s is out" % theirs
+	var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
+		and team < WorldNode.TEAM_COLORS.size() else UiTheme.ACCENT
+	fanfare(line, tint)
+	Sfx.play("collect", -4.0, 1.2)
 	if id != Game.player_id(multiplayer.get_unique_id(), slot):
 		return
 	var me := _player()
@@ -1532,8 +1432,7 @@ func _on_page_entered(page: int) -> void:
 func _page_visible(page: int) -> bool:
 	match page:
 		PAGE_SCORES:
-			return world != null and (world.client_mode == "battle"
-				or world.flag_mode())
+			return world != null and world.client_rules.has_knockouts()
 		_:
 			return true
 
@@ -2270,7 +2169,7 @@ func _refresh_ctf_panel() -> void:
 	# THE HEADING SAYS WHAT THE MODE IS PLAYED ON, and last flag standing
 	# is not played on a target — it was reading "first to 3" in a mode
 	# where reaching three of anything means nothing at all.
-	head.text = "LAST FLAG STANDING   took / lost" if world.client_mode == "holdout" \
+	head.text = "LAST FLAG STANDING   took / lost" if world.client_rules.flag_loss_is_out() \
 		else "FIRST TO %d   took / lost" % int(world.ctf_target)
 	head.add_theme_font_size_override("font_size", _us(13))
 	head.add_theme_font_override("font", UiTheme.display(_uscale(), 1.2))
@@ -2536,7 +2435,7 @@ func _refresh_identity() -> void:
 	_treasure_label.text = ""
 	var id := Game.player_id(multiplayer.get_unique_id(), slot)
 	var hearts_on: bool = world != null and (world.survival_active \
-		or world.client_mode == "battle" \
+		or world.client_rules.has_knockouts() \
 		or world.match_phase in ["SETUP", "BATTLE"])
 	var hp: int = int(world.hearts.get(id, 8)) if world != null else 8
 	var top: int = int(world.hearts_max.get(id, 8)) if world != null else 8
@@ -2690,7 +2589,7 @@ func _refresh_battle_prompts(player: Player) -> void:
 		_game_tabs.set_tab_hidden(0, false)
 		_game_tabs.set_tab_hidden(1, false)
 	if _battle_start != null and world != null:
-		_battle_start.visible = world.client_mode == "battle"
+		_battle_start.visible = world.client_rules.has_rounds() and not world.client_rules.has_flags()
 		match world.match_phase:
 			"IDLE":
 				_battle_start.disabled = false
@@ -2770,19 +2669,7 @@ func news(text: String, seconds := 5.0) -> void:
 ## The centre note, the storm countdown and the death card.
 func _refresh_notices(player: Player, delta: float) -> void:
 	if _round_card != null and world != null:
-		var phase: String = world.match_phase
-		var pre_round := phase == "LOBBY" or phase == "SETUP"
-		if not pre_round:
-			_round_dismissed = false
-		var card_up: bool = pre_round and not _menu.visible and not _round_dismissed
-		_round_card.visible = card_up
-		if card_up:
-			_round_t -= delta
-			if _round_t <= 0.0:
-				_round_t = 0.2
-				_refresh_round_card(phase)
-		else:
-			_round_t = 0.0
+		_round_card.tick(str(world.match_phase), delta)
 	if _center_note != null and world != null:
 		var secs := int(ceil(world.match_seconds))
 		var say := ""
@@ -2875,6 +2762,9 @@ func _refresh_notices(player: Player, delta: float) -> void:
 				player.visible = true
 		_death_t = maxf(0.0, _death_t - delta)
 		_death_note.visible = _death_t > 0.0
+		if _fanfare != null and _fanfare.visible:
+			_fanfare_t -= delta
+			_fanfare.visible = _fanfare_t > 0.0
 		_drain_colour(down_now or out_now, delta)
 
 ## Out of the fight, so the fight stops looking like something you are in.
