@@ -17,55 +17,6 @@ const LIFT_SPEED := 6.0
 ## the hole they had just made, and the only way back was an adult. Slow
 ## on purpose — it is a way out, not a way to scale a tower quickly.
 const WALL_CLIMB_SPEED := 1.0
-## THE BOAT OR CAR UNDER THIS PLAYER'S FEET, if any, and where they are
-## standing on it in the vehicle's own frame.
-##
-## Keeping the spot in the VEHICLE's frame rather than the world's is what
-## makes "everyone stays where they were standing" work when it turns: the
-## spot is remembered as "two blocks aft, one to port" and turned back
-## into a world position after the vehicle has moved. Doing it as a plain
-## position delta carries people along fine in a straight line and slides
-## them off the side in a turn.
-var ride_id := ""
-## How often a rider re-asks for a helm nobody is holding.
-const HELM_RETRY_SECONDS := 0.5
-var _helm_ask := 0.0
-## Where the vehicle was last physics frame, so this frame's motion can be
-## worked out and applied to whoever is standing on it.
-var _ride_was := ""
-var _ride_was_pos := Vector3.ZERO
-var _ride_was_yaw := 0.0
-## Sent to the server about as often as a position is.
-var _ride_send := 0.0
-const RIDE_SEND_HZ := 15.0
-## How long the deck test may keep missing before a rider is treated
-## as having stepped off. Three or four frames: long enough that a
-## wobble at the rail on a turning boat is not a disembarkation,
-## short enough that walking off still feels immediate.
-const RIDE_GRACE_SECONDS := 0.2
-var _ride_grace := RIDE_GRACE_SECONDS
-## ...AND ONE MISSED FRAME IS NOT LETTING GO OF THE WHEEL.
-##
-## The same crossing of messages that HELM_RETRY_SECONDS below exists to
-## recover from — a vehicle list built before the helm was granted,
-## arriving after it, rebuilding every vehicle from a payload that says
-## nobody is driving — has a second consequence nothing covered. While
-## the list says you are not the driver, `driving()` is false, so
-## _local_move stops treating your stick as a helm and starts treating it
-## as legs: you WALK, at running pace, across the deck of the boat you are
-## steering. A few frames of that is most of a block, and then the helm
-## comes back and everything looks fine again.
-##
-## It showed up as the boat probe sliding 0.4 to 0.7 blocks, only ever on
-## a loaded server, about two runs in five — and it survived the ride
-## getting its own grace, because the ride was never what was lost.
-##
-## Longer than the ride's grace because this one waits on a round trip
-## rather than on a box test. Somebody else genuinely taking the helm
-## still takes it; they just get the wheel a third of a second before you
-## get your legs back.
-const HELM_GRACE_SECONDS := 0.35
-var _helm_grace := 0.0
 ## HOW FAR ABOVE THE FEET "room above" IS TESTED, and therefore how far a
 ## top-out has to lift you. Named because it is load-bearing in two places
 ## that have to agree: the probe below decides when a climb has reached
@@ -801,195 +752,6 @@ func _solid_at(pos: Vector3) -> bool:
 	return Blocks.is_solid(_chunks().get_block(Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))))
 
 ## Any solid block overlapping the AABB at a candidate position?
-## The deck we are standing on or about to land on, or INF for none.
-func _deck_floor(from: Vector3, to: Vector3) -> float:
-	if world == null or world.vehicle_view == null:
-		return INF
-	var found: Dictionary = world.vehicle_view.deck_under(to)
-	if found.is_empty():
-		return INF
-	var deck: float = found.deck_y
-	# Coming down through it, or already standing on it. Not while rising
-	# through it — you can jump up out of a boat.
-	if from.y >= deck - 0.05 or absf(from.y - deck) < 0.35:
-		return deck
-	return INF
-
-## STANDING ON A BOAT, AND POSSIBLY DRIVING IT.
-##
-## Runs after this player's own movement, so what it does is add the
-## vehicle's motion on top: your walking about the deck is yours, and the
-## deck moving under you is the boat's. Both, every frame, which is what
-## lets somebody walk to the bow of a boat that is already under way.
-##
-## The carry is done through the VEHICLE'S OWN FRAME rather than as a
-## position delta. In a straight line the two are identical; in a turn the
-## delta version slides everybody off the side, because the stern travels
-## further than the bow.
-func _ride(delta: float) -> void:
-	if not is_local or world == null or world.vehicle_view == null:
-		_ride_was = ""
-		return
-	var view: VehicleView = world.vehicle_view
-	# CARRY FIRST, ASK AFTERWARDS.
-	#
-	# This used to look for a deck under the player and only then carry
-	# them, which quietly means "you are carried as long as the boat has
-	# not gone anywhere" — the deck has to still be under your feet at the
-	# moment it is looked for. At walking pace that is true and it works.
-	# It stops being true the moment the boat covers more ground in one
-	# frame than you were standing from the edge, which is a lag spike, or
-	# a fast boat, or a passenger near the rail. Then the rider is dropped
-	# into the sea and the boat sails off.
-	#
-	# Being carried is a consequence of having been aboard LAST frame, so
-	# that is what it is based on. Walking off is then still walking off:
-	# the deck test below runs on the carried position and finds nothing.
-	if not _ride_was.is_empty():
-		var was: Dictionary = view.at(_ride_was)
-		if was.is_empty():
-			_ride_was = ""
-		else:
-			if view.driver_of(_ride_was) == player_id:
-				var helm := input.get_move_vector()
-				# Stick forward is throttle, stick sideways is helm.
-				# Nothing to learn and nothing to press.
-				view.drive_mine(_ride_was, -helm.y, helm.x, delta)
-				_ride_send -= delta
-				if _ride_send <= 0.0:
-					_ride_send = 1.0 / RIDE_SEND_HZ
-					world.sv_vehicle_moved.rpc_id(1, _ride_was, slot,
-						Vector3(was.pos), float(was.yaw))
-			var spot := VehicleGeom.to_local(_ride_was_pos, _ride_was_yaw,
-				position)
-			position = VehicleGeom.to_world(Vector3(was.pos), float(was.yaw),
-				spot)
-			# ...AND WHICH WAY YOU ARE POINTING GOES ROUND WITH HER TOO.
-			#
-			# The carry above is exact — measured at zero drift over a
-			# forty-frame turn, as a passenger and at the helm — and it was
-			# still reported as "when you turn, your position on the boat
-			# moves". It is not the position. It is the FACING: only where
-			# you stood was ever carried, so the boat rotated underneath a
-			# body that went on pointing the same way at the world, and the
-			# camera went on looking there as well.
-			#
-			# From the seat that is indistinguishable from sliding, and it
-			# is why it read as the boat turning about the wrong centre:
-			# everything you can see swings around you while you face one
-			# way. Standing on a turning deck turns you. It always did in
-			# life and it never did here.
-			#
-			# Rotated through VehicleGeom rather than Godot's own
-			# `rotated(UP, …)`, which is the opposite sign convention: the
-			# heading has to turn exactly as the position did, and the one
-			# way to be sure of that is to use the same function.
-			# THE TWO RUN OPPOSITE WAYS, and adding the same delta to both
-			# is how this was wrong the first time. `heading` turns the way
-			# VehicleGeom turns things; the yaws this file keeps are the
-			# other way round, because `heading` is (-sin, -cos) of
-			# look_yaw. Caught by the probe rather than by reading it: a
-			# 1.04 radian turn came out as 2.08 radians of drift against
-			# the deck, which is the shape of a sign flip and nothing else.
-			var turned := wrapf(float(was.yaw) - _ride_was_yaw, -PI, PI)
-			if absf(turned) > 0.00001:
-				heading = VehicleGeom.to_world(Vector3.ZERO, turned, heading)
-				var swing := -turned
-				look_yaw = wrapf(look_yaw + swing, -PI, PI)
-				camera_yaw = wrapf(camera_yaw + swing, -PI, PI)
-				rotation.y = wrapf(rotation.y + swing, -PI, PI)
-	var found: Dictionary = view.deck_under(position)
-	var now_id := str(found.get("id", ""))
-	# ONE MISSED FRAME IS NOT STEPPING OFF.
-	#
-	# `deck_under` is a box test against the deck as it is RIGHT NOW, and
-	# on a turning boat a rider near the rail can fall a hair outside it
-	# for a single frame — the body is carried by last frame's pose and
-	# tested against this one. Dropping the ride there costs that frame's
-	# carry, so the rider stands still in the world while the deck turns
-	# under them, and every dropped frame is a permanent slice of their
-	# place on the boat.
-	#
-	# Invisible on an idle server and obvious on a busy one, which is
-	# exactly how it hid: the boat probe measured 0.00 blocks of drift run
-	# on its own and 0.69 through a full integration run with the same
-	# code. Frame times are the only difference.
-	#
-	# So a miss has to persist before it counts. Walking off is still
-	# walking off — a fifth of a second is three or four frames, and you
-	# are metres away by then — but a wobble at the rail is no longer a
-	# disembarkation.
-	if now_id.is_empty() and not ride_id.is_empty():
-		_ride_grace -= delta
-		if _ride_grace > 0.0:
-			now_id = ride_id
-	else:
-		_ride_grace = RIDE_GRACE_SECONDS
-	if now_id != ride_id:
-		# Stepping off frees the helm; stepping on asks for it. The server
-		# decides — see VehicleDirector.board — and it is first aboard,
-		# because a five-year-old standing on a boat expects it to go
-		# rather than expecting to find a seat and press something.
-		if not ride_id.is_empty():
-			world.sv_vehicle_leave.rpc_id(1, ride_id, slot)
-		ride_id = now_id
-		if not ride_id.is_empty():
-			world.sv_vehicle_board.rpc_id(1, ride_id, slot)
-	if ride_id.is_empty():
-		_ride_was = ""
-		_helm_grace = 0.0
-		return
-	# ASK AGAIN IF NOBODY IS DRIVING THE THING YOU ARE STANDING ON.
-	#
-	# The helm is granted by the server as its own message, and the full
-	# vehicle list is another — so the two cross. A list built a moment
-	# BEFORE the grant, arriving a moment AFTER it, rebuilds every
-	# vehicle from a payload that says nobody is driving, and the helm is
-	# quietly gone. The boat still carries you; it just stops answering,
-	# which is precisely "it pulls me into it but I can't control it".
-	#
-	# Standing on a driverless vehicle is a state that should never
-	# persist, so say so again. Reliable, throttled, and self-healing —
-	# it also covers a dropped packet and a join landing mid-handover,
-	# which no amount of ordering the two messages would.
-	if view.driver_of(ride_id).is_empty():
-		_helm_ask -= delta
-		if _helm_ask <= 0.0:
-			_helm_ask = HELM_RETRY_SECONDS
-			world.sv_vehicle_board.rpc_id(1, ride_id, slot)
-	else:
-		_helm_ask = 0.0
-	# Fed while the list agrees we are at the wheel, and run down when it
-	# does not. Never STARTED by the grace — a helm we never held cannot
-	# be held over.
-	if view.driver_of(ride_id) == player_id:
-		_helm_grace = HELM_GRACE_SECONDS
-	else:
-		_helm_grace = maxf(0.0, _helm_grace - delta)
-	var v: Dictionary = view.at(ride_id)
-	if v.is_empty():
-		ride_id = ""
-		_ride_was = ""
-		return
-	# Remembered for next frame's carry: where she was when we last stood
-	# on her, in her own frame.
-	_ride_was = ride_id
-	_ride_was_pos = v.pos
-	_ride_was_yaw = v.yaw
-
-## At the helm of the thing we are standing on.
-##
-## Held over a gap in the vehicle list — see HELM_GRACE_SECONDS. Without
-## that, a single broadcast that has not caught up with the helm grant
-## turns the driver's stick back into legs for a few frames and walks them
-## across their own deck.
-func driving() -> bool:
-	if ride_id.is_empty() or world == null or world.vehicle_view == null:
-		return false
-	if world.vehicle_view.driver_of(ride_id) == player_id:
-		return true
-	return _helm_grace > 0.0
-
 func _collides(at: Vector3) -> bool:
 	var min_x := floori(at.x - HALF_WIDTH)
 	var max_x := floori(at.x + HALF_WIDTH)
@@ -1017,12 +779,6 @@ func _local_move(delta: float) -> void:
 		camera_yaw = look_yaw
 	var move := input.get_move_vector()
 	var dir := Vector3(move.x, 0, move.y).rotated(Vector3.UP, camera_yaw)
-	# AT THE HELM, the stick steers the boat instead of walking you about
-	# on it — otherwise the driver spends the whole voyage trying to walk
-	# off the front of their own boat. Everyone else aboard keeps their
-	# legs and can move around the deck while it is under way.
-	if driving():
-		dir = Vector3.ZERO
 	var feet := Vector3i(floori(position.x), floori(position.y + 0.3), floori(position.z))
 	in_water = Blocks.is_liquid(_chunks().get_block(feet))
 
@@ -1306,7 +1062,6 @@ func _local_move(delta: float) -> void:
 			anim = Anim.FLY
 	var vertical := velocity.y * delta
 	var v_attempt := next + Vector3(0, vertical, 0)
-	var deck_y := _deck_floor(next, v_attempt)
 	if _knockout_rise > 0.0 or _lift_to < INF:
 		# Straight through the roof. Somebody knocked out inside their own
 		# fort would otherwise be pinned against its ceiling for the whole
@@ -1314,15 +1069,6 @@ func _local_move(delta: float) -> void:
 		# they are already invisible to everyone still playing.
 		next = v_attempt
 		on_floor = false
-	elif deck_y < INF and velocity.y <= 0.0:
-		# A DECK IS A FLOOR. It is not made of blocks, so nothing in the
-		# voxel sweep above can see it — without this you fall through the
-		# boat you are trying to get into.
-		next = Vector3(v_attempt.x, deck_y, v_attempt.z)
-		velocity.y = 0.0
-		on_floor = true
-		if _fly_grace <= 0.0:
-			fly_mode = false
 	elif _collides(v_attempt):
 		var impact := velocity.y
 		if velocity.y < 0.0:
@@ -1365,7 +1111,6 @@ func _local_move(delta: float) -> void:
 		next = v_attempt
 		on_floor = false
 	position = next
-	_ride(delta)
 	if fp_mode:
 		heading = Vector3(-sin(look_yaw), 0, -cos(look_yaw))
 		rotation.y = look_yaw
@@ -1519,13 +1264,7 @@ func _local_actions(delta: float) -> void:
 			world.orbs.shoot_local(self, int(item.id))
 			_edit_cooldown = float(Weapons.spec(int(item.id)).cooldown)
 		elif place_target != Vector3i(0, -99, 0):
-			if item.kind == "vehicle":
-				# Where you are AIMING, not where you are standing. The
-				# server settles it onto the water or the ground from
-				# there — see VehicleDirector.settle.
-				world.sv_vehicle_place.rpc_id(1, slot, place_target, int(item.id))
-				_edit_cooldown = 1.0
-			elif item.kind == "structure":
+			if item.kind == "structure":
 				var facing := 0
 				if absf(heading.x) > absf(heading.z):
 					facing = 1 if heading.x > 0 else 3

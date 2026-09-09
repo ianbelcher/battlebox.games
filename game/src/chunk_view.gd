@@ -560,8 +560,19 @@ const FOLIAGE_MODELS := {Blocks.TALL_GRASS: "grass_large",
 const FOLIAGE_SCALES := {Blocks.TALL_GRASS: 1.6, Blocks.FERN: 1.5,
 	Blocks.FLOWER_RED: 1.2, Blocks.FLOWER_YELLOW: 1.2, Blocks.MUSHROOM: 1.1,
 	Blocks.FLOWER_PINK: 1.2, Blocks.DAISY: 1.2, Blocks.BLUEBELL: 1.2,
-	Blocks.CATTAIL: 1.4, Blocks.WHEAT_PLANT: 1.3, Blocks.DEAD_BUSH: 1.1,
+	Blocks.CATTAIL: 2.2, Blocks.WHEAT_PLANT: 1.3, Blocks.DEAD_BUSH: 1.1,
 	Blocks.BERRY_BUSH: 1.3, Blocks.BAMBOO: 1.5}
+## GRASS IS NOT ONE PLANT. Every grass block was the same model at the
+## same size, which is a field of identical stamps and reads as one:
+## a plane with tufts on it. Three models now, dealt by position — the
+## ordinary tuft, a big leafy clump, a small fine one — and every
+## instance at its own size, so a meadow is grass of different heights
+## with the ground showing through, and the blocks underneath stop
+## reading as blocks. Same trick for the ferns, at two sizes.
+const GRASS_VARIANTS := ["grass_large", "grass_leafsLarge", "grass_leafs"]
+## How much an instance's size wanders from the table above: 0.75 to 1.45
+## of it.
+const FOLIAGE_SIZE_SPREAD := 0.7
 var _foliage_meshes: Dictionary = {}
 
 func _foliage_mesh(model: String) -> Mesh:
@@ -584,6 +595,8 @@ func _add_foliage(holder: Node3D, cpos: Vector2i) -> void:
 	var data: PackedByteArray = _data.get(cpos, PackedByteArray())
 	if data.is_empty():
 		return
+	# Bucketed by MODEL rather than by block, because one block can be
+	# drawn as any of several models — see GRASS_VARIANTS.
 	var buckets: Dictionary = {}
 	for i in data.size():
 		var block := data[i]
@@ -592,18 +605,26 @@ func _add_foliage(holder: Node3D, cpos: Vector2i) -> void:
 		var x := i % 16
 		var z := (i / 16) % 16
 		var y := i / 256
-		var yaw := WorldGen.hash01(cpos.x * 16 + x, cpos.y * 16 + z, y) * TAU
-		var t := Transform3D(Basis(Vector3.UP, yaw)
-			.scaled(Vector3.ONE * float(FOLIAGE_SCALES.get(block, 1.2))),
+		var wx := cpos.x * 16 + x
+		var wz := cpos.y * 16 + z
+		var yaw := WorldGen.hash01(wx, wz, y) * TAU
+		var model := str(FOLIAGE_MODELS[block])
+		if block == Blocks.TALL_GRASS:
+			var pick := WorldGen.hash01(wx, wz, y + 7)
+			model = GRASS_VARIANTS[0] if pick < 0.55 else (GRASS_VARIANTS[1] if pick < 0.85
+				else GRASS_VARIANTS[2])
+		var size := float(FOLIAGE_SCALES.get(block, 1.2)) \
+			* (1.0 - FOLIAGE_SIZE_SPREAD * 0.35 + FOLIAGE_SIZE_SPREAD * WorldGen.hash01(wx, wz, y + 11))
+		var t := Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * size),
 			Vector3(x + 0.5, y, z + 0.5))
-		if not buckets.has(block):
-			buckets[block] = []
-		(buckets[block] as Array).append(t)
-	for block: int in buckets:
-		var mesh := _foliage_mesh(str(FOLIAGE_MODELS[block]))
+		if not buckets.has(model):
+			buckets[model] = []
+		(buckets[model] as Array).append(t)
+	for model: String in buckets:
+		var mesh := _foliage_mesh(model)
 		if mesh == null:
 			continue
-		var transforms: Array = buckets[block]
+		var transforms: Array = buckets[model]
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.mesh = mesh

@@ -2,8 +2,8 @@ class_name GameMode
 extends RefCounted
 ## WHAT A GAME IS, kept apart from what the world is.
 ##
-## The world — blocks, digging, building, running, shooting, vehicles,
-## weather, the wire — is the PLATFORM, and it never asks what game is
+## The world — blocks, digging, building, running, shooting, weather,
+## the wire — is the PLATFORM, and it never asks what game is
 ## being played. Everything that makes a round a round is a MODE: one
 ## file in this folder, and that file OWNS its mechanics. Battle royale's
 ## storm is in battle_mode.gd, not in the match director. Capture the

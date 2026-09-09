@@ -1182,8 +1182,36 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 			if surface == Blocks.GRASS:
 				_scatter_grass_column(data, lx, lz, wx, wz, ground)
 			elif surface == Blocks.SAND and ground <= SEA_LEVEL + 2:
-				if hash01(wx, wz, 15) < 0.008:
+				# REEDS AT THE WATER'S EDGE: long stands of them where the
+				# sand meets the sea, and a shell here and there further up.
+				# A beach was bare, which is fine for a beach and wrong for
+				# the whole shoreline of an island.
+				if _water_near(data, lx, lz, ground) and hash01(wx, wz, 16) < 0.16:
+					data[idx(lx, ground + 1, lz)] = Blocks.CATTAIL
+				elif hash01(wx, wz, 15) < 0.008:
 					data[idx(lx, ground + 1, lz)] = Blocks.SHELL
+
+## Is there water within two blocks of this column at its own height?
+## Looks inside the chunk only — generation stays independent per chunk,
+## and a reed that misses by being on a chunk edge is one reed.
+func _water_near(data: PackedByteArray, lx: int, lz: int, ground: int) -> bool:
+	for dz in range(-2, 3):
+		for dx in range(-2, 3):
+			var nx := lx + dx
+			var nz := lz + dz
+			if nx < 0 or nx >= CHUNK_SIZE or nz < 0 or nz >= CHUNK_SIZE:
+				continue
+			if data[idx(nx, ground, nz)] == Blocks.WATER:
+				return true
+	return false
+
+## GRASS GROWS IN CLUMPS. A roll against a flat chance gave an even
+## sprinkle, which is what a lawn looks like and not what a field does;
+## the chance is bent by a low-frequency noise so it comes in patches —
+## thick stands with thinner ground between them.
+func _grass_here(wx: int, wz: int, chance: float) -> bool:
+	var clump := clampf(_detail.get_noise_2d(wx * 2.5, wz * 2.5) * 1.3 + 0.5, 0.0, 1.0)
+	return hash01(wx, wz, 9) < chance * (0.35 + 1.3 * clump)
 
 ## Per-biome surface decoration. Trees only fully inside the chunk so
 ## canopies never cross borders (generation stays independent per chunk).
@@ -1198,14 +1226,14 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				return
 			if hash01(wx, wz, 12) < 0.03:
 				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
-			elif hash01(wx, wz, 9) < 0.3:
+			elif _grass_here(wx, wz, 0.3):
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif interior and tree_roll < 0.012:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
 		Biome.JUNGLE:
 			if lx >= 4 and lx < 12 and lz >= 4 and lz < 12 and tree_roll < 0.09:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 1)
-			elif hash01(wx, wz, 9) < 0.38:
+			elif _grass_here(wx, wz, 0.38):
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 12) < 0.012:
 				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
@@ -1218,7 +1246,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 		Biome.FOREST:
 			if interior and tree_roll < 0.03:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
-			elif hash01(wx, wz, 9) < 0.28:
+			elif _grass_here(wx, wz, 0.28):
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 12) < 0.007:
 				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
@@ -1227,7 +1255,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 		Biome.PINE:
 			if lx >= 2 and lx < 14 and lz >= 2 and lz < 14 and tree_roll < 0.05:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 2)
-			elif hash01(wx, wz, 9) < 0.14:
+			elif _grass_here(wx, wz, 0.14):
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 14) < 0.08:
 				data[idx(lx, ground + 1, lz)] = Blocks.FERN
@@ -1240,7 +1268,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				elif pick > 0.33:
 					flower = Blocks.FLOWER_YELLOW
 				data[idx(lx, ground + 1, lz)] = flower
-			elif hash01(wx, wz, 9) < 0.26:
+			elif _grass_here(wx, wz, 0.26):
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 13) < 0.01:
 				data[idx(lx, ground + 1, lz)] = Blocks.BERRY_BUSH
@@ -1269,7 +1297,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 			# through, which is what every child expects a field to be.
 			if interior and tree_roll < 0.006:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
-			elif hash01(wx, wz, 9) < 0.34:
+			elif _grass_here(wx, wz, 0.34):
 				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
 			elif hash01(wx, wz, 10) < 0.02:
 				var pick := hash01(wx, wz, 11)

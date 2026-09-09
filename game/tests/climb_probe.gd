@@ -32,9 +32,6 @@ extends Node
 ##   ahead was routinely a ditch, a hillside or open water — so a fill
 ##   that needed ground under it was refused, every course of it.
 ##
-##   Standing on a vehicle makes you its DRIVER, and this probe holds the
-##   stick forward forever. That is not a walk, it is full throttle.
-##
 ##   Movement is relative to the CAMERA, and the camera is turned by
 ##   `Game.local_inputs`, which is a different object from the one the
 ##   player walks on. The autotest bot went on steering while this pushed
@@ -305,21 +302,6 @@ func _physics_process(delta: float) -> void:
 	var world: WorldNode = Game.world
 	if me == null or world == null or world.chunks == null:
 		return
-	# NOBODY IS DRIVING ANYTHING TODAY.
-	#
-	# The world puts five boats and three cars out near the spawn, which
-	# is where this probe starts, and standing on one makes you its
-	# DRIVER — at which point HeldForward's "hold forward, forever" stops
-	# being a walk and becomes full throttle. Measured: a run that built a
-	# perfectly good wall and then reported on a player who had driven
-	# forty-eight blocks away from it in six seconds, on an empty field.
-	#
-	# `_ride_was` is what the carry is actually based on (being aboard
-	# LAST frame), so clearing both every frame is what stops it, whatever
-	# order the nodes tick in. A probe about climbing has no business
-	# being a probe about boats.
-	me.ride_id = ""
-	me._ride_was = ""
 	match _phase:
 		0:
 			# Take the controls first — the autotest bot is still driving
@@ -364,28 +346,6 @@ func _physics_process(delta: float) -> void:
 			# So: not flying, on the floor, and at the same height for a
 			# good half second before anything is built.
 			me.fly_mode = false
-			# NOT ABOARD ANYTHING, and this one cost a whole afternoon.
-			#
-			# The world puts five boats and three cars out near the spawn,
-			# and the spawn is where this probe starts. A deck reads as
-			# `on_floor` and holds a perfectly stable height, so the settle
-			# test passes on one — and standing on a vehicle makes you its
-			# DRIVER, at which point HeldForward's "hold forward forever"
-			# stops being a walk and becomes full throttle. The run
-			# measured a wall built on solid ground and then reported on a
-			# player who had driven a car twenty-nine blocks across the
-			# map. Every reading was of an empty field.
-			#
-			# So: step off, and keep stepping until there is nothing under
-			# the feet but world.
-			if world.vehicle_view != null \
-					and not world.vehicle_view.deck_under(me.position).is_empty():
-				me.position += Vector3(5.0, 1.0, 0.0)
-				me.ride_id = ""
-				_settled_at = INF
-				_settled_t = 0.0
-				if _t < SETTLE_LIMIT:
-					return
 			if not _streamed(world, me) or not me.on_floor \
 					or absf(me.position.y - _settled_at) > 0.02:
 				_settled_at = me.position.y

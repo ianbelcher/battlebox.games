@@ -166,9 +166,6 @@ func _ready() -> void:
 		add_child(load("res://tests/menu_probe.gd").new())
 	if not OS.get_environment("WORLD_CLIMB_TEST").is_empty():
 		add_child(load("res://tests/climb_probe.gd").new())
-	# WORLD_BOAT_TEST=1: stand a player on a boat and move it under them.
-	if OS.get_environment("WORLD_BOAT_TEST") == "1":
-		add_child(load("res://tests/boat_probe.gd").new())
 	# WORLD_GHOST_TEST=1: is a knocked-out team actually put away? Only a
 	# client can answer it — the server knows who is out, this knows what
 	# is drawn.

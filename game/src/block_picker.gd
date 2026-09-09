@@ -68,15 +68,6 @@ func _init(p_category := "blocks") -> void:
 				entries.append({"kind": "block", "id": block,
 					"name": Blocks.display_name(block),
 					"color": Blocks.color_of(block)})
-			# BOATS AND CARS ARE TOOLS, and they belong here with the
-			# other things you put down. They used to be two buttons in
-			# the WORLD menu, under the map, next to the world size —
-			# which is a settings page for the whole table, not a place
-			# anybody looks for something to place.
-			entries.append({"kind": "vehicle", "id": VehicleGeom.KIND_BOAT,
-				"name": "Boat", "color": Color("8a5a34")})
-			entries.append({"kind": "vehicle", "id": VehicleGeom.KIND_CAR,
-				"name": "Car", "color": Color("c8503c")})
 		"kits":
 			for i in Structures.count():
 				var spec := Structures.spec(i)
@@ -173,13 +164,6 @@ func set_allowed(ids: Array) -> void:
 
 func _allowed(index: int) -> bool:
 	if allowed_ids.is_empty():
-		return true
-	# THE CARRY LIST IS ABOUT WEAPONS. A boat is not something you are
-	# holding, it is something you put down — and its "id" is a vehicle
-	# kind, 0 or 1, which collides with weapon ids by accident. So in a
-	# battle a boat was offered only if you happened to be carrying
-	# weapon 0, which is nonsense in both directions.
-	if str(entries[index].get("kind", "")) == "vehicle":
 		return true
 	return int(entries[index].id) in allowed_ids
 

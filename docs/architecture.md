@@ -126,7 +126,6 @@ back-reference, none declaring an RPC:
 | `World/Terrain` | `terrain_sim.gd` | Water, fire, growth, explosions |
 | `World/Critters` | `critter_director.gd` | Where animals live and where they wander |
 | `World/Survival` | `survival_director.gd` | Grump raids and supply crates |
-| `World/Vehicles` | `vehicle_director.gd` | Boats and cars: the fleet, the ids, one driver each |
 | `World/Probes` | `world_probes.gd` | The `WORLD_*_TEST` dev hooks |
 | `World/Fx` | `world_fx.gd` | Client-side bangs and sparkles |
 

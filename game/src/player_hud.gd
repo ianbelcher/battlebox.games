@@ -1839,8 +1839,6 @@ func _held_name() -> String:
 			return str(Blocks.info(int(item.id)).get("name", ""))
 		"structure":
 			return str(Structures.spec(int(item.id)).get("name", ""))
-		"vehicle":
-			return "Boat" if int(item.id) == VehicleGeom.KIND_BOAT else "Car"
 		_:
 			return ""
 
