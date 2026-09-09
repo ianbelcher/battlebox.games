@@ -198,7 +198,7 @@
     // title screen cannot be is a screen with no title on it.
     var mark = document.createElement('img');
     mark.className = 'bb-mark';
-    mark.src = 'wordmark.png';
+    mark.src = 'wordmark.webp';
     mark.alt = 'BattleBox';
     mark.decoding = 'async';
     mark.addEventListener('error', function () {

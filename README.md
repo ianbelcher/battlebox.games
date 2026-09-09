@@ -84,6 +84,13 @@ be https**: the browser build meshes chunks on real threads, which needs
 page, and isolation only counts in a secure context. Over plain http the
 game loads and then dies.
 
+The build's files are named for their build (`index.<sha>.wasm`) and
+sent with a one-year immutable cache header, precompressed. If a CDN sits
+in front, give it a cache rule for that path pattern — Cloudflare does
+not cache `.wasm` by default — so the sixty megabytes come from the edge
+rather than from your uplink on every visit. `index.html` stays
+no-cache on purpose.
+
 ## How it is put together
 
 [`docs/architecture.md`](docs/architecture.md) is the map. In short:

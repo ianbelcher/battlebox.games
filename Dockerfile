@@ -114,6 +114,40 @@ RUN mkdir -p /game/build/server /game/build/play \
     && godot --headless --path /game --export-release "Web" build/play/index.html \
     && cp /game/version.txt /game/build/play/version.txt
 
+# THE BUILD IS NAMED FOR ITSELF, AND COMPRESSED ONCE.
+#
+# index.wasm, index.pck and index.js become index.<sha>.wasm and so on,
+# and index.html is patched to ask for them by that name. Two things
+# follow. A browser, or anything in front of the site, can cache them
+# for a year, because a new build never has the same name as an old one
+# — so a stale wasm against a new pack file is impossible by
+# construction rather than by a no-cache header on sixty megabytes.
+# And index.html, which stays no-cache and is two kilobytes, is the only
+# thing that has to be fetched fresh.
+#
+# Each of them also gets a .gz beside it, written here with the good
+# setting, so nginx hands the compressed file over (gzip_static) instead
+# of compressing forty megabytes per request on a core the game rooms
+# are using. That on-the-fly gzip was the slow path: measured at a third
+# of the raw transfer rate on a quiet box, and it collapses on a busy one.
+#
+# Godot derives every runtime file from the "executable" name — the
+# wasm, the pack, the audio worklets — so one field in the config and
+# one rename cover the lot. The icons keep their names; the HTML asks
+# for those directly and they are small.
+RUN cd /game/build/play \
+    && hash="$(tr -d '[:space:]' < version.txt)" \
+    && for f in index.*; do \
+         case "$f" in index.html|index.png|index.icon.png|index.apple-touch-icon.png) continue;; esac; \
+         mv "$f" "index.${hash}.${f#index.}"; \
+       done \
+    && sed -i "s/\"executable\":\"index\"/\"executable\":\"index.${hash}\"/; s/index\.js\b/index.${hash}.js/g; s/index\.wasm/index.${hash}.wasm/g; s/index\.pck/index.${hash}.pck/g" index.html \
+    && grep -q "index.${hash}.wasm" index.html \
+    && grep -q "src=\"index.${hash}.js\"" index.html \
+    && ls "index.${hash}.wasm" "index.${hash}.pck" "index.${hash}.js" >/dev/null \
+    && for f in index.${hash}.*; do case "$f" in *.wasm|*.pck|*.js) gzip -9 -k "$f";; esac; done \
+    && ls -la
+
 # Runtime stage: one image, three roles. A deployment runs two containers
 # from it — `lobby` (which starts a world per game) and `web` (nginx serving
 # the browser build). They share a network namespace, so nginx proxies /ws
@@ -181,7 +215,7 @@ COPY --from=build /game/build/play /opt/battlebox/web
 # is the point of copying the directory rather than the file.
 COPY web/ /opt/battlebox/websrc/
 RUN cp /opt/battlebox/websrc/boot.css /opt/battlebox/websrc/boot.js \
-        /opt/battlebox/websrc/wordmark.png \
+        /opt/battlebox/websrc/wordmark.webp \
         /opt/battlebox/websrc/BarlowCondensed-SemiBold.ttf \
         /opt/battlebox/websrc/Barlow-Medium.ttf \
         /opt/battlebox/web/ \

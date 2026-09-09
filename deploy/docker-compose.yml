@@ -23,6 +23,15 @@
 # tunnel, whatever you already run. It must pass websocket upgrades through
 # and leave response headers alone, or the Cross-Origin-* headers nginx.conf
 # sets never reach the browser.
+#
+# IF A CDN IS IN FRONT, TELL IT TO CACHE THE BUILD. The wasm and pack are
+# named for their build (index.<sha>.wasm) and sent with a one-year
+# immutable cache header, but Cloudflare and its kind cache only the file
+# types they are told to, and .wasm is not one of them by default. A cache
+# rule on the path pattern ^/index\.[0-9a-f]{12}\. — eligible for cache,
+# origin TTL — is what makes the sixty megabytes come from the edge
+# nearest the player rather than from this machine's uplink every visit.
+# Nothing else should be cached: index.html is no-cache on purpose.
 
 name: battlebox
 
