@@ -133,15 +133,8 @@ var _revive_pulse_t: Dictionary = {}
 func guarded(id: String) -> bool:
 	return Time.get_ticks_msec() < int(_capture_guard.get(id, 0))
 
-## Bases, poles and flags — the machinery both flag modes are built on.
-func active() -> bool:
-	return world.rules.has_flags()
-
-## LAST FLAG STANDING: the same board, one rule different. Losing your
-## flag does not cost you a point, it costs you the round. See
-## HoldoutRules.
-func elimination() -> bool:
-	return world.rules.flag_loss_is_out()
+## Bases, poles and flags — the machinery any flag mode is built on.
+## What a taken flag MEANS is not decided here: see GameMode.on_flag_taken.
 
 ## Put a block down as part of building a base, remembering it for one
 ## bulk broadcast. Skips anything already correct so the payload is walls
@@ -422,9 +415,9 @@ func _clear_flag_progress(id: String) -> void:
 ## Both closed routes live here: a mode with no way back through a flag,
 ## and a team already knocked out of a siege, whose flag is gone.
 func flag_route_open(id: String) -> bool:
-	if not ReviveRule.flag_brings_you_back(world.revive_mode, active()):
+	if not ReviveRule.flag_brings_you_back(world.revive_mode, world.rules.has_flags()):
 		return false
-	if elimination() and team_is_out(int(Game.roster.get(id, {}).get("team", -1))):
+	if team_is_out(int(Game.roster.get(id, {}).get("team", -1))):
 		return false
 	return true
 
@@ -485,7 +478,7 @@ func tick(delta: float) -> void:
 			# and without this they trudge to where their base was for the
 			# rest of the round, which looks exactly like a bot that has
 			# lost the plot.
-			if elimination() and team_is_out(team):
+			if team_is_out(team):
 				continue
 			# A computer player WALKS HOME like everybody else. Its goal
 			# while it is out is its own flag (see `_ctf_bot_goal`), so
@@ -621,31 +614,10 @@ func capture(id: String, team: int, from_team: int) -> void:
 	world.ctf_caps[team] = int(world.ctf_caps.get(team, 0)) + 1
 	world.ctf_lost[from_team] = int(world.ctf_lost.get(from_team, 0)) + 1
 	world.ctf_player_caps[id] = int(world.ctf_player_caps.get(id, 0)) + 1
-	if elimination():
-		# THAT IS THEIR ROUND. No point, no respawning flag, no coming
-		# back: the whole reason to dig in is that there is no second
-		# chance. Points are settled once, at the end — see
-		# MatchDirector.end_holdout.
-		knock_out_team(from_team)
-		print("HOLDOUT: %s took team %d's flag — team %d is out"
-			% [id, from_team, from_team])
-		world.battle.check_holdout_over()
+	# WHAT IT MEANS IS THE MODE'S: a point and a flag that comes back,
+	# or a side out of the round. This file only knows a flag was touched.
+	if not world.rules.on_flag_taken(world, id, team, from_team):
 		return
-	world.ctf_scores[team] = int(world.ctf_scores.get(team, 0)) + 1
-	world.ctf_scores[from_team] = int(world.ctf_scores.get(from_team, 0)) - 1
-	var flag: Dictionary = _flags[from_team]
-	flag.pos = Vector3.INF
-	flag.back_at = Time.get_ticks_msec() + CTF_FLAG_RETURN_MS
-	show_flag(from_team, false)
-	broadcast_flags()
-	# A capture used to bring the SCORER'S WHOLE TEAM back at once, as a
-	# release valve for a losing side. It is gone on purpose. There are
-	# exactly two ways back into a round now, and both are something a
-	# person does: fly home and touch your own flag, or have a
-	# team-mate stand over you and pick you up. Anything that quietly
-	# undoes a knockout somewhere else on the map makes knocking anybody
-	# down feel like it did not count.
-
 	# Home you go. Without this, touch-to-score lets one player stand on an
 	# enemy flag and take it again every time it respawns — the headless
 	# run had somebody win 3-0 off a single flag without moving. Sending
@@ -670,9 +642,17 @@ func capture(id: String, team: int, from_team: int) -> void:
 		if world.bots.roster.has(id):
 			world.bots.roster[id].pos = landing
 		world.cl_stand.rpc(id, landing, false, [], false))
-	print("CTF: %s took team %d's flag (scores %s)" % [id, from_team, world.ctf_scores])
-	if int(world.ctf_scores.get(team, 0)) >= world.ctf_target:
-		world.battle.finish(team)
+
+## The flag goes away and comes back home later. A capture in capture
+## the flag; what a mode does with a taken flag is its own business.
+func send_flag_away(team: int) -> void:
+	var flag: Dictionary = _flags.get(team, {})
+	if flag.is_empty():
+		return
+	flag.pos = Vector3.INF
+	flag.back_at = Time.get_ticks_msec() + CTF_FLAG_RETURN_MS
+	show_flag(team, false)
+	broadcast_flags()
 
 ## EVERY PLAYER ON A TEAM, OUT. Their flag comes down with them, so the
 ## board shows at a glance who is still in it.

@@ -48,7 +48,7 @@ var client_mode := "creative"
 ## EITHER FLAG MODE, as the client sees it. Capture the flag and last
 ## flag standing are the same board — bases, poles, flags, the panel that
 ## lists them — and everything that draws that board wants both. The
-## server-side twin is CtfDirector.active().
+## server-side twin is rules.has_flags().
 ## THE GAME BEING PLAYED, as an object with the answers (GameMode); the
 ## server's follows game_mode, the client's client_mode.
 var rules: GameMode = GameModes.by_key("creative")
@@ -464,7 +464,7 @@ func sv_hello() -> void:
 	# been up all night walks into.
 	cl_match_state.rpc_id(peer, match_phase, battle._timer,
 		match_alive.keys(), downed_ids.keys(), out_ids.keys())
-	if ctf.active() and not ctf._flags.is_empty():
+	if rules.has_flags() and not ctf._flags.is_empty():
 		cl_flags.rpc_id(peer, ctf._flag_payload(), ctf_scores, ctf_target,
 			ctf_caps, ctf_lost, ctf_player_caps)
 
@@ -564,14 +564,14 @@ func sv_where(slot: int) -> void:
 			seats.append(id)
 			battle.team_seats[team] = seats
 		var seat := maxi(seats.find(id), 0)
-		var spot := ctf.home_spot(team, seat) if ctf.active() \
+		var spot := ctf.home_spot(team, seat) if rules.has_flags() \
 			else battle.team_start_spot(team, seat)
 		# INSIDE THE WALL, if there is one. The team's site is where the
 		# round started, and by now the storm may have closed a hundred
 		# blocks past it: somebody dropped there burnt down in three
 		# seconds in a world that was red to every horizon, which is
 		# what a newcomer to a busy game used to get.
-		if match_phase == "BATTLE" and storm_radius >= 0.0 and not ctf.active():
+		if match_phase == "BATTLE" and storm_radius >= 0.0 and not rules.has_flags():
 			spot = store.safe_stand(storm_center, maxf(storm_radius * 0.5, 1.0))
 		player_state[id] = {"pos": spot, "treasures": 0,
 			"name": str(entry.name), "hp": max_hp(id)}
@@ -1513,9 +1513,7 @@ func open_round_if_waiting() -> void:
 		return
 	battle.open_lobby()
 
-## NOTHING IS KEPT ON DISK: the world is thrown away on every restart and
-## resize, and every "turned up in the void" bug traced back to state that
-## outlived its world. A restart is a clean table.
+## NOTHING IS KEPT ON DISK: a restart is a clean table.
 func _save_battle_setup() -> void:
 	pass
 
@@ -1664,9 +1662,6 @@ func sv_ctf_config(revive: int, target: int, drop: int, hold_mins := -1) -> void
 		drop_on_knockout = drop == 1
 	if hold_mins > 0:
 		holdout_minutes = clampf(float(hold_mins), 1.0, 99.0)
-		# The clock is read once and remembered, so a length changed
-		# mid-round has to say so or the round runs on the old one.
-		battle.forget_holdout_length()
 	cl_battle_config.rpc(int(storm_minutes), int(battle_size), loot_only,
 		battle_fly, team_count, drop_on_knockout, revive_mode, ctf_target,
 		battle_fly_bots, int(holdout_minutes), map_enemies)
@@ -2015,6 +2010,7 @@ signal match_score_changed
 ## Flag positions as the clients know them: [[team, home:Vector3, present:bool], ...]
 signal flags_changed
 signal flag_taken(id: String, team: int, from_team: int)
+signal fanfare(text: String, team: int)
 signal knockout(attacker: String, attacker_team: int, victim: String, victim_team: int)
 var out_ids: Dictionary = {}
 ## Client mirror of the flags, for the HUD map. See cl_flags.
@@ -3188,6 +3184,10 @@ func cl_flags(payload: Array, scores: Dictionary, target: int,
 @rpc("authority", "reliable")
 func cl_flag_taken(id: String, team: int, from_team: int) -> void:
 	flag_taken.emit(id, team, from_team)
+
+@rpc("authority", "reliable")
+func cl_fanfare(text: String, team: int) -> void:
+	fanfare.emit(text, team)
 
 
 ## Take a heart (or several) off somebody, from an attacker or from the

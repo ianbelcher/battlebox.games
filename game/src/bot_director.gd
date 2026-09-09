@@ -274,8 +274,8 @@ func _refresh_intel(delta: float) -> void:
 		var size := int(sizes[team])
 		var mine := standing.duplicate()
 		mine.erase(team)
-		var base := SiegeRoles.keepers(size, world.ctf.elimination(),
-			world.battle.holdout_pushing())
+		var base := SiegeRoles.keepers(size, world.rules.flag_loss_is_out(),
+			world.rules.defenders_push(world))
 		var old: Dictionary = _intel.get(team, {})
 		_intel[team] = {
 			"threat": threat,
@@ -285,9 +285,9 @@ func _refresh_intel(delta: float) -> void:
 			"bearing": BotHarbour.bearing(Vector3.ZERO, toward,
 				float(old.get("bearing", 0.0))),
 			"keepers": BotOrders.keepers(size, base, threat, mine.size(),
-				world.ctf.elimination()),
+				world.rules.flag_loss_is_out()),
 			"attackers": BotOrders.attackers(size, base, threat, mine.size(),
-				world.ctf.elimination()),
+				world.rules.flag_loss_is_out()),
 			"standing": mine,
 			"commit": commit.get(team, {}),
 			"mates": mates.get(team, []),
@@ -704,7 +704,7 @@ func _closer_mate(id: String, mate: String, body: Vector3, away: float) -> bool:
 		if other == id or other == mate or world.out_ids.has(other) \
 				or not bool(entry[3]):
 			continue
-		if world.ctf.active() and team >= 0 and _bot_ctf_defends(other, team):
+		if world.rules.has_flags() and team >= 0 and _bot_ctf_defends(other, team):
 			continue
 		rivals.append(Vector3(entry[1]).distance_to(body))
 	return not RallyRules.mine_to_take(away, rivals)
@@ -759,7 +759,7 @@ func _bot_cover_goal(id: String, pos: Vector3) -> Vector3:
 	# own base is where help lives, so this is both "get to cover" and
 	# "get home". Knocked-down players standing exactly where they fell was
 	# one of the things that read as broken.
-	if world.ctf.active():
+	if world.rules.has_flags():
 		var team := int(Game.roster.get(id, {}).get("team", -1))
 		var mine: Dictionary = world.ctf._flags.get(team, {})
 		var home: Vector3 = mine.get("home", Vector3.INF)
@@ -801,14 +801,14 @@ func _bot_ctf_keepers(team: int) -> int:
 	if known.has("keepers"):
 		return int(known.keepers)
 	return SiegeRoles.keepers(world.ctf.seats_of(team).size(),
-		world.ctf.elimination(), world.battle.holdout_pushing())
+		world.rules.flag_loss_is_out(), world.rules.defenders_push(world))
 
 ## How far from its own flag a keeper will go to pick somebody up.
 const KEEPER_RESCUE_RANGE := 14.0
 
 ## May this one walk to a body, or is it minding a flag?
 func _may_leave_post(id: String, body: Vector3) -> bool:
-	if not world.ctf.active():
+	if not world.rules.has_flags():
 		return true
 	var team := int(Game.roster.get(id, {}).get("team", -1))
 	if team < 0 or not _bot_ctf_defends(id, team):
@@ -1292,7 +1292,7 @@ func _threat_goal(id: String, bot: Dictionary, pos: Vector3, hp: int) -> Vector3
 		_bot_build_shield(id, bot, pos, at)
 	bot.erase("watch_yaw")
 	var team := int(Game.roster.get(id, {}).get("team", -1))
-	if world.ctf.active() and team >= 0 and _bot_ctf_defends(id, team):
+	if world.rules.has_flags() and team >= 0 and _bot_ctf_defends(id, team):
 		var home: Vector3 = world.ctf._flags.get(team, {}).get("home", Vector3.INF)
 		if home != Vector3.INF:
 			want = BotHarbour.leashed(home, want, KEEPER_LEASH)
@@ -1367,7 +1367,7 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 	# anyone up and cannot take a flag — so any other goal is a knocked-out
 	# computer player wandering the map for no reason, which is exactly
 	# what it looked like on the field.
-	if world.ctf.active() and world.out_ids.has(id):
+	if world.rules.has_flags() and world.out_ids.has(id):
 		var back := ctf_goal(id, pos)
 		if back != Vector3.INF:
 			return back
@@ -1446,7 +1446,7 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 		# separate from this and fires at anything in sight. Hunting stays
 		# below as the fallback for when every enemy flag is already off its
 		# pole and there is nothing left to run at.
-		if world.ctf.active():
+		if world.rules.has_flags():
 			var objective := ctf_goal(id, pos)
 			if objective != Vector3.INF:
 				return objective
@@ -2045,10 +2045,10 @@ const CTF_COVER_RADIUS := 9
 ## It is team wool either way, and wool digs out, so a wall is a delay and
 ## never a lock.
 func _cover_height() -> int:
-	return 3 if world.ctf.elimination() else 2
+	return 3 if world.rules.flag_loss_is_out() else 2
 
 func _cover_slots() -> int:
-	return 16 if world.ctf.elimination() else 8
+	return 16 if world.rules.flag_loss_is_out() else 8
 
 ## HOW MANY MINES A SIDE PUTS OUT, and how far from its own flag.
 ##
@@ -2079,7 +2079,7 @@ const MINE_CLEAR_OF_MATES := 5.0
 var _mines: Dictionary = {}
 
 func _mine_allowance() -> int:
-	return 8 if world.ctf.elimination() else 4
+	return 8 if world.rules.flag_loss_is_out() else 4
 
 ## Lay one, if there is a sensible place for it. True when something went
 ## down, so the caller can spend its build on the wall instead.
@@ -2129,7 +2129,7 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> 
 	# Quicker in a siege: the whole round is whether the wall went up in
 	# time, so a defender that lays a block every second and a half is a
 	# defender that loses.
-	bot.build_cd = randf_range(0.45, 0.9) if world.ctf.elimination() \
+	bot.build_cd = randf_range(0.45, 0.9) if world.rules.flag_loss_is_out() \
 		else randf_range(1.0, 1.9)
 	var flag: Dictionary = world.ctf._flags.get(team, {})
 	if flag.is_empty():
@@ -2161,7 +2161,7 @@ func _bot_build_cover(id: String, bot: Dictionary, team: int, _delta: float) -> 
 	# base actually falls is somebody coming in over the top of it. So
 	# once the wall has no gaps left to fill, the same builder starts
 	# putting a lid on.
-	if world.ctf.elimination():
+	if world.rules.flag_loss_is_out():
 		_roof_over(team, home)
 
 ## One block, if that cell is empty. True when something went down.
@@ -2892,8 +2892,8 @@ func _tick_bots(frame_delta: float) -> void:
 		# setup phase, which in last flag standing is the whole point of
 		# the mode — was spent standing about. A siege you have not built
 		# anything for is just a fight in a field.
-		var digging_in: bool = world.match_phase == "SETUP" and world.ctf.elimination()
-		if world.ctf.active() and not downed and not world.out_ids.has(id) \
+		var digging_in: bool = world.match_phase == "SETUP" and world.rules.flag_loss_is_out()
+		if world.rules.has_flags() and not downed and not world.out_ids.has(id) \
 				and ((world.match_phase == "BATTLE" and world.match_alive.has(id)) \
 					or digging_in):
 			var my_team := int(Game.roster.get(id, {}).get("team", -1))

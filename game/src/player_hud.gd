@@ -769,6 +769,11 @@ func _build_picker_pages() -> void:
 		world.match_score_changed.connect(_refresh_team_panel)
 		world.match_score_changed.connect(_refresh_ctf_panel)
 		world.flag_taken.connect(_on_flag_taken)
+		world.fanfare.connect(func(text: String, team: int) -> void:
+			var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
+				and team < WorldNode.TEAM_COLORS.size() else UiTheme.ACCENT
+			fanfare(text, tint)
+			Sfx.play("collect", -4.0, 1.2))
 		world.flags_changed.connect(_refresh_ctf_panel)
 		world.match_changed.connect(_refresh_ctf_panel)
 		world.match_changed.connect(func() -> void:
@@ -846,23 +851,9 @@ func _cap(what: String) -> String:
 ## happens behind the black so it is a scene change rather than a
 ## teleport. The server holds the same beat and makes us untouchable for
 ## it, so nothing can happen to us while we cannot see.
-func _on_flag_taken(id: String, team: int, from_team: int) -> void:
+func _on_flag_taken(id: String, _team: int, _from_team: int) -> void:
 	if world == null or _fade == null:
 		return
-	# EVERYBODY HEARS ABOUT IT. Who took whose flag, in the taker's
-	# colour — and in last flag standing, that the losing side is out,
-	# which is otherwise something you notice as a team going quiet.
-	var names: Array = world.client_team_names
-	var who := str(Game.roster.get(id, {}).get("name", "Somebody"))
-	var theirs := str(names[from_team]) if from_team >= 0 and from_team < names.size() \
-		else "the other side"
-	var line := "%s took %s's flag" % [who, theirs]
-	if world.client_rules.flag_loss_is_out():
-		line += "  ·  %s is out" % theirs
-	var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
-		and team < WorldNode.TEAM_COLORS.size() else UiTheme.ACCENT
-	fanfare(line, tint)
-	Sfx.play("collect", -4.0, 1.2)
 	if id != Game.player_id(multiplayer.get_unique_id(), slot):
 		return
 	var me := _player()

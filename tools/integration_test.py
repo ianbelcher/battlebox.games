@@ -161,7 +161,7 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--mode",
         default="creative",
-        choices=["creative", "battle", "ctf", "holdout", "zombies"],
+        choices=["creative", "battle", "ctf", "holdout"],
         help="which game mode to play; battle and ctf start a round",
     )
     args = parser.parse_args(argv)

@@ -167,36 +167,49 @@ instead.
 The world is the **platform**: blocks, digging, building, running,
 shooting, vehicles, weather, the wire protocol. It never asks what game
 is being played. Everything that makes a round a round is a **mode** —
-one file in `game/src/modes/`, a `GameMode` — and the platform asks its
-mode at a handful of seams and does what it is told:
+one file in `game/src/modes/`, a `GameMode` — and **that file owns its
+mechanics**. Battle royale's storm is in `battle_mode.gd`, not in the
+match director. Capture the flag's scoring is in `ctf_mode.gd`. Last
+flag's clock, elimination and end-of-round share-out are in
+`holdout_mode.gd`. If two modes want a similar thing, each writes its
+own; the day one of them needs to differ, nothing else breaks.
+
+The platform asks the mode at fixed points and does what it is told:
 
 | The seam | What the mode is asked |
 | --- | --- |
 | The front page (`game_setup.gd`) | its key, label and note; which settings it uses (`has_clock`, `has_target`, `picks_teams`, …) |
-| The drop (`MatchDirector.drop_everyone`) | `deal_teams`, `team_names`, `kit`, `max_hp` |
-| Every battle tick (`MatchDirector.tick`) | `has_storm`, `has_clock` / `round_seconds` / `on_time_up`, `has_flags`, `winner` |
-| A knockout (`MatchDirector.eliminate`) | `on_knockout`: the revive ladder, or convert, or respawn |
+| The lobby and the drop (`MatchDirector`) | `deal_teams`, `team_names`, `on_round_start`, `round_seconds`, `kit`, `max_hp` |
+| Every battle tick | `tick(world, delta, seconds_left)` — the mode's own machinery — then `on_time_up` and `winner` |
+| A knockout | `on_knockout`: the revive ladder, or convert, or respawn |
+| A flag touched (`CtfDirector`) | `on_flag_taken`: a point and a flag that comes back, or a side out |
 | Hearts growing back | `regen_ms` |
 | A late joiner | `joiner_team` |
-| The HUD | the same predicates and `kicker`, through the client's copy (`world.client_rules`) |
+| The computer players | `flag_loss_is_out`, `defenders_push` |
+| The HUD | the predicates and `kicker`, through the client's copy (`world.client_rules`) |
 
-`GameModes` is the registry: the order there is the order on the front
-page. `lobby.py` keeps a twin of the key list because it validates a
-POST before any Godot is involved. To add a mode: one file extending
-`GameMode` with the hooks it has an opinion about, one line in
-`GameModes.ALL`, its key in `lobby.py`'s `MODES`, and it appears on the
-front page, survives validation, and plays. `zombies_mode.gd` is the
-worked example — uneven sides, one-heart respawning zombies, survivors
-who turn when bitten, a clock the survivors have to outlast — and it
-touches nothing outside its own file.
+What the mode calls back into are **primitives** — things the world can
+do that know nothing about any game: hearts and elimination, the
+closing-circle picture every client draws (`storm_radius`,
+`storm_center`, `cl_storm`), crumbling ground (`terrain.crumble_ring`),
+the flag machinery (bases, poles, carrying, touching, tagging in,
+`send_flag_away`, `knock_out_team`), a line across every screen
+(`cl_fanfare`), standing a player up again (`battle.stand_again`), the
+blocks. The full list is at the bottom of `game_mode.gd`.
 
-It used to be strings: `game_mode == "ctf"` in one place,
-`ctf.elimination()` in another, `client_mode == "battle"` on the HUD,
-each a separate opinion about what the modes were. That is how the
-storm ended up over a capture the flag round — the drop set it for every
-mode and only the modes that knew about it cleared it. A mode that does
-not name the `Game` autoload is a mode the front page's unit tests can
-load; read the roster through `world.roster()`.
+**To add a game:** one file extending `GameMode` with the hooks it has
+an opinion about, one line in `GameModes.ALL`, its key in `lobby.py`'s
+`MODES`. It is then on the front page, validated on the way in, and
+playing. **If it needs something the world cannot do** — spawn a thing
+at a point, draw a marker, a new kind of touch — add that as a primitive
+on the platform, a method any mode may call. Never add an "objective"
+that two modes share: that is how last flag standing came to be a set of
+`if elimination()` branches inside capture the flag's code, and how the
+storm ended up over a flag round — the drop set it for every mode and
+only the modes that knew about it cleared it.
+
+A mode must not name the `Game` autoload, or the front page's unit tests
+cannot load it; read the roster through `world.roster()`.
 
 ## Data, not code
 

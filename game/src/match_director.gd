@@ -24,9 +24,9 @@ var _last_hit_ms: Dictionary = {}
 
 var _timer := 0.0
 
-var _storm_hurt_ms: Dictionary = {}
+## Told the mode the clock ran out, once this round.
+var _time_up_told := false
 
-var _next_bite_ms := 0
 
 var revive_progress: Dictionary = {}
 
@@ -56,43 +56,10 @@ var _burn_ms: Dictionary = {}
 
 var _result_recorded := false
 
-func storm_start_radius() -> float:
-	# Big enough that the wall starts beyond every corner of the arena
-	# from wherever this battle's center landed.
-	return world.battle_size * 0.75 + Vector2(world.storm_center.x, world.storm_center.z).length()
-
-## One line on the server's stdout as the wall changes what it is doing,
-## so a log says when the last stand began and when the round was shut —
-## the two moments that were missing for an hour of "18 still standing".
-var _storm_stage := ""
-
-func _say_storm_stage() -> void:
-	var stage := "none"
-	if world.storm_radius < 0.0:
-		stage = "none"
-	elif world.storm_radius == 0.0:
-		stage = "shut"
-	elif world.storm_radius <= StormClock.HOLD_RADIUS:
-		stage = "last stand"
-	else:
-		stage = "closing"
-	if stage == _storm_stage:
-		return
-	_storm_stage = stage
-	match stage:
-		"closing":
-			print("STORM: closing in, %d still in it" % world.match_alive.size())
-		"last stand":
-			print("STORM: last stand — the wall holds at %d for %ds, %d still in it"
-				% [int(StormClock.HOLD_RADIUS), int(StormClock.HOLD_SECONDS),
-					world.match_alive.size()])
-		"shut":
-			print("STORM: shut, %d still in it and burning" % world.match_alive.size())
-
 func what_this_is() -> String:
-	if world.ctf.elimination():
+	if world.rules.flag_loss_is_out():
 		return "Last flag standing"
-	if world.ctf.active():
+	if world.rules.has_flags():
 		return "Capture the flag"
 	return "Battle royale"
 
@@ -191,8 +158,8 @@ func tick(delta: float) -> void:
 				# How long a round runs is the mode's to say: a storm's
 				# closing, a clock, or forever.
 				_timer = world.rules.round_seconds(world)
-				if world.rules.has_clock() and not world.rules.has_storm():
-					print("%s: round is %.0f seconds" % [world.rules.label, _timer])
+				_time_up_told = false
+				print("%s: round is %.0f seconds" % [world.rules.label, _timer])
 				world.cl_match.rpc("BATTLE", _timer)
 		"BATTLE":
 			# THE MODE SAYS WHAT A TICK IS. Storm, clock, flags and the win
@@ -201,9 +168,6 @@ func tick(delta: float) -> void:
 			# move, the clock or the storm does its thing, and then
 			# somebody may have won.
 			var rules: GameMode = world.rules
-			if rules.flag_loss_is_out():
-				_storm_bite()
-			world.stats.lap("match_storm")
 			_tick_slow(delta)
 			if int(_timer) % 2 == 0 and _timer - floorf(_timer) < 0.02:
 				_tick_crate_gravity()
@@ -214,27 +178,21 @@ func tick(delta: float) -> void:
 			world.stats.lap("match_revives")
 			if rules.has_flags():
 				world.ctf.tick(delta)
-			if rules.has_storm():
-				if world.storm_minutes >= 59.0:
-					# Unlimited: the storm never closes and the match only
-					# ends when one team is left standing.
-					_timer = 9999.0
-				var storm := StormClock.at(_timer, world.storm_minutes * 60.0, storm_start_radius())
-				world.storm_radius = float(storm.radius)
-				world.cl_storm.rpc(world.storm_radius, world.storm_center, float(storm.seconds))
-				_say_storm_stage()
-				if world.storm_radius >= 0.0:
-					_storm_damage()
-					_storm_bite()
-				world.stats.lap("match_storm")
-			elif rules.has_clock():
-				# NO SECOND SUBTRACTION. `_timer -= delta` already ran at
-				# the top of this function, for every phase — so taking it
-				# off again here ran the round clock at DOUBLE SPEED.
+				world.stats.lap("match_flags")
+			# THE MODE'S OWN TICK: the storm, or whatever else it plays
+			# with. `_timer -= delta` already ran at the top of this
+			# function, for every phase, and NOTHING else subtracts from
+			# it — a second subtraction once ran a round clock at double
+			# speed.
+			rules.tick(world, delta, _timer)
+			world.stats.lap("match_mode")
+			if rules.has_clock():
 				world.match_seconds = maxf(0.0, _timer)
-				if _timer <= 0.0:
+				if _timer <= 0.0 and not _time_up_told:
+					_time_up_told = true
 					rules.on_time_up(world)
-					return
+					if world.match_phase != "BATTLE":
+						return
 			else:
 				# No clock: the round runs until the mode says it is won.
 				_timer = 9999.0
@@ -275,7 +233,6 @@ func _let_the_mode_deal() -> void:
 func drop_everyone() -> void:
 	world.match_phase = "SETUP"
 	_timer = 6.0
-	_storm_stage = ""
 	world.match_alive.clear()
 	world.downed_ids.clear()
 	revive_progress.clear()
@@ -335,7 +292,7 @@ func drop_everyone() -> void:
 	# Capture the flag raises the bases FIRST, so that placing a team puts
 	# them on their own base's floor rather than on the hillside the base
 	# is about to be built over.
-	if world.ctf.active():
+	if world.rules.has_flags():
 		world.ctf_scores.clear()
 		world.ctf_caps.clear()
 		world.ctf_lost.clear()
@@ -371,7 +328,7 @@ func drop_everyone() -> void:
 		# last time is the wall you start behind this time.
 		var seats_here: PackedStringArray = team_seats.get(team_i, PackedStringArray())
 		var seat := maxi(seats_here.find(id), 0)
-		var drop := world.ctf.home_spot(team_i, seat) if world.ctf.active() \
+		var drop := world.ctf.home_spot(team_i, seat) if world.rules.has_flags() \
 			else team_start_spot(team_i, seat)
 		world.cl_stand.rpc(id, drop, world.loot_only, world.rules.kit(world, id), true)
 		if world.bots.roster.has(id):
@@ -387,7 +344,7 @@ func drop_everyone() -> void:
 			# exchange with a person who started armed. Battle royale still
 			# opens on the sword for both, because there the scramble for
 			# crates IS the opening.
-			var drop_weapon := 0 if world.ctf.active() else 13
+			var drop_weapon := 0 if world.rules.has_flags() else 13
 			world.bots.roster[id].weapon = forced_weapon.to_int() \
 				if forced_weapon.is_valid_int() else drop_weapon
 			world.player_state[id].pos = drop
@@ -455,19 +412,16 @@ func drop_everyone() -> void:
 	print("Battle loot: %d/%d crates placed (%d attempts)" % [placed, crate_count, attempts])
 	world.survival.broadcast_crates()
 	Game.cl_roster.rpc(Game.roster)
-	# NO STORM IN A MODE THAT HAS NONE, and everybody told so. This was
-	# set for every mode and sent to every client on its hello, and the
-	# flag modes cleared it on the server every tick without ever saying
-	# so — a capture the flag round went red to the horizon on screen
-	# while nobody lost a heart to it.
-	world.storm_radius = storm_start_radius() if world.rules.has_storm() else -1.0
-	if not world.rules.has_storm():
-		world.cl_storm.rpc(-1.0, Vector3.ZERO, 0.0)
-	# The circle closes on a RANDOM spot each battle, and the wall starts
-	# beyond the arena edge so no red is visible at the drop.
-	var storm_angle := randf() * TAU
-	var storm_dist := randf() * world.battle_size * 0.22
-	world.storm_center = Vector3(cos(storm_angle) * storm_dist, 0, sin(storm_angle) * storm_dist)
+	# NO STORM UNLESS THE MODE MAKES ONE, and everybody told so. The
+	# platform used to set a start radius for every mode and send it to
+	# every client on its hello, and the flag modes cleared it on the
+	# server without ever saying so — a capture the flag round went red
+	# to the horizon on screen while nobody lost a heart to it. Now the
+	# picture is cleared here and only a mode's on_round_start paints it.
+	world.storm_radius = -1.0
+	world.storm_center = Vector3.ZERO
+	world.rules.on_round_start(world)
+	world.cl_storm.rpc(world.storm_radius, world.storm_center, 0.0)
 	# Every battle gets its own time of day, and runs exactly one day.
 	#
 	# There used to be a `clock = 0.79` on the line under the random one,
@@ -491,70 +445,7 @@ func drop_everyone() -> void:
 		sites.append("%d@%v" % [team_of, team_site[team_of]])
 	sites.sort()
 	print("%s: dropping %d players | team sites: %s"
-		% ["Capture the flag" if world.ctf.active() else "Battle royale",
-			world.match_alive.size(), ", ".join(sites)])
-
-func _storm_damage() -> void:
-	var now := Time.get_ticks_msec()
-	for id: String in world.match_alive.keys():
-		var state: Dictionary = world.player_state.get(id, {})
-		if state.is_empty() or now < int(_storm_hurt_ms.get(id, 0)):
-			continue
-		var pos: Vector3 = state.pos
-		# Outside the wall you are ON THE CLOCK. A short grace band, then
-		# damage that speeds up the further out you are: matches used to
-		# end by everyone standing in the middle waiting for the storm to
-		# get round to it.
-		var out := Vector2(pos.x - world.storm_center.x,
-			pos.z - world.storm_center.z).length() - world.storm_radius
-		# A short grace band outside the wall — until the wall has closed
-		# to nothing, when there is no inside left to be graced by.
-		var grace := 2.0 if world.storm_radius > 0.0 else -1.0
-		if out > grace:
-			# 1.1s a heart at the edge, down to 0.3s deep out — eight
-			# hearts is about nine seconds at the rim, under three if you
-			# ignore it completely.
-			var bite := clampf(1.1 - out / 40.0, 0.3, 1.1)
-			_storm_hurt_ms[id] = now + int(bite * 1000.0)
-			state.hp = int(state.get("hp", world.MATCH_HP)) - 1
-			world.send_hearts(id)
-			# No knockback from the storm: pushing players while they're
-			# already outside fed back into more storm damage and once
-			# launched a player 142 km off the map.
-			if state.hp > 0:
-				continue
-			if not world.downed_ids.has(id):
-				eliminate(id)
-			elif state.hp <= -world.MATCH_HP:
-				# ON THE FLOOR IN THE STORM. Being knocked out is not a
-				# countdown anywhere else — you wait for a team-mate —
-				# but nobody is coming out here, and a downed player the
-				# storm could not finish was a round that could not end.
-				# Another eight hearts' worth of it and you are out.
-				put_out(id)
-
-## The storm chews the world: surface blocks just outside the wall pop
-## away, so the losing ground visibly crumbles.
-func _storm_bite() -> void:
-	var now := Time.get_ticks_msec()
-	if now < _next_bite_ms:
-		return
-	_next_bite_ms = now + 500
-	for n in 6:
-		var a := randf() * TAU
-		var r := world.storm_radius + randf_range(2.0, 14.0)
-		var wx := int(world.storm_center.x + cos(a) * r)
-		var wz := int(world.storm_center.z + sin(a) * r)
-		var y := world.store.surface_y(wx, wz)
-		if y <= WorldGen.SEA_LEVEL or y >= WorldGen.CHUNK_H - 2:
-			continue
-		var pos := Vector3i(wx, y, wz)
-		if world.store.get_block(pos) == Blocks.AIR:
-			continue
-		world.store.set_block(pos, Blocks.AIR)
-		world.cl_edit.rpc(pos, Blocks.AIR, "storm")
-		if randf() < 0.12:
-			world.cl_boom_fx.rpc(pos)
+		% [world.rules.label, world.match_alive.size(), ", ".join(sites)])
 
 ## Down-but-not-out: if living teammates remain you crawl and can be
 ## revived (teammate stands close for ~3s); alone, you're out.
@@ -577,7 +468,7 @@ func eliminate(id: String, attacker := "") -> void:
 	var verdict := world.rules.on_knockout(world, id)
 	if verdict == "convert" or verdict == "respawn":
 		_emit_feed(id, attacker)
-		_stand_again(id, verdict == "convert")
+		stand_again(id, verdict == "convert")
 		return
 	# Reviving is a mode setting in capture the flag: with it off, a
 	# knockout puts you straight OUT and the only way back is
@@ -601,9 +492,13 @@ func eliminate(id: String, attacker := "") -> void:
 	_emit_feed(id, attacker)
 	check_win()
 
+## The round clock, for the modes and the computer players.
+func seconds_left() -> float:
+	return _timer
+
 ## Back on your feet where your side starts, with its kit and its
 ## hearts — and on the OTHER side, if the mode has just taken you.
-func _stand_again(id: String, switch_sides: bool) -> void:
+func stand_again(id: String, switch_sides: bool) -> void:
 	if switch_sides:
 		var was := int(Game.roster.get(id, {}).get("team", 0))
 		var to := 0
@@ -904,72 +799,6 @@ func finish(winner: int) -> void:
 	print("%s over: team %d" % [world.rules.label, winner])
 	record_result(winner)
 	world.cl_match_end.rpc(winner, _timer)
-
-## HOW LONG A ROUND OF LAST FLAG STANDING RUNS.
-##
-## Ten minutes, unless WORLD_HOLDOUT_MINUTES says otherwise. A mode that
-## can only be seen by waiting ten minutes is a mode that never gets
-## checked end to end, and the scoring only happens at the very end — so
-## the one part most worth testing was the part hardest to reach.
-## Read once, not per call: this is reached from the bot goal path, which
-## asks how much of the round is left for every computer player deciding
-## whether it is still minding the flag — and an environment lookup is a
-## syscall, not a variable.
-var _holdout_env := -1.0
-
-## Forget a remembered length — the setting changed under us.
-func forget_holdout_length() -> void:
-	_holdout_env = -1.0
-
-func holdout_seconds() -> float:
-	# The environment knob is for headless runs and wins when it is set;
-	# read once, because this is reached from the bot goal path and an
-	# environment lookup is a syscall rather than a variable.
-	if _holdout_env < 0.0:
-		var knob := OS.get_environment("WORLD_HOLDOUT_MINUTES")
-		_holdout_env = knob.to_float() * 60.0 \
-			if knob.is_valid_float() and knob.to_float() > 0.0 else 0.0
-	if _holdout_env > 0.0:
-		return _holdout_env
-	return maxf(60.0, world.holdout_minutes * 60.0)
-
-## Is the guard going out? See HoldoutRules.pushing.
-func holdout_pushing() -> bool:
-	return HoldoutRules.pushing(_timer, holdout_seconds())
-
-## Is last flag standing over because only one team still has a flag?
-func check_holdout_over() -> void:
-	if world.match_phase != "BATTLE" or not world.ctf.elimination():
-		return
-	if Game.roster.is_empty():
-		finish(-2)
-		return
-	if world.ctf.teams_holding().size() <= 1:
-		end_holdout()
-
-## SETTLE THE ROUND. Whoever still has a flag shares the pot, and the
-## share depends on how many of them there are — see HoldoutRules.
-##
-## Points go into the same per-team score capture the flag uses, so they
-## accumulate across rounds and the existing scoreboard shows them with no
-## second system to build.
-##
-## The winner reported is the top team, or -1 when more than one held: a
-## shared round is a draw and saying otherwise on the end card would be a
-## lie about what just happened.
-func end_holdout() -> void:
-	if world.match_phase != "BATTLE":
-		return
-	# SURVIVING, not merely holding — see CtfDirector.teams_surviving.
-	var held: Array = world.ctf.teams_surviving()
-	var each := HoldoutRules.share(held.size())
-	for team_v: Variant in held:
-		var team := int(team_v)
-		world.ctf_scores[team] = int(world.ctf_scores.get(team, 0)) + each
-	world.ctf.broadcast_flags()
-	print("HOLDOUT: %d team(s) survived of %d holding, %d point(s) each (scores %s)"
-		% [held.size(), world.ctf.teams_holding().size(), each, world.ctf_scores])
-	finish(int(held[0]) if held.size() == 1 else -1)
 
 ## One knockout, for the board.
 func credit_frag(attacker_id: String) -> void:

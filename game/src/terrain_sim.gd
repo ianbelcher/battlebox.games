@@ -379,3 +379,24 @@ func dawn_check() -> void:
 					place(Vector3i(wx, y + 1, wz),
 						flowers[int(WorldGen.hash01(wx, wz, 93) * 3.0)])
 	_was_night = night
+
+## THE GROUND CRUMBLES around a ring: a few surface blocks just outside
+## `radius` of `center` pop away, so losing ground visibly goes. A world
+## primitive — battle royale's storm chews the map with it; a mode with
+## some other reason for the ground to give way may call it too.
+func crumble_ring(center: Vector3, radius: float, bites := 6) -> void:
+	for n in bites:
+		var a := randf() * TAU
+		var r := radius + randf_range(2.0, 14.0)
+		var wx := int(center.x + cos(a) * r)
+		var wz := int(center.z + sin(a) * r)
+		var y := world.store.surface_y(wx, wz)
+		if y <= WorldGen.SEA_LEVEL or y >= WorldGen.CHUNK_H - 2:
+			continue
+		var pos := Vector3i(wx, y, wz)
+		if world.store.get_block(pos) == Blocks.AIR:
+			continue
+		world.store.set_block(pos, Blocks.AIR)
+		world.cl_edit.rpc(pos, Blocks.AIR, "storm")
+		if randf() < 0.12:
+			world.cl_boom_fx.rpc(pos)

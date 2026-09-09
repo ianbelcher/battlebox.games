@@ -9,7 +9,7 @@ extends TestCase
 ## So this reads the source instead of trusting the list, and fails on the
 ## day a hook is added without a line saying what it does.
 
-const SOURCE_DIRS := ["res://src", "res://tests", "res://tests/unit"]
+const SOURCE_DIRS := ["res://src", "res://src/modes", "res://tests", "res://tests/unit"]
 ## A read of the environment: the raw call, or one of EnvConfig's typed
 ## readers. Digits are in the class because of WORLD_MCA_Y0 — leaving them
 ## out was a bug this test had, and caught in itself.
