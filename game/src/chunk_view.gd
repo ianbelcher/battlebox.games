@@ -550,26 +550,28 @@ func _drop_chunk(cpos: Vector2i) -> void:
 # type per chunk — grass, ferns, flowers and mushrooms become real
 # little models while staying ordinary diggable blocks underneath.
 # ------------------------------------------------------------------
-const FOLIAGE_MODELS := {Blocks.TALL_GRASS: "grass_large",
+## "proc:" names are built by Foliage; the rest are Kenney models,
+## recoloured on load (their teal is a placeholder, not a plant colour).
+const FOLIAGE_MODELS := {Blocks.TALL_GRASS: "proc:grass",
 	Blocks.FERN: "grass_leafs", Blocks.FLOWER_RED: "flower_redA",
 	Blocks.FLOWER_YELLOW: "flower_yellowA", Blocks.MUSHROOM: "mushroom_red",
 	Blocks.FLOWER_PINK: "flower_purpleA", Blocks.DAISY: "flower_yellowB",
-	Blocks.BLUEBELL: "flower_purpleB", Blocks.CATTAIL: "grass_leafsLarge",
+	Blocks.BLUEBELL: "flower_purpleB", Blocks.CATTAIL: "proc:reeds",
 	Blocks.WHEAT_PLANT: "crops_wheatStageB", Blocks.DEAD_BUSH: "plant_bushSmall",
 	Blocks.BERRY_BUSH: "plant_bushDetailed", Blocks.BAMBOO: "crops_bambooStageB"}
-const FOLIAGE_SCALES := {Blocks.TALL_GRASS: 1.6, Blocks.FERN: 1.5,
+const FOLIAGE_SCALES := {Blocks.TALL_GRASS: 1.0, Blocks.FERN: 1.5,
 	Blocks.FLOWER_RED: 1.2, Blocks.FLOWER_YELLOW: 1.2, Blocks.MUSHROOM: 1.1,
 	Blocks.FLOWER_PINK: 1.2, Blocks.DAISY: 1.2, Blocks.BLUEBELL: 1.2,
-	Blocks.CATTAIL: 2.2, Blocks.WHEAT_PLANT: 1.3, Blocks.DEAD_BUSH: 1.1,
+	Blocks.CATTAIL: 1.0, Blocks.WHEAT_PLANT: 1.3, Blocks.DEAD_BUSH: 1.1,
 	Blocks.BERRY_BUSH: 1.3, Blocks.BAMBOO: 1.5}
 ## GRASS IS NOT ONE PLANT. Every grass block was the same model at the
 ## same size, which is a field of identical stamps and reads as one:
-## a plane with tufts on it. Three models now, dealt by position — the
-## ordinary tuft, a big leafy clump, a small fine one — and every
-## instance at its own size, so a meadow is grass of different heights
-## with the ground showing through, and the blocks underneath stop
-## reading as blocks. Same trick for the ferns, at two sizes.
-const GRASS_VARIANTS := ["grass_large", "grass_leafsLarge", "grass_leafs"]
+## a plane with tufts on it. Three builds now, dealt by position — the
+## ordinary tuft, a thick tussock, a small fine one (see Foliage) — and
+## every instance at its own size, so a meadow is grass of different
+## heights with the ground showing through, and the blocks underneath
+## stop reading as blocks.
+const GRASS_VARIANTS := ["proc:grass", "proc:clump", "proc:fine"]
 ## How much an instance's size wanders from the table above: 0.75 to 1.45
 ## of it.
 const FOLIAGE_SIZE_SPREAD := 0.7
@@ -579,13 +581,17 @@ func _foliage_mesh(model: String) -> Mesh:
 	if _foliage_meshes.has(model):
 		return _foliage_meshes[model]
 	var mesh: Mesh = null
-	var scene: PackedScene = load("res://assets/models/nature/%s.glb" % model)
-	if scene != null:
-		var inst := scene.instantiate()
-		for node in inst.find_children("*", "MeshInstance3D", true, false):
-			mesh = (node as MeshInstance3D).mesh
-			break
-		inst.free()
+	if model.begins_with("proc:"):
+		mesh = Foliage.build(model)
+	else:
+		var scene: PackedScene = load("res://assets/models/nature/%s.glb" % model)
+		if scene != null:
+			var inst := scene.instantiate()
+			for node in inst.find_children("*", "MeshInstance3D", true, false):
+				mesh = (node as MeshInstance3D).mesh
+				break
+			inst.free()
+		Foliage.recolour(mesh)
 	_foliage_meshes[model] = mesh
 	return mesh
 
