@@ -13,7 +13,9 @@ var match_mode := false
 const MAX_INFLIGHT_MESHES := 3
 ## Lights per chunk. Twenty, from ten: underground every glowing block
 ## is a light and eight was a cave with two lamps in it.
-var light_cap := 20
+## EIGHT, because that is how many lamps the compatibility renderer will
+## light one mesh with; the mesher merges neighbours so eight is enough.
+var light_cap := 8
 const REQUEST_BATCH := 40
 const REQUEST_RETRY_SECONDS := 6.0
 
@@ -107,6 +109,10 @@ func _mesh_worker() -> void:
 		_mesh_mutex.lock()
 		_mesh_results.append({"cpos": job.cpos, "surfaces": surfaces, "gen": job.gen})
 		_mesh_mutex.unlock()
+
+## The eight chunks around one.
+const AROUND := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
+	Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
 
 func _ready() -> void:
 	for i in 3:
@@ -209,7 +215,7 @@ func receive_chunk(cx: int, cz: int, blob: PackedByteArray) -> void:
 	_data[cpos] = raw
 	_queue_mesh(cpos)
 	# Neighbors were meshed against air where this chunk borders them.
-	for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+	for off: Vector2i in AROUND:
 		if _data.has(cpos + off):
 			_queue_mesh(cpos + off)
 
@@ -259,15 +265,16 @@ func apply_edit(pos: Vector3i, block: int) -> int:
 	data[index] = block
 	_data[cpos] = data
 	_queue_mesh(cpos, true)
-	# Border edits change neighbor face culling and AO.
-	if lx == 0:
-		_queue_mesh(cpos + Vector2i(-1, 0), true)
-	elif lx == 15:
-		_queue_mesh(cpos + Vector2i(1, 0), true)
-	if lz == 0:
-		_queue_mesh(cpos + Vector2i(0, -1), true)
-	elif lz == 15:
-		_queue_mesh(cpos + Vector2i(0, 1), true)
+	# Border edits change neighbor face culling, AO and the ground's
+	# shape — and a corner edit changes the chunk diagonally beyond it.
+	var ex := -1 if lx == 0 else (1 if lx == 15 else 0)
+	var ez := -1 if lz == 0 else (1 if lz == 15 else 0)
+	if ex != 0:
+		_queue_mesh(cpos + Vector2i(ex, 0), true)
+	if ez != 0:
+		_queue_mesh(cpos + Vector2i(0, ez), true)
+	if ex != 0 and ez != 0:
+		_queue_mesh(cpos + Vector2i(ex, ez), true)
 	return old
 
 func get_block(pos: Vector3i) -> int:
@@ -332,7 +339,9 @@ func _process(_delta: float) -> void:
 		if not _data.has(cpos):
 			continue
 		var neighbors := {}
-		for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		# All eight, diagonals included: the shape of a corner block reads
+		# the block diagonally beyond it.
+		for off: Vector2i in AROUND:
 			var n: PackedByteArray = _data.get(cpos + off, PackedByteArray())
 			if not n.is_empty():
 				neighbors[off] = n.duplicate()

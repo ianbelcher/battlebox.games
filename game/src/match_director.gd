@@ -590,10 +590,9 @@ func find_team_site(slot: int) -> Vector3:
 		var wz := int(sin(angle) * dist)
 		if not world.store.inside_world(wx, wz, 10):
 			continue
-		var y := world.store.surface_y(wx, wz)
-		if y <= WorldGen.SEA_LEVEL or y >= WorldGen.CHUNK_H - 10:
-			continue
-		if Blocks.is_liquid(world.store.get_block(Vector3i(wx, y, wz))):
+		var y := world.store.stand_y(wx, wz)
+		if y < 0 or (y <= WorldGen.SEA_LEVEL and world.store.theme != "caverns") \
+				or y >= WorldGen.CHUNK_H - 10:
 			continue
 		# Prefer flat: a team standing on a staircase is no use to anyone.
 		var roughness := 0

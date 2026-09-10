@@ -245,11 +245,23 @@ and water are shaders driven by vertex data in UV2.
 Natural ground is shaped, in the picture only — collision is whole
 blocks. Every top corner of a block of ground is a vertex the ground
 shares, with one height that every block touching it reads (see the rule
-above `Mesher._smooth`): a step is a ramp, a stair is a slope, a diagonal
-hillside is one plane, and a lone block or a one-wide hole stays square.
-`game/tests/unit/ground_shape_test.gd` pins the corner heights, and
-`game/tests/ground_look.gd` renders a made-up chunk from a fixed camera
-so the shape can be looked at without walking a client up a hill.
+above `Mesher._smooth`): a step is a ramp, a stair is a slope, a
+plateau's corner is flat from its midline, and a lone block or a one-wide
+hole stays square. Every corner is a whole block up or down, and anything
+solid — glowstone, glass, a fence — holds the ground up beside it. The
+mesher reads all eight neighbouring chunks for it, diagonals included.
+`game/tests/unit/ground_shape_test.gd` pins the corner heights and checks
+the mesh is closed, and `game/tests/ground_look.gd` renders a made-up
+chunk from a fixed camera so the shape can be looked at without walking
+a client up a hill.
+
+Lamps in a chunk are merged by the mesher and capped at eight by
+`chunk_view.gd`, because the compatibility renderer lights a mesh with
+eight lamps at most and a chunk is one mesh.
+
+The world is a square slab with a bedrock floor and a bedrock wall around
+its outermost ring, floor to sky. The Lobby's map is locked: a reset
+keeps the map a room was made as, and the Lobby refuses a map switch.
 
 ## Nothing is persisted
 

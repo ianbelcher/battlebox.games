@@ -34,32 +34,19 @@ func _shaped(data: PackedByteArray) -> Mesher:
 func _diagonal(x: int, z: int) -> int:
 	return clampi(x + z - 7, 1, 6)
 
-func test_a_diagonal_hillside_is_one_plane() -> void:
+func test_a_diagonal_edge_is_flat_from_the_midline() -> void:
 	var m := _shaped(_ground(_diagonal))
-	# Block (6, 5) is the top of a column four high — x + z = 11 — on the
-	# edge of tread 3: (5, 5) and (6, 4) are open, (7, 5) and (6, 6)
-	# solid, and the ground beyond its NW corner is two steps down. Its
-	# top runs straight from a block below its bottom at NW to its own
-	# top at SE.
+	# Block (6, 5) — x + z = 11 — is on the edge of tread 3: (5, 5) and
+	# (6, 4) are open, (7, 5) and (6, 6) solid. Its outer corner drops
+	# one block and the rest of its top stays up: flat from the midline,
+	# never a ridge and never a cut deeper than a block.
 	var h := m._heights(6, 3, 5)
-	equal(h, PackedFloat32Array([-1, 0, 1, 0]),
-		"the outer corner cuts a block deep, the far corner is up: %s" % [h])
-	# The whole hillside is that plane: every edge block, on every tread,
-	# rises one per block along x and along z.
-	for z in range(3, 9):
-		for x in range(3, 9):
-			if x + z < 10 or x + z > 12:
-				continue
-			var y := x + z - 8
-			var c := m._heights(x, y, z)
-			var nw := y + c[0]
-			check(y + c[1] == nw + 1 and y + c[3] == nw + 1 and y + c[2] == nw + 2,
-				"(%d,%d) lies in the plane: %s" % [x, z, c])
+	equal(h, PackedFloat32Array([0, 1, 1, 1]),
+		"the outer corner drops a block, the other three stay up: %s" % [h])
 	# And the tread below reads the same height for the vertex they
-	# share: (4, 5) at level 1 meets (5, 5) at level 2 at vertex (5, 5).
-	var below := m._heights(4, 1, 5)
-	var above := m._heights(5, 2, 5)
-	equal(1.0 + below[1], 2.0 + above[0], "one vertex, one height, across levels")
+	# share: (5, 5) at level 2 meets (6, 5) at level 3 at vertex (6, 5).
+	var below := m._heights(5, 2, 5)
+	equal(2.0 + below[1], 3.0 + h[0], "one vertex, one height, across levels")
 
 func test_every_corner_is_whole_or_nothing() -> void:
 	var m := _shaped(_ground(_diagonal))
@@ -67,8 +54,8 @@ func test_every_corner_is_whole_or_nothing() -> void:
 		for x in range(1, SIZE - 1):
 			var y := _diagonal(x, z) - 1
 			for c in m._heights(x, y, z):
-				check(c == -1.0 or c == 0.0 or c == 1.0,
-					"whole blocks only at (%d,%d): %s" % [x, z, c])
+				check(c == 0.0 or c == 1.0,
+					"a corner is a whole block up or down at (%d,%d): %s" % [x, z, c])
 
 func test_neighbours_never_disagree_about_a_shared_vertex() -> void:
 	var m := _shaped(_ground(_diagonal))
@@ -104,3 +91,46 @@ func test_a_one_wide_hole_keeps_its_walls() -> void:
 	var m := _shaped(_ground(func(x: int, z: int) -> int: return 1 if x == 8 and z == 8 else 2))
 	equal(m._heights(8, 1, 7), PackedFloat32Array([1, 1, 1, 1]),
 		"a hole one block wide is a hole, not a funnel")
+
+func test_anything_solid_holds_the_ground_up_beside_it() -> void:
+	# A step with a glowstone set into the lower ground right in front
+	# of it. Glowstone is not opaque, but it is solid, and the step must
+	# not slope toward it as if it were air: the glowstone draws no face
+	# against the step, so a slope there would open the glowstone up.
+	var data := _ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1)
+	data[_at(8, 1, 7)] = Blocks.GLOWSTONE
+	var m := _shaped(data)
+	equal(m._heights(8, 1, 8), PackedFloat32Array([1, 1, 1, 1]),
+		"the step stays whole against the glowstone")
+	equal(m._heights(7, 1, 8), PackedFloat32Array([0, 1, 1, 1]),
+		"and its neighbour keeps the shared corner up")
+
+## Every edge of the ground's mesh is shared by exactly two faces: a
+## seam, a missing face or a stray sliver all show up here as an edge
+## with nothing on its other side.
+func test_the_ground_has_no_holes_in_it() -> void:
+	var data := _ground(_diagonal)
+	# Things that are not ground, on and beside it.
+	data[_at(3, 1, 12)] = Blocks.GLOWSTONE
+	data[_at(9, 2, 3)] = Blocks.GLOWSTONE
+	data[_at(12, 4, 12)] = Blocks.PLANKS
+	data[_at(10, 3, 10)] = Blocks.TALL_GRASS
+	data[_at(5, 1, 5)] = Blocks.AIR
+	var built: Dictionary = Mesher.new().build(data, {}, 0, 0)
+	var arrays: Array = built["opaque"]
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var index: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var edges := {}
+	for i in range(0, index.size(), 3):
+		for k in 3:
+			var a := verts[index[i + k]].snapped(Vector3(0.001, 0.001, 0.001))
+			var b := verts[index[i + (k + 1) % 3]].snapped(Vector3(0.001, 0.001, 0.001))
+			var key := "%s>%s" % [a, b]
+			edges[key] = int(edges.get(key, 0)) + 1
+	var open: Array = []
+	for key: String in edges.keys():
+		var parts := key.split(">")
+		var back := "%s>%s" % [parts[1], parts[0]]
+		if int(edges.get(back, 0)) != int(edges[key]):
+			open.append(key)
+	equal(open.size(), 0, "edges with nothing on the other side: %s" % [open.slice(0, 8)])

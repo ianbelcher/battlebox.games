@@ -35,6 +35,11 @@ func in_bounds(wx: int, wz: int) -> bool:
 	var half := world_size / 2
 	return wx >= -half and wx <= half and wz >= -half and wz <= half
 
+## The outermost ring of columns inside the slab: the wall.
+func on_border(wx: int, wz: int) -> bool:
+	var half := world_size / 2
+	return absi(wx) == half or absi(wz) == half
+
 enum Biome { MEADOW, FOREST, JUNGLE, PINE, FLOWERS, SWAMP }
 
 var _continent := FastNoiseLite.new()
@@ -70,9 +75,20 @@ const CAVERN_THRESHOLD := -0.05
 ## under it has a lake in the dip and a hall above it is dry — instead of
 ## every cave bottom being a flooded cellar. Shallow: two blocks, so you
 ## wade rather than swim, except in the odd pocket (POOL_DEEP) where the
-## bed drops away. In the caverns world the table is magma.
+## bed drops away.
 const POOL_TOP := 9
 const POOL_DEEP := 5
+
+## THE FLOOR OF THE CAVERNS WORLD is land and water. One noise decides
+## which a column is: land rises from the shore into low hills, and the
+## lakes deepen away from it. So the halls have islands in them, with
+## shores, rather than one glowing table of magma you could run across.
+## And the islands are joined: on a grid, wherever a line crosses water
+## between two shores, an arched bridge of cobble spans it.
+const CAVERN_LAKE := 0.04
+const BRIDGE_GRID := 40
+const BRIDGE_REACH := 44
+const BRIDGE_HALF_WIDTH := 2
 
 func _init(p_seed: int, p_theme := "classic", p_size := 250) -> void:
 	seed_value = p_seed
@@ -199,6 +215,14 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 			# instead of terrain that keeps generating forever.
 			if not in_bounds(wx, wz):
 				continue
+			# THE WALL AROUND THE WORLD. The outermost ring of columns is
+			# bedrock from the floor to the top of the sky, so the edge of
+			# the map is a wall you can see and cannot dig, rather than a
+			# cliff with blue nothing past it.
+			if on_border(wx, wz):
+				for y in CHUNK_H:
+					data[idx(lx, y, lz)] = Blocks.BEDROCK
+				continue
 			var h := height_at(wx, wz)
 			h -= lake_depth_at(wx, wz, h)
 			var moist := moisture_at(wx, wz)
@@ -246,31 +270,34 @@ func _carve_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		return
 	var deep := theme == "caverns"
 	var roof := h - (CAVERN_CRUST if deep else 6)
-	# Taller halls in the caverns world: the noise is sampled with less
-	# vertical stretch, so a chamber is as high as it is wide.
-	var y_scale := 0.85 if deep else 1.0
-	var threshold := CAVERN_THRESHOLD if deep else HALL_THRESHOLD
+	var land_y := -1
+	var bed_y := -1
+	if deep:
+		var basin := cavern_basin(wx, wz)
+		land_y = cavern_land_y(basin)
+		bed_y = cavern_bed_y(basin)
 	for y in range(4, roof):
-		var carve := false
-		if absf(_caves.get_noise_3d(wx, y * 1.6, wz)) < 0.085 \
-				and absf(_caves2.get_noise_3d(wx, y * 1.6, wz)) < 0.085:
-			carve = true
-		elif _halls.get_noise_3d(wx, y * y_scale, wz) > threshold:
-			carve = true
-		if carve:
-			if y > POOL_TOP:
+		if not _hall_open(wx, y, wz, deep):
+			continue
+		if deep:
+			# Land keeps its floor; water columns are carved to the
+			# table and filled down to the bed.
+			if land_y >= 0:
+				if y > land_y:
+					data[idx(lx, y, lz)] = Blocks.AIR
+			elif y > POOL_TOP:
 				data[idx(lx, y, lz)] = Blocks.AIR
-			elif deep:
-				# A magma floor at the table, solid rock beneath: a lake
-				# of glow you can walk across, lighting the hall above.
-				if y == POOL_TOP:
-					data[idx(lx, y, lz)] = Blocks.MAGMA
-			elif y >= POOL_TOP - 1 or (y >= POOL_DEEP
-					and _lakes.get_noise_2d(wx * 2.0, wz * 2.0) > 0.42):
+			elif y > bed_y:
 				data[idx(lx, y, lz)] = Blocks.WATER
-			# ...and anything else under the table stays rock: the bed.
+		elif y > POOL_TOP:
+			data[idx(lx, y, lz)] = Blocks.AIR
+		elif y >= POOL_TOP - 1 or (y >= POOL_DEEP
+				and _lakes.get_noise_2d(wx * 2.0, wz * 2.0) > 0.42):
+			data[idx(lx, y, lz)] = Blocks.WATER
+		# ...and anything else under the table stays rock: the bed.
 	if deep:
 		_cavern_shaft(data, lx, lz, wx, wz, h)
+		_cavern_bridge(data, lx, lz, wx, wz)
 	else:
 		# Walkable funnel entrances from the surface on a wide grid.
 		var ax := roundi(float(wx - 48) / 96.0) * 96 + 48
@@ -281,6 +308,86 @@ func _carve_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 				for y in range(maxi(4, h - 9 + int(dist)), h + 1):
 					data[idx(lx, y, lz)] = Blocks.AIR
 	_dress_caves(data, lx, lz, wx, wz, h, deep)
+
+## Whether the caves are open at this block — the one test both the
+## carving and the spawn search use, so the spawn is never in rock.
+func _hall_open(wx: int, y: int, wz: int, deep: bool) -> bool:
+	if absf(_caves.get_noise_3d(wx, y * 1.6, wz)) < 0.085 \
+			and absf(_caves2.get_noise_3d(wx, y * 1.6, wz)) < 0.085:
+		return true
+	# Taller halls in the caverns world: the noise is sampled with less
+	# vertical stretch, so a chamber is as high as it is wide.
+	var y_scale := 0.85 if deep else 1.0
+	var threshold := CAVERN_THRESHOLD if deep else HALL_THRESHOLD
+	return _halls.get_noise_3d(wx, y * y_scale, wz) > threshold
+
+func cavern_basin(wx: int, wz: int) -> float:
+	return _lakes.get_noise_2d(wx * 0.75, wz * 0.75)
+
+## The top solid block of a land column in the caverns, or -1 for water.
+func cavern_land_y(basin: float) -> int:
+	if basin < CAVERN_LAKE:
+		return -1
+	return POOL_TOP + 1 + mini(int((basin - CAVERN_LAKE) * 16.0), 5)
+
+## The bed under a lake column: deeper the further from the shore.
+func cavern_bed_y(basin: float) -> int:
+	return POOL_TOP - 2 - mini(int((CAVERN_LAKE - basin) * 12.0), 4)
+
+## The floor of the caverns under this column, with room to stand, or -1.
+func cavern_floor_at(wx: int, wz: int) -> int:
+	var land := cavern_land_y(cavern_basin(wx, wz))
+	if land < 0 or land + 3 >= CAVERN_TOP - CAVERN_CRUST:
+		return -1
+	if _hall_open(wx, land + 1, wz, true) and _hall_open(wx, land + 2, wz, true):
+		return land
+	return -1
+
+## A bridge, where a grid line crosses water between two shores: an arch
+## of cobble, five wide with a wall along each edge, rising with the
+## length of the span. Built only through open hall — a deck that would
+## sit in rock is left out, so a bridge never tunnels.
+func _cavern_bridge(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
+	if cavern_land_y(cavern_basin(wx, wz)) >= 0:
+		return
+	for axis in 2:
+		var across := wz if axis == 0 else wx
+		var along := wx if axis == 0 else wz
+		var line := roundi(float(across) / float(BRIDGE_GRID)) * BRIDGE_GRID
+		var off := across - line
+		if absi(off) > BRIDGE_HALF_WIDTH:
+			continue
+		var a := _shore(axis, line, along, -1)
+		var b := _shore(axis, line, along, 1)
+		if a == -99999 or b == -99999:
+			continue
+		var span := b - a
+		if span < 6:
+			continue
+		var t := float(along - a) / float(span)
+		var rise := minf(6.0, float(span) / 5.0)
+		var deck := POOL_TOP + 2 + roundi(rise * 4.0 * t * (1.0 - t))
+		if deck + 1 >= CHUNK_H:
+			continue
+		var here := data[idx(lx, deck, lz)]
+		if here != Blocks.AIR and here != Blocks.WATER:
+			continue
+		data[idx(lx, deck, lz)] = Blocks.COBBLE
+		if absi(off) == BRIDGE_HALF_WIDTH and data[idx(lx, deck + 1, lz)] == Blocks.AIR:
+			data[idx(lx, deck + 1, lz)] = Blocks.WALL
+
+## The nearest land along a bridge line from `along`, walking `dir`, or
+## -99999 when there is none within reach or the line leaves the world.
+func _shore(axis: int, line: int, along: int, dir: int) -> int:
+	for step in range(1, BRIDGE_REACH + 1):
+		var p := along + dir * step
+		var bx := p if axis == 0 else line
+		var bz := line if axis == 0 else p
+		if not in_bounds(bx, bz) or on_border(bx, bz):
+			return -99999
+		if cavern_land_y(cavern_basin(bx, bz)) >= 0:
+			return p
+	return -99999
 
 ## A straight shaft from the plain down into the halls, on a grid, with a
 ## wider mouth so it reads as a hole in the ground from a distance rather
@@ -305,24 +412,22 @@ func _cavern_shaft(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h:
 	# underneath — far enough that it always opens into a hall.
 	for y in range(maxi(4, h - CAVERN_CRUST - 10), h + 1):
 		data[idx(lx, y, lz)] = Blocks.AIR
-	# Glowstone set into the wall of the mouth, so the hole can be seen
-	# from across the plain at night — which, down here, is always.
-	if dist >= CAVERN_SHAFT_RADIUS - 1.0 and hash01(wx, wz, 913) < 0.35:
-		data[idx(lx, h, lz)] = Blocks.GLOWSTONE
 
-## Stalagmites, stalactites, crystals, glowstone, mushrooms — and in the
-## caverns world a lot more of the things that glow, because light is the
-## whole of what makes a dark place a place.
+## Stalagmites, stalactites, crystals, glowstone, mushrooms. The caverns
+## world gets a few more of the things that glow, because light is the
+## whole of what makes a dark place a place — a FEW more: a renderer
+## lights a chunk with eight lamps at most, and a floor carpeted in
+## glowstone was lit in patches and dark between them.
 func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int,
 		deep: bool) -> void:
-	var lamp := 0.14 if deep else 0.06
+	var lamp := 0.05 if deep else 0.03
 	for y in range(5, h - 3):
 		var here := data[idx(lx, y, lz)]
 		var roll := hash01(wx, y, wz * 7)
 		var below := data[idx(lx, y - 1, lz)]
 		# Sea lanterns set into the beds of the pools, so the water glows.
 		if here == Blocks.WATER:
-			if below == Blocks.STONE and roll < 0.06:
+			if below == Blocks.STONE and roll < 0.02:
 				data[idx(lx, y - 1, lz)] = 147
 			continue
 		if here != Blocks.AIR:
@@ -339,13 +444,10 @@ func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 					data[idx(lx, y - 1, lz)] = Blocks.MYCELIUM
 			elif roll < lamp + 0.08:
 				data[idx(lx, y, lz)] = Blocks.COBBLE  # stalagmite
-			elif deep and y < 16 and roll > 0.97:
-				# Veins of magma low in the walls, for the glow.
-				data[idx(lx, y - 1, lz)] = Blocks.MAGMA
 		elif y + 1 < CHUNK_H and data[idx(lx, y + 1, lz)] == Blocks.STONE:
 			if roll > 0.94:
 				data[idx(lx, y, lz)] = Blocks.COBBLE  # stalactite
-			elif deep and roll > 0.84:
+			elif deep and roll > 0.975:
 				# Shroomlight in the ceiling: the hall's own lamps.
 				data[idx(lx, y + 1, lz)] = 148
 
@@ -1397,6 +1499,13 @@ func find_spawn() -> Vector3i:
 			var wx := int(cos(angle) * ring)
 			var wz := int(sin(angle) * ring)
 			if not in_bounds(wx, wz):
+				continue
+			# The caverns world is lived in underneath: start on an
+			# island floor down in the halls, not on the plain over them.
+			if theme == "caverns":
+				var floor_y := cavern_floor_at(wx, wz)
+				if floor_y >= 0:
+					return Vector3i(wx, floor_y, wz)
 				continue
 			var h := height_at(wx, wz)
 			h -= lake_depth_at(wx, wz, h)

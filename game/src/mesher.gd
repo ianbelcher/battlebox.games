@@ -135,6 +135,7 @@ func _occludes(x: int, y: int, z: int) -> bool:
 ## Build all surfaces for a chunk. cx/cz are only used to seed color jitter
 ## so the pattern doesn't repeat chunk to chunk.
 var _lk_opaque := PackedByteArray()
+var _lk_solid := PackedByteArray()
 # Per build: the shared height of every ground vertex, and every block's
 # slope on each axis — see _surface and _axes.
 var _surface_cache: Dictionary = {}
@@ -142,6 +143,7 @@ var _axes_cache: Dictionary = {}
 
 func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Dictionary:
 	_lk_opaque = Blocks.LK_OPAQUE
+	_lk_solid = Blocks.LK_SOLID
 	_data = data
 	_neighbors = neighbors
 	_surface_cache.clear()
@@ -224,7 +226,7 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 		arrays[Mesh.ARRAY_TEX_UV2] = _uv2s[key]
 		arrays[Mesh.ARRAY_INDEX] = _indices[key]
 		result[key] = arrays
-	result["lights"] = lights
+	result["lights"] = _merged(lights)
 	result["teleporters"] = teleporters
 	result["topmap"] = topmap
 	return result
@@ -234,104 +236,66 @@ func _jitter(x: int, y: int, z: int, cx: int, cz: int, rough := 0.0) -> float:
 	return 1.0 - amp * 0.6 + amp * WorldGen.hash01(cx * SIZE + x, cz * SIZE + z, y * 31)
 
 ## THE SHAPE OF THE GROUND. Every top corner of a block of ground is a
-## VERTEX THE GROUND SHARES: up to four blocks meet at it, on up to three
-## levels, and they all read the same height for it — so nothing here can
-## leave a seam, a spike, or a sliver of wall between two blocks that are
-## both ground. A block's top is drawn through the four heights at its
-## corners; its sides are drawn up to the line the surface makes across
-## them. The height of a vertex, in whole blocks, is the HIGHEST of:
+## VERTEX THE GROUND SHARES: up to four blocks meet at it, and they all
+## read the same height for it — so nothing here can leave a seam, a
+## spike, or a sliver of wall between two blocks that are both ground.
+## A block's top is drawn through the four heights at its corners, and
+## its open sides up to the line the surface makes across them. A vertex
+## is UP (a whole block) if anything at all stands on it, or if any block
+## touching it that is not ground says so; a block of ground's own
+## opinion of its corner is: on each axis, one side open and the other
+## solid means it slopes down toward the open side; both solid or both
+## open, it is flat; the corner takes the lower axis. Solid means solid
+## — a glowstone or a pane of glass holds a corner up like stone does.
 ##
-##   whatever stands on it — a block above with something on it, or one
-##     that is not ground, reaches its own top;
-##   each block of ground touching it, with nothing above, reaching its
-##     bottom plus its OPINION of that corner: on each axis, one side open
-##     and the other solid means it slopes down toward the open side; both
-##     solid or both open, it is flat; the corner takes the lower axis.
-##     Open on BOTH sides, with ground beneath and the ground beside it
-##     one step lower while the block diagonally beyond is lower still,
-##     it drops a whole block further — see _opinion.
-##
-## A step's edge is a ramp. A stair is a slope, because each tread's back
-## corners are held up by the tread above. A wide tread's diagonal edge is
-## a bevel: the outer corner drops and the two beside it are held by the
-## neighbours along the edge. A hillside climbing one block per block on
-## the diagonal is ONE FLAT PLANE, because each block's outer corner cuts
-## a block deep into the block beneath — that is the case that was a row
-## of pyramids, then a lattice of little triangles. A lone block, a
-## one-wide ridge and a one-wide hole all stay square, because nothing
-## beside them slopes. Only natural ground with nothing above it is
-## shaped; anything built, and anything with something on it, is whole.
+## A step's edge is a ramp. A stair is a slope, because each tread's
+## back corners are held up by the tread above. A plateau's outer corner
+## drops its outer corner and keeps the rest of its top flat, from the
+## midline. A lone block, a one-wide ridge and a one-wide hole all stay
+## square, because nothing beside them slopes. Every corner is a whole
+## block up or down: a rise is always one block over one block. Only
+## natural ground with nothing above it is shaped; anything built, and
+## anything with something on it, is whole.
 func _smooth(block: int, x: int, y: int, z: int) -> bool:
 	return SMOOTH_CORNERS and (block in SMOOTH_BLOCKS) and _block_at(x, y + 1, z) == Blocks.AIR
 
 ## Corner heights [NW, NE, SE, SW] of a block's top, relative to its
-## bottom: 1 is its own top, 0 its bottom, -1 the bottom of the block
-## beneath.
+## bottom: 1 is its own top, 0 its bottom.
 func _heights(x: int, y: int, z: int) -> PackedFloat32Array:
 	return PackedFloat32Array([_surface(x, y, z, 0, 0), _surface(x, y, z, 1, 0),
 		_surface(x, y, z, 1, 1), _surface(x, y, z, 0, 1)])
 
 ## The shared height of the vertex at the (cx, cz) corner of block (x, z)
-## on level y — cx and cz each 0 or 1 — relative to that level. Cached
-## per vertex and level: four blocks ask for each one.
+## on level y — cx and cz each 0 or 1. Cached per vertex and level: four
+## blocks ask for each one.
 func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 	var key := Vector3i(x + cx, y, z + cz)
 	if _surface_cache.has(key):
 		return _surface_cache[key]
-	var top := -1e9
+	var top := 0.0
 	for dx: int in [cx - 1, cx]:
 		for dz: int in [cz - 1, cz]:
 			var nx: int = x + dx
 			var nz: int = z + dz
-			for level: int in [y + 1, y, y - 1]:
-				if not _is_opaque_at(nx, level, nz):
-					continue
-				var reach: float
-				var above := _block_at(nx, level + 1, nz)
-				if _lk_opaque[above] == 1:
-					if level > y or not _smooth(above, nx, level + 1, nz):
-						reach = level + 1     # solid through to its top
-					else:
-						continue              # the ground above speaks for it
-				elif _smooth(_block_at(nx, level, nz), nx, level, nz):
-					reach = level + _opinion(nx, level, nz, cx - dx, cz - dz)
+			if _firm_at(nx, y + 1, nz):
+				top = 1.0          # something stands on it
+			elif _firm_at(nx, y, nz):
+				var block := _block_at(nx, y, nz)
+				if _smooth(block, nx, y, nz):
+					top = maxf(top, _opinion(nx, y, nz, cx - dx, cz - dz))
 				else:
-					reach = level + 1         # built, or under water: whole
-				top = maxf(top, reach)
-	var h := clampf(top - y, -1.0, 1.0)
-	_surface_cache[key] = h
-	return h
+					top = 1.0      # built, or with something on it: whole
+			if top >= 1.0:
+				break
+		if top >= 1.0:
+			break
+	_surface_cache[key] = top
+	return top
 
-## One block of ground's own view of one of its corners: 1 up, 0 down to
-## its bottom, -1 a block further. See the rule above _smooth.
+## One block of ground's own view of one of its corners, 1 up or 0 down.
 func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
 	var axes := _axes(x, y, z)
-	var hz := axes[cz]
-	var hx := axes[2 + cx]
-	var ex := 1 if cx == 1 else -1
-	var ez := 1 if cz == 1 else -1
-	if hx > 0.0 or hz > 0.0:
-		# Solid on both sides of this corner but open diagonally beyond
-		# it, onto open ground rather than into a one-block hole: the
-		# hillside falls away across this corner and it drops, so a
-		# slope running diagonally carries on through the row behind
-		# the edge instead of stopping at it in a row of teeth.
-		if hx > 0.0 and hz > 0.0 and _is_opaque_at(x + ex, y, z) and _is_opaque_at(x, y, z + ez) \
-				and not _is_opaque_at(x + ex, y, z + ez) \
-				and not _is_opaque_at(x + 2 * ex, y, z + ez) \
-				and not _is_opaque_at(x + ex, y, z + 2 * ez):
-			return 0.0
-		return minf(hx, hz)
-	# Open on both sides of this corner. If the ground beside it is one
-	# step down on both sides and the block diagonally beyond is lower
-	# still, the hillside is descending on the diagonal and this corner
-	# belongs a whole block lower — cut into the block beneath, which has
-	# to be ground for that to be a picture of anything.
-	if _block_at(x, y - 1, z) in SMOOTH_BLOCKS and _is_opaque_at(x, y - 1, z) \
-			and _is_opaque_at(x + ex, y - 1, z) and _is_opaque_at(x, y - 1, z + ez) \
-			and not _is_opaque_at(x + ex, y - 1, z + ez):
-		return -1.0
-	return 0.0
+	return minf(axes[2 + cx], axes[cz])
 
 ## A block's slope on each axis from its four side neighbours alone:
 ## [north edge, south edge, west edge, east edge], each 1 up or 0 down.
@@ -339,15 +303,22 @@ func _axes(x: int, y: int, z: int) -> PackedFloat32Array:
 	var key := Vector3i(x, y, z)
 	if _axes_cache.has(key):
 		return _axes_cache[key]
-	var n := _is_opaque_at(x, y, z - 1)
-	var e := _is_opaque_at(x + 1, y, z)
-	var s := _is_opaque_at(x, y, z + 1)
-	var w := _is_opaque_at(x - 1, y, z)
+	var n := _firm_at(x, y, z - 1)
+	var e := _firm_at(x + 1, y, z)
+	var s := _firm_at(x, y, z + 1)
+	var w := _firm_at(x - 1, y, z)
 	var axes := PackedFloat32Array([
 		0.0 if (not n and s) else 1.0, 0.0 if (not s and n) else 1.0,
 		0.0 if (not w and e) else 1.0, 0.0 if (not e and w) else 1.0])
 	_axes_cache[key] = axes
 	return axes
+
+## Solid, for the shape of the ground: stone, but also glowstone, glass,
+## a fence — anything a body cannot pass. Ground next to a glowstone
+## used to slope toward it as if it were air, and the glowstone, which
+## draws no face against an opaque neighbour, was then open on that side.
+func _firm_at(x: int, y: int, z: int) -> bool:
+	return _lk_solid[_block_at(x, y, z)] == 1
 
 ## Sides 0 N, 1 E, 2 S, 3 W; each runs between two corners, clockwise
 ## seen from above: N is NW→NE, E is NE→SE, S is SE→SW, W is SW→NW.
@@ -447,6 +418,29 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		_tri("opaque", [o, o + Vector3(1, 0, 1), o + Vector3(0, 0, 1)], Vector3.DOWN,
 			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
 
+## LAMPS CLOSE TOGETHER BECOME ONE. The compatibility renderer lights a
+## mesh with at most eight lamps, and a chunk is one mesh: a hall with
+## twenty glowstones in it was lit by its first eight and dark past
+## them, which read as the light dying as you walked across the room.
+## Fewer, stronger lamps light the whole of it, and chunk_view caps what
+## is left at the renderer's eight.
+const LAMP_MERGE := 7.0
+func _merged(lights: Array) -> Array:
+	lights.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a.energy) > float(b.energy))
+	var out: Array = []
+	for spec: Dictionary in lights:
+		var joined := false
+		for kept: Dictionary in out:
+			if (kept.pos as Vector3).distance_to(spec.pos) <= LAMP_MERGE:
+				kept.energy = minf(float(kept.energy) + float(spec.energy) * 0.5,
+					float(kept.energy) * 1.8)
+				joined = true
+				break
+		if not joined:
+			out.append(spec)
+	return out
+
 ## One triangle with a colour per vertex, wound clockwise as seen from
 ## `normal`'s side, which is the side Godot draws.
 func _tri(key: String, pts: Array, normal: Vector3, cols: Array, brightness: float,
@@ -515,21 +509,6 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 		else:
 			if Blocks.LK_OPAQUE[neighbor] == 1:
 				continue
-			# UNDER A CUT. Ground above this block may have dipped a
-			# corner into it (see _opinion), and then this side is drawn
-			# only up to the surface line, like a shaped block's.
-			if n.y == 0 and SMOOTH_CORNERS and _lk_opaque[_block_at(x, y + 1, z)] == 1 \
-					and _smooth(_block_at(x, y + 1, z), x, y + 1, z):
-				var side := 0 if n.z < 0 else (1 if n.x > 0 else (2 if n.z > 0 else 3))
-				var pair: Array = SIDE_CORNERS[side]
-				var c0: Vector2 = CORNER_XZ[pair[0]]
-				var c1: Vector2 = CORNER_XZ[pair[1]]
-				var mine := Vector2(_surface(x, y, z, int(c0.x), int(c0.y)),
-					_surface(x, y, z, int(c1.x), int(c1.y)))
-				if mine.x < 1.0 or mine.y < 1.0:
-					_side_face(x, y, z, side, mine, base_color, top_color,
-						face[3] * jitter, emit)
-					continue
 		var u: Vector3i = face[1]
 		var v: Vector3i = face[2]
 		var shade: float = face[3]

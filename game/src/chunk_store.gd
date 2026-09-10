@@ -153,15 +153,29 @@ func safe_stand(around: Vector3, spread := 0.0) -> Vector3:
 ## A standable spot in this column, or y <= 0 if there is not one: solid
 ## ground under foot, nothing liquid, and clear of the sky and the void.
 func _stand_at(gx: int, gz: int) -> Vector3:
-	if not inside_world(gx, gz, 2):
-		return Vector3.ZERO
-	var y := surface_y(gx, gz)
-	if y <= 1 or y >= WorldGen.CHUNK_H - 4:
-		return Vector3.ZERO
-	var under := get_block(Vector3i(gx, y, gz))
-	if under == Blocks.AIR or Blocks.is_liquid(under):
+	var y := stand_y(gx, gz)
+	if y < 0:
 		return Vector3.ZERO
 	return Vector3(float(gx) + 0.5, float(y) + 1.2, float(gz) + 0.5)
+
+## The block a body can stand on in this column, or -1: solid ground,
+## nothing liquid, inside the world and clear of the sky and the void.
+## Every placement that picks its own columns — a team's site, a spawn
+## far from everybody — asks this rather than surface_y, because in the
+## caverns world a column of solid rock reports the plain over it, and
+## the plain is nowhere: the whole game is underneath.
+func stand_y(gx: int, gz: int) -> int:
+	if not inside_world(gx, gz, 2):
+		return -1
+	var y := surface_y(gx, gz)
+	if y <= 1 or y >= WorldGen.CHUNK_H - 4:
+		return -1
+	if theme == "caverns" and y >= WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST:
+		return -1
+	var under := get_block(Vector3i(gx, y, gz))
+	if under == Blocks.AIR or Blocks.is_liquid(under):
+		return -1
+	return y
 
 ## The same point, pulled back inside the slab instead of rejected. Use
 ## this where a thing MUST exist somewhere (a player's drop) rather than
@@ -370,11 +384,35 @@ func surface_y(wx: int, wz: int) -> int:
 	var data := get_chunk(cpos)
 	var lx := posmod(wx, 16)
 	var lz := posmod(wz, 16)
+	# THE CAVERNS WORLD IS LIVED IN UNDERNEATH. Its "surface" is the floor
+	# of the hall under the crust wherever there is one, so everything
+	# placed by height — spawns, sites, crates, the computer players'
+	# goals — lands down there rather than on the empty plain over it,
+	# where the bots used to circle in the sky above a hole.
+	if theme == "caverns":
+		var floor_y := _hall_floor(data, lx, lz)
+		if floor_y >= 0:
+			return floor_y
 	for y in range(WorldGen.CHUNK_H - 1, -1, -1):
 		var b := data[WorldGen.idx(lx, y, lz)]
 		if b != Blocks.AIR and not Blocks.is_cross(b):
 			return y
 	return 0
+
+## The top of the ground under the caverns' crust with open air on it —
+## the bed of a lake counts, so a column of water is a place to swim to —
+## or -1 where the rock is solid all the way down.
+func _hall_floor(data: PackedByteArray, lx: int, lz: int) -> int:
+	var open_above := false
+	for y in range(WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST - 1, 0, -1):
+		var b := data[WorldGen.idx(lx, y, lz)]
+		if b == Blocks.AIR or Blocks.is_cross(b):
+			open_above = true
+		elif open_above:
+			return y
+		else:
+			open_above = false
+	return -1
 
 ## THE GROUND UNDER A WALKER: the highest block at or just above `from_y`
 ## with two clear blocks over it, or -1 for "nowhere here a body fits".
@@ -465,8 +503,12 @@ func set_map(map_name: String, new_seed: int) -> void:
 var current_map_key := ""
 
 func _apply_map(map_name: String, new_seed: int) -> void:
+	# NO NAME MEANS THE SAME MAP. A reset — a vote, a change of size —
+	# keeps the world the room was made as. It used to pick a theme at
+	# random, which is how the Lobby, made as an island, turned into the
+	# caverns under everybody one afternoon.
 	if map_name.is_empty():
-		map_name = WorldGen.THEMES[randi() % WorldGen.THEMES.size()]
+		map_name = current_map_key if not current_map_key.is_empty() else theme
 	current_map_key = map_name
 	if map_name == "mca" or map_name.begins_with("mca:"):
 		source = "mca"

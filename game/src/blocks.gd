@@ -414,6 +414,9 @@ static func _static_init() -> void:
 const SHAPE_IDS := {"": 0, "slab": 1, "carpet": 2, "stairs": 3, "fence": 4,
 	"wall": 5, "pane": 6, "door": 7, "bed": 8}
 static var LK_OPAQUE := PackedByteArray()
+## 1 for anything a body cannot walk through — which is what holds the
+## ground's shape up beside it, opaque or not.
+static var LK_SOLID := PackedByteArray()
 static var LK_CROSS := PackedByteArray()
 static var LK_TRANS := PackedByteArray()
 static var LK_LIQUID := PackedByteArray()
@@ -433,6 +436,7 @@ static var LK_PATTERN_TOP := PackedByteArray()
 
 static func _build_lookups() -> void:
 	LK_OPAQUE.resize(256)
+	LK_SOLID.resize(256)
 	LK_CROSS.resize(256)
 	LK_TRANS.resize(256)
 	LK_LIQUID.resize(256)
@@ -463,6 +467,7 @@ static func _build_lookups() -> void:
 	for id in 256:
 		var spec := info(id)
 		LK_OPAQUE[id] = 1 if bool(spec.get("opaque", false)) else 0
+		LK_SOLID[id] = 1 if bool(spec.get("solid", false)) else 0
 		LK_CROSS[id] = 1 if bool(spec.get("cross", false)) else 0
 		LK_TRANS[id] = 1 if bool(spec.get("translucent", false)) else 0
 		LK_LIQUID[id] = 1 if is_liquid(id) else 0
@@ -528,7 +533,10 @@ const INFO := {
 	BERRY_BUSH: {"name": "Berry Bush", "color": Color("3f7a38"), "solid": false,
 		"opaque": false, "cross": true, "sway": 0.5, "emit": 0.35, "collect": true},
 	PATH: {"name": "Path", "color": Color("9c7f52"), "top": Color("b5975f"), "solid": true, "opaque": true},
-	BEDROCK: {"name": "Bedrock", "color": Color("4c4c52"), "solid": true, "opaque": true, "unbreakable": true},
+	# The floor of every world and the wall around it: steel-grey, so the
+	# edge of the map reads as a thing rather than as sky.
+	BEDROCK: {"name": "Bedrock", "color": Color("5b6068"), "top": Color("676c75"),
+		"solid": true, "opaque": true, "unbreakable": true, "rough": 0.5},
 	# --- Building families ---
 	MARBLE: {"name": "Marble", "color": Color("e8e6e0"), "solid": true, "opaque": true},
 	SLATE: {"name": "Slate", "color": Color("4a5568"), "solid": true, "opaque": true},

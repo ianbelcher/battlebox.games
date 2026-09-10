@@ -601,8 +601,9 @@ func _far_spawn() -> Vector3:
 		var wz := int(anchor.z + sin(angle) * dist)
 		if not store.inside_world(wx, wz, 6):
 			continue
-		var y := store.surface_y(wx, wz)
-		if y <= WorldGen.SEA_LEVEL or y >= WorldGen.CHUNK_H - 8:
+		var y := store.stand_y(wx, wz)
+		if y < 0 or (y <= WorldGen.SEA_LEVEL and store.theme != "caverns") \
+				or y >= WorldGen.CHUNK_H - 8:
 			continue
 		var nearest := 1e9
 		for other: Vector3 in others:
@@ -1209,11 +1210,17 @@ func _check_reset_votes() -> void:
 
 @rpc("any_peer", "call_local", "reliable")
 func sv_new_map(map_name: String) -> void:
-	if not multiplayer.is_server() or match_phase != "IDLE":
+	if not multiplayer.is_server() or match_phase != "IDLE" or _map_locked():
 		return
 	if not _known_map(map_name):
 		return
 	_do_world_reset(map_name)
+
+## THE LOBBY IS ALWAYS THE ISLAND. It is the world Play drops everybody
+## into, and a first-timer should land on the same shore every time — not
+## in whatever somebody switched it to a minute ago.
+func _map_locked() -> bool:
+	return EnvConfig.text("WORLD_ROOM_CODE", "") == Room.HOUSE_CODE
 
 ## Guard: _do_world_reset() now kicks off a fresh battle when the mode is
 ## battle royale, and opening a lobby can itself decide the world needs
@@ -1736,7 +1743,8 @@ func sv_match_start(_slot: int) -> void:
 ## applied when the next battle starts — never an instant switch.
 @rpc("any_peer", "call_local", "reliable")
 func sv_select_world(map_name: String) -> void:
-	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()):
+	if not multiplayer.is_server() or not _is_host(multiplayer.get_remote_sender_id()) \
+			or _map_locked():
 		return
 	if not _known_map(map_name):
 		return
