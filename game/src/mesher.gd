@@ -39,7 +39,8 @@ const H := WorldGen.CHUNK_H
 ## of trying this in the mesher alone, and the reason it is a switch.
 const SMOOTH_CORNERS := true
 const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
-	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE]
+	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
+	Blocks.LEAVES, Blocks.LEAVES_DARK, Blocks.LEAVES_LIGHT, Blocks.LEAVES_PINK]
 
 const SHADE_TOP := 1.0
 const SHADE_BOTTOM := 0.82
@@ -227,9 +228,20 @@ func _jitter(x: int, y: int, z: int, cx: int, cz: int, rough := 0.0) -> float:
 	var amp := 0.09 * (1.0 + rough)
 	return 1.0 - amp * 0.6 + amp * WorldGen.hash01(cx * SIZE + x, cz * SIZE + z, y * 31)
 
-## Which outer corner this block is, or -1 for none. 0: solid to the
-## north (-z) and east (+x); 1: east and south; 2: south and west; 3: west
-## and north. The kept triangle is the one against the two neighbours.
+## HOW A BLOCK OF GROUND IS CUT, from its neighbours. -1: a whole block.
+##
+## Lateral siblings first. Three or four: whole. Two adjacent: an outer
+## corner, and the cut is in plan — 0: solid north (-z) and east (+x),
+## 1: east and south, 2: south and west, 3: west and north; the kept
+## triangle is the one against the two neighbours. Two opposite: whole.
+## One: the cut moves into the vertical plane along that sibling — with
+## ground under it and air over it the block becomes a RAMP running down
+## from the sibling's side to the open side, 4: sibling north, 5: east,
+## 6: south, 7: west. None: whole, for now.
+##
+## Nothing may stand on top: the generator keeps plants off any block
+## these rules would cut (WorldGen._lateral_solids), and a block with
+## anything over it stays whole regardless.
 func _corner_of(block: int, x: int, y: int, z: int) -> int:
 	if not (block in SMOOTH_BLOCKS):
 		return -1
@@ -239,32 +251,92 @@ func _corner_of(block: int, x: int, y: int, z: int) -> int:
 	var e := _is_opaque_at(x + 1, y, z)
 	var s := _is_opaque_at(x, y, z + 1)
 	var w := _is_opaque_at(x - 1, y, z)
-	if n and e and not s and not w:
-		return 0
-	if e and s and not w and not n:
-		return 1
-	if s and w and not n and not e:
-		return 2
-	if w and n and not e and not s:
-		return 3
-	return -1
+	var count := int(n) + int(e) + int(s) + int(w)
+	if count >= 3 or count == 0:
+		return -1
+	if count == 2:
+		if n and e:
+			return 0
+		if e and s:
+			return 1
+		if s and w:
+			return 2
+		if w and n:
+			return 3
+		return -1
+	# One sibling: a ramp, if there is ground to run down onto.
+	if not _is_opaque_at(x, y - 1, z):
+		return -1
+	if n:
+		return 4
+	if e:
+		return 5
+	if s:
+		return 6
+	return 7
 
-## The wedge: the top triangle, the diagonal face, the bottom triangle
-## when there is nothing under it — and, when there IS something under
-## it that is not a matching wedge, the quarter of that block's top the
-## cut has uncovered, so no hole opens into the ground.
+## A cut block. The wedge (0-3): the top triangle, the diagonal face, the
+## bottom triangle when there is nothing under it — and, when there IS
+## something under it that is not a matching wedge, the quarter of the
+## ground the cut uncovers. The ramp (4-7): a slanted top from the
+## sibling's top edge down to the open side's bottom edge, and a
+## triangular cap at each end.
+##
+## THE COLOURS RUN DOWN THE SLOPE. Every sloped and cut face is the
+## block's TOP colour along its top edge and the block's side colour
+## along its bottom edge, and the uncovered quarter is the top colour
+## too — so a hillside of grass is green all the way down its cuts with
+## the brown only at the foot, instead of a brown face wherever a corner
+## was taken off, which is what the first version drew.
 func _add_corner(block: int, x: int, y: int, z: int, cx: int, cz: int, corner: int) -> void:
 	var base_color := Blocks.LK_COLOR[block]
 	var top_color := Blocks.LK_TOP[block]
 	var jitter := _jitter(x, y, z, cx, cz, Blocks.LK_ROUGH[block])
 	var emit := Blocks.LK_EMIT[block]
 	var o := Vector3(x, y, z)
-	# Plan corners: NW (0,0), NE (1,0), SE (1,1), SW (0,1) in x,z.
 	var nw := Vector2(0, 0)
 	var ne := Vector2(1, 0)
 	var se := Vector2(1, 1)
 	var sw := Vector2(0, 1)
-	# The kept triangle and the diagonal's two ends, per corner.
+	var top_b := SHADE_TOP * jitter
+	var side_b := (SHADE_X + SHADE_Z) * 0.5 * jitter
+	if corner >= 4:
+		# The ramp. `hi` is the sibling's side (the top edge), `lo` the
+		# open side (the bottom edge), as pairs of plan corners.
+		var hi: Array
+		var lo: Array
+		match corner:
+			4:
+				hi = [nw, ne]; lo = [sw, se]
+			5:
+				hi = [ne, se]; lo = [nw, sw]
+			6:
+				hi = [se, sw]; lo = [ne, nw]
+			_:
+				hi = [sw, nw]; lo = [se, ne]
+		var h0 := o + Vector3(Vector2(hi[0]).x, 1, Vector2(hi[0]).y)
+		var h1 := o + Vector3(Vector2(hi[1]).x, 1, Vector2(hi[1]).y)
+		var l0 := o + Vector3(Vector2(lo[0]).x, 0, Vector2(lo[0]).y)
+		var l1 := o + Vector3(Vector2(lo[1]).x, 0, Vector2(lo[1]).y)
+		var down_dir: Vector2 = ((Vector2(lo[0]) + Vector2(lo[1])) - (Vector2(hi[0]) + Vector2(hi[1]))).normalized()
+		var slope_n := Vector3(down_dir.x, 1.0, down_dir.y).normalized()
+		var slope_b := (SHADE_TOP + side_b / jitter) * 0.5 * jitter
+		_tri("opaque", [h0, h1, l1], slope_n, [top_color, top_color, base_color], slope_b, emit)
+		_tri("opaque", [h0, l1, l0], slope_n, [top_color, base_color, base_color], slope_b, emit)
+		# The caps, on the two sides across the slope, where nothing is.
+		for cap: Array in [[hi[0], lo[0]], [hi[1], lo[1]]]:
+			var hc: Vector2 = cap[0]
+			var lc: Vector2 = cap[1]
+			var mid_side: Vector2 = (hc + lc) * 0.5
+			var cap_n := Vector3(mid_side.x - 0.5, 0, mid_side.y - 0.5).normalized()
+			var sx := x + int(round(cap_n.x))
+			var sz := z + int(round(cap_n.z))
+			if _is_opaque_at(sx, y, sz):
+				continue
+			_tri("opaque", [o + Vector3(hc.x, 0, hc.y), o + Vector3(hc.x, 1, hc.y),
+				o + Vector3(lc.x, 0, lc.y)], cap_n, [base_color, top_color, base_color], side_b, emit)
+		return
+	# The wedge.
 	var keep: Array = []
 	var cut_a := Vector2.ZERO
 	var cut_b := Vector2.ZERO
@@ -277,51 +349,57 @@ func _add_corner(block: int, x: int, y: int, z: int, cx: int, cz: int, corner: i
 			keep = [se, sw, nw]; cut_a = se; cut_b = nw
 		_:
 			keep = [sw, nw, ne]; cut_a = sw; cut_b = ne
-	var top_b := SHADE_TOP * jitter
-	_tri("opaque", o + Vector3(keep[0].x, 1, keep[0].y), o + Vector3(keep[1].x, 1, keep[1].y),
-		o + Vector3(keep[2].x, 1, keep[2].y), Vector3.UP, top_color, top_b, emit)
-	# The diagonal face, lit between the two side shades and facing away
-	# from the kept triangle.
+	_tri("opaque", [o + Vector3(keep[0].x, 1, keep[0].y), o + Vector3(keep[1].x, 1, keep[1].y),
+		o + Vector3(keep[2].x, 1, keep[2].y)], Vector3.UP, [top_color, top_color, top_color], top_b, emit)
 	var mid: Vector2 = (Vector2(keep[0]) + Vector2(keep[1]) + Vector2(keep[2])) / 3.0
 	var edge_mid: Vector2 = (cut_a + cut_b) * 0.5
 	var out_dir: Vector2 = (edge_mid - mid).normalized()
 	var normal := Vector3(out_dir.x, 0, out_dir.y)
-	var side_b := (SHADE_X + SHADE_Z) * 0.5 * jitter
 	var a0 := o + Vector3(cut_a.x, 0, cut_a.y)
 	var a1 := o + Vector3(cut_a.x, 1, cut_a.y)
 	var b0 := o + Vector3(cut_b.x, 0, cut_b.y)
 	var b1 := o + Vector3(cut_b.x, 1, cut_b.y)
-	_tri("opaque", a0, a1, b1, normal, base_color, side_b, emit)
-	_tri("opaque", a0, b1, b0, normal, base_color, side_b, emit)
+	_tri("opaque", [a0, a1, b1], normal, [base_color, top_color, top_color], side_b, emit)
+	_tri("opaque", [a0, b1, b0], normal, [base_color, top_color, base_color], side_b, emit)
 	var below := _block_at(x, y - 1, z)
 	if Blocks.LK_OPAQUE[below] != 1:
-		_tri("opaque", o + Vector3(keep[0].x, 0, keep[0].y), o + Vector3(keep[1].x, 0, keep[1].y),
-			o + Vector3(keep[2].x, 0, keep[2].y), Vector3.DOWN, base_color, SHADE_BOTTOM * jitter, emit)
+		_tri("opaque", [o + Vector3(keep[0].x, 0, keep[0].y), o + Vector3(keep[1].x, 0, keep[1].y),
+			o + Vector3(keep[2].x, 0, keep[2].y)], Vector3.DOWN,
+			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
 	elif _corner_of(below, x, y - 1, z) != corner:
-		# The quarter of the block below that the cut uncovers, in that
-		# block's own top colour.
+		# The quarter of the ground the cut uncovers, in THIS block's top
+		# colour: grass runs down to the foot of the cut.
 		var far: Vector2 = [sw, nw, ne, se][corner]
-		var below_top: Color = Blocks.LK_TOP[below]
-		_tri("opaque", o + Vector3(cut_a.x, 0, cut_a.y), o + Vector3(far.x, 0, far.y),
-			o + Vector3(cut_b.x, 0, cut_b.y), Vector3.UP, below_top,
-			SHADE_TOP * _jitter(x, y - 1, z, cx, cz, Blocks.LK_ROUGH[below]), Blocks.LK_EMIT[below])
+		_tri("opaque", [o + Vector3(cut_a.x, 0, cut_a.y), o + Vector3(far.x, 0, far.y),
+			o + Vector3(cut_b.x, 0, cut_b.y)], Vector3.UP,
+			[top_color, top_color, top_color], top_b, emit)
 
-## One triangle, wound clockwise as seen from `normal`'s side, which is
-## the side Godot draws.
-func _tri(key: String, a: Vector3, b: Vector3, c: Vector3, normal: Vector3,
-		color: Color, brightness: float, emit: float) -> void:
+## One triangle with a colour per vertex, wound clockwise as seen from
+## `normal`'s side, which is the side Godot draws.
+func _tri(key: String, pts: Array, normal: Vector3, cols: Array, brightness: float,
+		emit: float) -> void:
+	var a: Vector3 = pts[0]
+	var b: Vector3 = pts[1]
+	var c: Vector3 = pts[2]
+	var cb: Color = cols[1]
+	var cc: Color = cols[2]
 	if (b - a).cross(c - a).dot(normal) > 0.0:
 		var t := b
 		b = c
 		c = t
+		var tc := cb
+		cb = cc
+		cc = tc
 	var start: int = _verts[key].size()
-	var out := Color(color.r * brightness, color.g * brightness, color.b * brightness, color.a)
-	for p: Vector3 in [a, b, c]:
-		_verts[key].append(p)
+	var i := 0
+	for pair: Array in [[a, cols[0]], [b, cb], [c, cc]]:
+		var color: Color = pair[1]
+		_verts[key].append(pair[0])
 		_normals[key].append(normal)
 		_uvs[key].append(Vector2(0, 0))
-		_colors[key].append(out)
+		_colors[key].append(Color(color.r * brightness, color.g * brightness, color.b * brightness, color.a))
 		_uv2s[key].append(Vector2(0.0, emit))
+		i += 1
 	_indices[key].append_array([start, start + 1, start + 2])
 
 func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String) -> void:

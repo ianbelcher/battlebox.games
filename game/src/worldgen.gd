@@ -1179,6 +1179,12 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 			if ground <= 0 or ground + 1 >= CHUNK_H:
 				continue
 			var surface := data[idx(lx, ground, lz)]
+			# NOTHING GROWS ON A BLOCK THAT WILL BE CUT. The mesher draws a
+			# block of ground with fewer than three lateral neighbours as
+			# a wedge or a ramp (Mesher._corner_of), and a plant standing
+			# on the missing half was a plant standing in the air.
+			if _lateral_solids(data, lx, lz, ground) < 3:
+				continue
 			if surface == Blocks.GRASS:
 				_scatter_grass_column(data, lx, lz, wx, wz, ground)
 			elif surface == Blocks.SAND and ground <= SEA_LEVEL + 2:
@@ -1195,6 +1201,22 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 					data[idx(lx, ground + 1, lz)] = Blocks.CATTAIL
 				elif hash01(wx, wz, 15) < 0.008:
 					data[idx(lx, ground + 1, lz)] = Blocks.SHELL
+
+## How many of a block's four lateral neighbours are solid ground. Looks
+## inside the chunk only; a neighbour past the edge counts as solid,
+## which errs on the side of leaving a plant where it was.
+func _lateral_solids(data: PackedByteArray, lx: int, lz: int, y: int) -> int:
+	var count := 0
+	for step: Vector2i in [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]:
+		var nx := lx + step.x
+		var nz := lz + step.y
+		if nx < 0 or nx >= CHUNK_SIZE or nz < 0 or nz >= CHUNK_SIZE:
+			count += 1
+			continue
+		var b := data[idx(nx, y, nz)]
+		if b != Blocks.AIR and not Blocks.is_liquid(b) and Blocks.LK_CROSS[b] != 1:
+			count += 1
+	return count
 
 ## Is there water within two blocks of this column at its own height?
 ## Looks inside the chunk only — generation stays independent per chunk,
