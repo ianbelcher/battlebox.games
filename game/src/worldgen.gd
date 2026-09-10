@@ -1186,7 +1186,12 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 				# sand meets the sea, and a shell here and there further up.
 				# A beach was bare, which is fine for a beach and wrong for
 				# the whole shoreline of an island.
-				if _water_near(data, lx, lz, ground) and hash01(wx, wz, 16) < 0.16:
+				# IN STANDS, not sprinkled: a reed bed is a patch of them
+				# with bare sand between patches, so the chance is a noise
+				# gate — dense inside a stand, nothing outside it.
+				if _water_near(data, lx, lz, ground) \
+						and _detail.get_noise_2d(wx * 2.2, wz * 2.2) > 0.22 \
+						and hash01(wx, wz, 16) < 0.6:
 					data[idx(lx, ground + 1, lz)] = Blocks.CATTAIL
 				elif hash01(wx, wz, 15) < 0.008:
 					data[idx(lx, ground + 1, lz)] = Blocks.SHELL

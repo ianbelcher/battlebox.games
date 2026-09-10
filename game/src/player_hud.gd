@@ -2147,13 +2147,16 @@ func _refresh_ctf_panel() -> void:
 		for stale in _ctf_panel.get_children():
 			stale.queue_free()
 		return
-	var sig := "%s|%s|%d" % [str(world.ctf_caps), str(world.ctf_lost),
-		int(world.ctf_target)]
+	var sig := "%s|%s|%d|%s" % [str(world.ctf_caps), str(world.ctf_lost),
+		int(world.ctf_target), str(world.flags)]
 	if sig == _ctf_panel_sig:
 		return
 	_ctf_panel_sig = sig
 	for stale in _ctf_panel.get_children():
 		stale.queue_free()
+	if world.client_rules.flag_loss_is_out():
+		_fill_standing_panel()
+		return
 	var head := Label.new()
 	# THE HEADING SAYS WHAT THE MODE IS PLAYED ON, and last flag standing
 	# is not played on a target — it was reading "first to 3" in a mode
@@ -2230,6 +2233,55 @@ func _refresh_ctf_panel() -> void:
 		more.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
 		more.add_theme_constant_override("outline_size", 4)
 		_ctf_panel.add_child(more)
+
+## LAST FLAG STANDING'S BOARD: which flags are still up. It showed took
+## and lost counts, which is capture the flag's arithmetic and says
+## nothing about the one thing this mode is about — who is still in it.
+## A line per side: its name in its colour while its flag stands, struck
+## through and dim once it has been taken.
+func _fill_standing_panel() -> void:
+	var head := Label.new()
+	head.text = "LAST FLAG STANDING"
+	head.add_theme_font_size_override("font_size", _us(13))
+	head.add_theme_font_override("font", UiTheme.display(_uscale(), 1.2))
+	head.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
+	head.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
+	head.add_theme_constant_override("outline_size", 4)
+	_ctf_panel.add_child(head)
+	var standing: Array = []
+	var gone: Array = []
+	for entry: Array in world.flags:
+		var team := int(entry[0])
+		if entry.size() > 3 and bool(entry[3]):
+			gone.append(team)
+		else:
+			standing.append(team)
+	standing.sort()
+	gone.sort()
+	var name_px := TeamBoard.font_px(standing.size() + gone.size(), 18)
+	for team_v: Variant in standing + gone:
+		var team := int(team_v)
+		var out := gone.has(team)
+		var line := RichTextLabel.new()
+		line.bbcode_enabled = true
+		line.fit_content = true
+		line.scroll_active = false
+		line.autowrap_mode = TextServer.AUTOWRAP_OFF
+		line.custom_minimum_size = Vector2(_us(200), 0)
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		line.add_theme_font_size_override("normal_font_size", _us(name_px))
+		line.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.1, 0.9))
+		line.add_theme_constant_override("outline_size", 4)
+		var tint: Color = WorldNode.TEAM_COLORS[team] \
+			if team < WorldNode.TEAM_COLORS.size() else Color.WHITE
+		var team_name := str(world.client_team_names[team]) \
+			if team < world.client_team_names.size() else "Team %d" % (team + 1)
+		if out:
+			line.text = "[color=#6b6775][s]%s[/s]  out[/color]" % team_name
+		else:
+			line.text = "[color=#%s]%s[/color]  [color=#8d97ab]flag standing[/color]" % [
+				tint.to_html(false), team_name]
+		_ctf_panel.add_child(line)
 
 ## Swap a team header button for a LineEdit; commit renames server-side.
 func _rename_team(head: Button, index: int) -> void:

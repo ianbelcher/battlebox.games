@@ -941,9 +941,15 @@ func _local_move(delta: float) -> void:
 			elif input.is_sprint_pressed() or input.is_descend_pressed():
 				swim = -3.4
 			velocity.y = lerpf(velocity.y, swim, minf(1.0, delta * 5.0))
-	elif input.is_lift_pressed():
+	elif input.is_lift_pressed() and (downed or world.fly_allowed_for(player_id)):
 		# Held: rise. Released: this branch stops running and the plain
 		# gravity below takes over, so you drop rather than hover.
+		#
+		# ONLY WHERE FLYING IS ALLOWED. The double-tap checked the setting
+		# and this did not, so "nobody flies" still let anybody hold F or
+		# the bumper and go straight up. The knocked-out keep it, as they
+		# keep flight — it is how they get back to whoever might pick
+		# them up.
 		velocity.y = lerpf(velocity.y, LIFT_SPEED, minf(1.0, delta * 10.0))
 		on_floor = false
 		anim = Anim.FLY

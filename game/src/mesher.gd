@@ -21,6 +21,26 @@ const H := WorldGen.CHUNK_H
 ## of the brightness of the floor under it, which read as lamps that only
 ## shone upward. The sun still tells the faces apart; the lamps no longer
 ## lose on the underside.
+## SMOOTHED CORNERS, an experiment that can be switched off here.
+##
+## A block of natural ground standing at the outer corner of a step —
+## solid on two adjacent sides, open on the other two, open above with
+## nothing growing on it — is drawn as a wedge: its top is the triangle
+## against its two neighbours, and the two open faces become one diagonal
+## face from the outer corner of the near neighbour to the far corner.
+## Every hillside is made of these corners, so a hillside stops being a
+## staircase of boxes and starts being a slope, without a single block
+## moving. Buildings are untouched (only SMOOTH_BLOCKS qualify), and a
+## block with a plant on top stays square so the plant has ground under
+## it.
+##
+## THE SHAPE IS ONLY A PICTURE. The block is still a whole block to walk
+## on and dig — the cut-away quarter can be stood on. That is the price
+## of trying this in the mesher alone, and the reason it is a switch.
+const SMOOTH_CORNERS := true
+const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
+	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE]
+
 const SHADE_TOP := 1.0
 const SHADE_BOTTOM := 0.82
 const SHADE_X := 0.9
@@ -169,7 +189,11 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 					draw = Blocks.disguise_of([
 						_block_at(x - 1, y, z), _block_at(x + 1, y, z),
 						_block_at(x, y, z - 1), _block_at(x, y, z + 1)])
-				_add_cube(draw, x, y, z, cx, cz, "opaque")
+				var corner := _corner_of(block, x, y, z) if SMOOTH_CORNERS else -1
+				if corner >= 0:
+					_add_corner(draw, x, y, z, cx, cz, corner)
+				else:
+					_add_cube(draw, x, y, z, cx, cz, "opaque")
 				if block == Blocks.TELEPORT:
 					teleporters.append(Vector3i(x, y, z))
 				var light := Blocks.LK_LIGHT[block]
@@ -202,6 +226,103 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 func _jitter(x: int, y: int, z: int, cx: int, cz: int, rough := 0.0) -> float:
 	var amp := 0.09 * (1.0 + rough)
 	return 1.0 - amp * 0.6 + amp * WorldGen.hash01(cx * SIZE + x, cz * SIZE + z, y * 31)
+
+## Which outer corner this block is, or -1 for none. 0: solid to the
+## north (-z) and east (+x); 1: east and south; 2: south and west; 3: west
+## and north. The kept triangle is the one against the two neighbours.
+func _corner_of(block: int, x: int, y: int, z: int) -> int:
+	if not (block in SMOOTH_BLOCKS):
+		return -1
+	if _block_at(x, y + 1, z) != Blocks.AIR:
+		return -1
+	var n := _is_opaque_at(x, y, z - 1)
+	var e := _is_opaque_at(x + 1, y, z)
+	var s := _is_opaque_at(x, y, z + 1)
+	var w := _is_opaque_at(x - 1, y, z)
+	if n and e and not s and not w:
+		return 0
+	if e and s and not w and not n:
+		return 1
+	if s and w and not n and not e:
+		return 2
+	if w and n and not e and not s:
+		return 3
+	return -1
+
+## The wedge: the top triangle, the diagonal face, the bottom triangle
+## when there is nothing under it — and, when there IS something under
+## it that is not a matching wedge, the quarter of that block's top the
+## cut has uncovered, so no hole opens into the ground.
+func _add_corner(block: int, x: int, y: int, z: int, cx: int, cz: int, corner: int) -> void:
+	var base_color := Blocks.LK_COLOR[block]
+	var top_color := Blocks.LK_TOP[block]
+	var jitter := _jitter(x, y, z, cx, cz, Blocks.LK_ROUGH[block])
+	var emit := Blocks.LK_EMIT[block]
+	var o := Vector3(x, y, z)
+	# Plan corners: NW (0,0), NE (1,0), SE (1,1), SW (0,1) in x,z.
+	var nw := Vector2(0, 0)
+	var ne := Vector2(1, 0)
+	var se := Vector2(1, 1)
+	var sw := Vector2(0, 1)
+	# The kept triangle and the diagonal's two ends, per corner.
+	var keep: Array = []
+	var cut_a := Vector2.ZERO
+	var cut_b := Vector2.ZERO
+	match corner:
+		0:
+			keep = [nw, ne, se]; cut_a = nw; cut_b = se
+		1:
+			keep = [ne, se, sw]; cut_a = ne; cut_b = sw
+		2:
+			keep = [se, sw, nw]; cut_a = se; cut_b = nw
+		_:
+			keep = [sw, nw, ne]; cut_a = sw; cut_b = ne
+	var top_b := SHADE_TOP * jitter
+	_tri("opaque", o + Vector3(keep[0].x, 1, keep[0].y), o + Vector3(keep[1].x, 1, keep[1].y),
+		o + Vector3(keep[2].x, 1, keep[2].y), Vector3.UP, top_color, top_b, emit)
+	# The diagonal face, lit between the two side shades and facing away
+	# from the kept triangle.
+	var mid: Vector2 = (Vector2(keep[0]) + Vector2(keep[1]) + Vector2(keep[2])) / 3.0
+	var edge_mid: Vector2 = (cut_a + cut_b) * 0.5
+	var out_dir: Vector2 = (edge_mid - mid).normalized()
+	var normal := Vector3(out_dir.x, 0, out_dir.y)
+	var side_b := (SHADE_X + SHADE_Z) * 0.5 * jitter
+	var a0 := o + Vector3(cut_a.x, 0, cut_a.y)
+	var a1 := o + Vector3(cut_a.x, 1, cut_a.y)
+	var b0 := o + Vector3(cut_b.x, 0, cut_b.y)
+	var b1 := o + Vector3(cut_b.x, 1, cut_b.y)
+	_tri("opaque", a0, a1, b1, normal, base_color, side_b, emit)
+	_tri("opaque", a0, b1, b0, normal, base_color, side_b, emit)
+	var below := _block_at(x, y - 1, z)
+	if Blocks.LK_OPAQUE[below] != 1:
+		_tri("opaque", o + Vector3(keep[0].x, 0, keep[0].y), o + Vector3(keep[1].x, 0, keep[1].y),
+			o + Vector3(keep[2].x, 0, keep[2].y), Vector3.DOWN, base_color, SHADE_BOTTOM * jitter, emit)
+	elif _corner_of(below, x, y - 1, z) != corner:
+		# The quarter of the block below that the cut uncovers, in that
+		# block's own top colour.
+		var far: Vector2 = [sw, nw, ne, se][corner]
+		var below_top: Color = Blocks.LK_TOP[below]
+		_tri("opaque", o + Vector3(cut_a.x, 0, cut_a.y), o + Vector3(far.x, 0, far.y),
+			o + Vector3(cut_b.x, 0, cut_b.y), Vector3.UP, below_top,
+			SHADE_TOP * _jitter(x, y - 1, z, cx, cz, Blocks.LK_ROUGH[below]), Blocks.LK_EMIT[below])
+
+## One triangle, wound clockwise as seen from `normal`'s side, which is
+## the side Godot draws.
+func _tri(key: String, a: Vector3, b: Vector3, c: Vector3, normal: Vector3,
+		color: Color, brightness: float, emit: float) -> void:
+	if (b - a).cross(c - a).dot(normal) > 0.0:
+		var t := b
+		b = c
+		c = t
+	var start: int = _verts[key].size()
+	var out := Color(color.r * brightness, color.g * brightness, color.b * brightness, color.a)
+	for p: Vector3 in [a, b, c]:
+		_verts[key].append(p)
+		_normals[key].append(normal)
+		_uvs[key].append(Vector2(0, 0))
+		_colors[key].append(out)
+		_uv2s[key].append(Vector2(0.0, emit))
+	_indices[key].append_array([start, start + 1, start + 2])
 
 func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String) -> void:
 	var base_color := Blocks.LK_COLOR[block]
