@@ -448,7 +448,7 @@ func _room_label() -> String:
 	if not _room_name.is_empty():
 		return _room_name
 	if _room_code.is_empty() or _room_code == Room.HOUSE_CODE:
-		return "BattleBox"
+		return Room.HOUSE_NAME
 	return _room_code
 
 func _build_game_screen() -> void:

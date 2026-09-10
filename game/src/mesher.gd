@@ -135,11 +135,17 @@ func _occludes(x: int, y: int, z: int) -> bool:
 ## Build all surfaces for a chunk. cx/cz are only used to seed color jitter
 ## so the pattern doesn't repeat chunk to chunk.
 var _lk_opaque := PackedByteArray()
+# Per build: the shared height of every ground vertex, and every block's
+# slope on each axis — see _surface and _axes.
+var _surface_cache: Dictionary = {}
+var _axes_cache: Dictionary = {}
 
 func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Dictionary:
 	_lk_opaque = Blocks.LK_OPAQUE
 	_data = data
 	_neighbors = neighbors
+	_surface_cache.clear()
+	_axes_cache.clear()
 	var topmap := PackedByteArray()
 	topmap.resize(SIZE * SIZE)
 	for y in H:
@@ -227,53 +233,121 @@ func _jitter(x: int, y: int, z: int, cx: int, cz: int, rough := 0.0) -> float:
 	var amp := 0.09 * (1.0 + rough)
 	return 1.0 - amp * 0.6 + amp * WorldGen.hash01(cx * SIZE + x, cz * SIZE + z, y * 31)
 
-## THE SHAPE OF A BLOCK OF GROUND, as a height at each of its four top
-## corners — NW, NE, SE, SW — each 0 or 1. Read from raw neighbours only:
+## THE SHAPE OF THE GROUND. Every top corner of a block of ground is a
+## VERTEX THE GROUND SHARES: up to four blocks meet at it, on up to three
+## levels, and they all read the same height for it — so nothing here can
+## leave a seam, a spike, or a sliver of wall between two blocks that are
+## both ground. A block's top is drawn through the four heights at its
+## corners; its sides are drawn up to the line the surface makes across
+## them. The height of a vertex, in whole blocks, is the HIGHEST of:
 ##
-##   on each axis, one side open and the other solid means the block
-##   SLOPES down toward the open side; both solid or both open, it is
-##   flat on that axis. A corner's height is the lower of its two axes.
+##   whatever stands on it — a block above with something on it, or one
+##     that is not ground, reaches its own top;
+##   each block of ground touching it, with nothing above, reaching its
+##     bottom plus its OPINION of that corner: on each axis, one side open
+##     and the other solid means it slopes down toward the open side; both
+##     solid or both open, it is flat; the corner takes the lower axis.
+##     Open on BOTH sides, with ground beneath and the ground beside it
+##     one step lower while the block diagonally beyond is lower still,
+##     it drops a whole block further — see _opinion.
 ##
-## That one rule gives every shape the ground needs. A step's edge (open
-## in front, solid behind) is a ramp. A single-file ridge is a ramp with
-## caps. A plateau's outer corner (open on two adjacent sides) drops its
-## outer corner to a point, so the corner is rounded off. Two open sides
-## opposite each other is a bridge and stays flat. A lone block stays a
-## block. Only natural ground with nothing above it is shaped; anything
-## built, and anything with something on it, is a whole block.
-##
-## NEIGHBOURS NEVER DISAGREE, and that is the part that makes this hold
-## together. A block draws each side between its OWN profile along that
-## edge and its NEIGHBOUR'S profile along the same edge, both from this
-## rule — so a whole block next to a ramp draws the triangle of its face
-## the ramp leaves bare, and a ramp next to air draws its full cap. No
-## face is ever culled just because the block beyond it is "solid".
+## A step's edge is a ramp. A stair is a slope, because each tread's back
+## corners are held up by the tread above. A wide tread's diagonal edge is
+## a bevel: the outer corner drops and the two beside it are held by the
+## neighbours along the edge. A hillside climbing one block per block on
+## the diagonal is ONE FLAT PLANE, because each block's outer corner cuts
+## a block deep into the block beneath — that is the case that was a row
+## of pyramids, then a lattice of little triangles. A lone block, a
+## one-wide ridge and a one-wide hole all stay square, because nothing
+## beside them slopes. Only natural ground with nothing above it is
+## shaped; anything built, and anything with something on it, is whole.
 func _smooth(block: int, x: int, y: int, z: int) -> bool:
 	return SMOOTH_CORNERS and (block in SMOOTH_BLOCKS) and _block_at(x, y + 1, z) == Blocks.AIR
 
-## Corner heights [NW, NE, SE, SW] for a block already known to be smooth.
+## Corner heights [NW, NE, SE, SW] of a block's top, relative to its
+## bottom: 1 is its own top, 0 its bottom, -1 the bottom of the block
+## beneath.
 func _heights(x: int, y: int, z: int) -> PackedFloat32Array:
+	return PackedFloat32Array([_surface(x, y, z, 0, 0), _surface(x, y, z, 1, 0),
+		_surface(x, y, z, 1, 1), _surface(x, y, z, 0, 1)])
+
+## The shared height of the vertex at the (cx, cz) corner of block (x, z)
+## on level y — cx and cz each 0 or 1 — relative to that level. Cached
+## per vertex and level: four blocks ask for each one.
+func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
+	var key := Vector3i(x + cx, y, z + cz)
+	if _surface_cache.has(key):
+		return _surface_cache[key]
+	var top := -1e9
+	for dx: int in [cx - 1, cx]:
+		for dz: int in [cz - 1, cz]:
+			var nx: int = x + dx
+			var nz: int = z + dz
+			for level: int in [y + 1, y, y - 1]:
+				if not _is_opaque_at(nx, level, nz):
+					continue
+				var reach: float
+				var above := _block_at(nx, level + 1, nz)
+				if _lk_opaque[above] == 1:
+					if level > y or not _smooth(above, nx, level + 1, nz):
+						reach = level + 1     # solid through to its top
+					else:
+						continue              # the ground above speaks for it
+				elif _smooth(_block_at(nx, level, nz), nx, level, nz):
+					reach = level + _opinion(nx, level, nz, cx - dx, cz - dz)
+				else:
+					reach = level + 1         # built, or under water: whole
+				top = maxf(top, reach)
+	var h := clampf(top - y, -1.0, 1.0)
+	_surface_cache[key] = h
+	return h
+
+## One block of ground's own view of one of its corners: 1 up, 0 down to
+## its bottom, -1 a block further. See the rule above _smooth.
+func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
+	var axes := _axes(x, y, z)
+	var hz := axes[cz]
+	var hx := axes[2 + cx]
+	var ex := 1 if cx == 1 else -1
+	var ez := 1 if cz == 1 else -1
+	if hx > 0.0 or hz > 0.0:
+		# Solid on both sides of this corner but open diagonally beyond
+		# it, onto open ground rather than into a one-block hole: the
+		# hillside falls away across this corner and it drops, so a
+		# slope running diagonally carries on through the row behind
+		# the edge instead of stopping at it in a row of teeth.
+		if hx > 0.0 and hz > 0.0 and _is_opaque_at(x + ex, y, z) and _is_opaque_at(x, y, z + ez) \
+				and not _is_opaque_at(x + ex, y, z + ez) \
+				and not _is_opaque_at(x + 2 * ex, y, z + ez) \
+				and not _is_opaque_at(x + ex, y, z + 2 * ez):
+			return 0.0
+		return minf(hx, hz)
+	# Open on both sides of this corner. If the ground beside it is one
+	# step down on both sides and the block diagonally beyond is lower
+	# still, the hillside is descending on the diagonal and this corner
+	# belongs a whole block lower — cut into the block beneath, which has
+	# to be ground for that to be a picture of anything.
+	if _block_at(x, y - 1, z) in SMOOTH_BLOCKS and _is_opaque_at(x, y - 1, z) \
+			and _is_opaque_at(x + ex, y - 1, z) and _is_opaque_at(x, y - 1, z + ez) \
+			and not _is_opaque_at(x + ex, y - 1, z + ez):
+		return -1.0
+	return 0.0
+
+## A block's slope on each axis from its four side neighbours alone:
+## [north edge, south edge, west edge, east edge], each 1 up or 0 down.
+func _axes(x: int, y: int, z: int) -> PackedFloat32Array:
+	var key := Vector3i(x, y, z)
+	if _axes_cache.has(key):
+		return _axes_cache[key]
 	var n := _is_opaque_at(x, y, z - 1)
 	var e := _is_opaque_at(x + 1, y, z)
 	var s := _is_opaque_at(x, y, z + 1)
 	var w := _is_opaque_at(x - 1, y, z)
-	var hz_n := 0.0 if (not n and s) else 1.0
-	var hz_s := 0.0 if (not s and n) else 1.0
-	var hx_w := 0.0 if (not w and e) else 1.0
-	var hx_e := 0.0 if (not e and w) else 1.0
-	# SLOPING ON BOTH AXES — the block at the outer corner of a diagonal
-	# hillside — a corner that is up on one axis and down on the other
-	# sits HALFWAY. The lower of the two made a spike: one corner up,
-	# three down, and a diagonal stair was a row of spikes. At halfway the
-	# two half corners and the high and low ones lie in one plane, so the
-	# hillside is a flat slope running diagonally, which is what it is.
-	var both := (hz_n != hz_s) and (hx_w != hx_e)
-	var corners := PackedFloat32Array()
-	for pair: Array in [[hx_w, hz_n], [hx_e, hz_n], [hx_e, hz_s], [hx_w, hz_s]]:
-		var hx: float = pair[0]
-		var hz: float = pair[1]
-		corners.append((hx + hz) * 0.5 if both else minf(hx, hz))
-	return corners
+	var axes := PackedFloat32Array([
+		0.0 if (not n and s) else 1.0, 0.0 if (not s and n) else 1.0,
+		0.0 if (not w and e) else 1.0, 0.0 if (not e and w) else 1.0])
+	_axes_cache[key] = axes
+	return axes
 
 ## Sides 0 N, 1 E, 2 S, 3 W; each runs between two corners, clockwise
 ## seen from above: N is NW→NE, E is NE→SE, S is SE→SW, W is SW→NW.
@@ -281,57 +355,55 @@ const SIDE_CORNERS := [[0, 1], [1, 2], [2, 3], [3, 0]]
 const SIDE_STEP := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]
 const CORNER_XZ := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
 
-## A block's height profile along one of its sides, in that side's own
-## corner order. A whole block, or anything that is not ground, is (1, 1).
-func _profile(x: int, y: int, z: int, side: int) -> Vector2:
-	var block := _block_at(x, y, z)
-	if not _smooth(block, x, y, z):
-		return Vector2(1, 1)
-	var h := _heights(x, y, z)
-	var pair: Array = SIDE_CORNERS[side]
-	return Vector2(h[pair[0]], h[pair[1]])
-
-## The NEIGHBOUR across `side`, as a profile in MY corner order along the
-## shared edge — its facing side runs the other way, so it is reversed.
-## Air (or anything not opaque) is (0, 0): nothing covers my face.
-func _facing(x: int, y: int, z: int, side: int) -> Vector2:
-	var step: Vector2i = SIDE_STEP[side]
-	var nx := x + step.x
-	var nz := z + step.y
-	if not _is_opaque_at(nx, y, nz):
-		return Vector2(0, 0)
-	var theirs := _profile(nx, y, nz, (side + 2) % 4)
-	return Vector2(theirs.y, theirs.x)
-
-## The face of a block along one side, between a bottom profile and a top
-## profile — the part of the face nothing beyond it covers. Coloured from
-## the block's side colour at the ground to its top colour at the top,
-## so a cut runs green down to a brown foot rather than brown all over.
-func _side_quad(x: int, y: int, z: int, side: int, top: Vector2, bottom: Vector2,
+## One side of a block, against air: the part of it under the ground.
+## The surface crosses the face as a straight line from the height at
+## one corner to the height at the other — unclamped, so it may start
+## below the block's bottom or run off above its top — and the face is
+## whatever lies between the bottom, the top and that line. Coloured from
+## the block's side colour at the ground to its top colour at the top, so
+## a cut runs green down to a brown foot rather than brown all over.
+func _side_face(x: int, y: int, z: int, side: int, top: Vector2,
 		base_color: Color, top_color: Color, brightness: float, emit: float) -> void:
-	var lo := Vector2(minf(bottom.x, top.x), minf(bottom.y, top.y))
-	if top.x <= lo.x and top.y <= lo.y:
+	if top.x <= 0.0 and top.y <= 0.0:
 		return
+	var d := top.y - top.x
+	var s0 := 0.0
+	var s1 := 1.0
+	if top.x <= 0.0:
+		s0 = -top.x / d
+	elif top.y <= 0.0:
+		s1 = -top.x / d
+	# Around the face: along the bottom, up the far end, back along the
+	# surface line (with a bend where it runs off the top), down the near end.
+	var pts: Array = [Vector2(s0, 0), Vector2(s1, 0),
+		Vector2(s1, minf(1.0, top.x + d * s1))]
+	if d != 0.0:
+		var sk := (1.0 - top.x) / d
+		if sk > s0 and sk < s1:
+			pts.append(Vector2(sk, 1))
+	pts.append(Vector2(s0, minf(1.0, top.x + d * s0)))
 	var pair: Array = SIDE_CORNERS[side]
 	var c0: Vector2 = CORNER_XZ[pair[0]]
 	var c1: Vector2 = CORNER_XZ[pair[1]]
 	var o := Vector3(x, y, z)
 	var step: Vector2i = SIDE_STEP[side]
 	var normal := Vector3(step.x, 0, step.y)
-	var p0 := o + Vector3(c0.x, lo.x, c0.y)
-	var p1 := o + Vector3(c1.x, lo.y, c1.y)
-	var p2 := o + Vector3(c1.x, top.y, c1.y)
-	var p3 := o + Vector3(c0.x, top.x, c0.y)
-	var k0 := base_color.lerp(top_color, lo.x)
-	var k1 := base_color.lerp(top_color, lo.y)
-	var k2 := base_color.lerp(top_color, top.y)
-	var k3 := base_color.lerp(top_color, top.x)
-	_tri("opaque", [p0, p1, p2], normal, [k0, k1, k2], brightness, emit)
-	_tri("opaque", [p0, p2, p3], normal, [k0, k2, k3], brightness, emit)
+	var world: Array = []
+	var cols: Array = []
+	for q: Vector2 in pts:
+		if not world.is_empty() and (world.back() as Vector3).is_equal_approx(
+				o + Vector3(lerpf(c0.x, c1.x, q.x), q.y, lerpf(c0.y, c1.y, q.x))):
+			continue
+		world.append(o + Vector3(lerpf(c0.x, c1.x, q.x), q.y, lerpf(c0.y, c1.y, q.x)))
+		cols.append(base_color.lerp(top_color, q.y))
+	for i in range(1, world.size() - 1):
+		_tri("opaque", [world[0], world[i], world[i + 1]], normal,
+			[cols[0], cols[i], cols[i + 1]], brightness, emit)
 
-## A shaped block: the sloped top as two triangles split through its
-## higher diagonal, each side against what its neighbour leaves bare,
-## and a bottom when there is nothing beneath.
+## A shaped block: the top as two triangles split through its higher
+## diagonal, each open side up to the surface line, and a bottom when
+## there is nothing beneath. Sides against another solid block draw
+## nothing: the surface is shared, so there is nothing left bare.
 func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		h: PackedFloat32Array) -> void:
 	var base_color := Blocks.LK_COLOR[block]
@@ -343,11 +415,14 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 	for i in 4:
 		var c: Vector2 = CORNER_XZ[i]
 		p.append(o + Vector3(c.x, h[i], c.y))
-	# Split through the diagonal that carries more height, so a raised
-	# corner slopes away on both sides of it rather than sitting on a
-	# flat triangle.
-	var tris: Array = [[0, 1, 2], [0, 2, 3]] if h[0] + h[2] >= h[1] + h[3] \
-		else [[1, 2, 3], [1, 3, 0]]
+	# Split through the diagonal whose two corners are LEVEL, so a block
+	# with one corner out of line is a flat triangle and a sloped one —
+	# flat from the midline — rather than a ridge from that corner to
+	# the far one. Where neither is level, or both are, the higher.
+	var d02 := absf(h[0] - h[2])
+	var d13 := absf(h[1] - h[3])
+	var through_02 := d02 < d13 if d02 != d13 else h[0] + h[2] >= h[1] + h[3]
+	var tris: Array = [[0, 1, 2], [0, 2, 3]] if through_02 else [[1, 2, 3], [1, 3, 0]]
 	for t: Array in tris:
 		var a: Vector3 = p[t[0]]
 		var bpt: Vector3 = p[t[1]]
@@ -359,11 +434,13 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		var bright := lerpf((SHADE_X + SHADE_Z) * 0.5, SHADE_TOP, clampf(n.y, 0.0, 1.0)) * jitter
 		_tri("opaque", [a, bpt, c], n, [top_color, top_color, top_color], bright, emit)
 	for side in 4:
+		var step: Vector2i = SIDE_STEP[side]
+		if _is_opaque_at(x + step.x, y, z + step.y):
+			continue
 		var pair: Array = SIDE_CORNERS[side]
-		var mine := Vector2(h[pair[0]], h[pair[1]])
-		var theirs := _facing(x, y, z, side)
 		var shade := SHADE_Z if side % 2 == 0 else SHADE_X
-		_side_quad(x, y, z, side, mine, theirs, base_color, top_color, shade * jitter, emit)
+		_side_face(x, y, z, side, Vector2(h[pair[0]], h[pair[1]]),
+			base_color, top_color, shade * jitter, emit)
 	if not _is_opaque_at(x, y - 1, z):
 		_tri("opaque", [o, o + Vector3(1, 0, 0), o + Vector3(1, 0, 1)], Vector3.DOWN,
 			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
@@ -437,19 +514,22 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 				continue
 		else:
 			if Blocks.LK_OPAQUE[neighbor] == 1:
-				# A SHAPED NEIGHBOUR COVERS LESS THAN A WHOLE ONE. Sides
-				# only: the neighbour's profile along our shared edge, and
-				# the part of this face above it is drawn as a patch.
-				if n.y == 0 and SMOOTH_CORNERS:
-					var side := 5 if n.z < 0 else (1 if n.x > 0 else (2 if n.z > 0 else 3))
-					if side == 5:
-						side = 0
-					var theirs := _facing(x, y, z, side)
-					if theirs.x < 1.0 or theirs.y < 1.0:
-						_side_quad(x, y, z, side, Vector2(1, 1), theirs, base_color,
-							top_color if top_color != base_color else base_color,
-							face[3] * jitter, emit)
 				continue
+			# UNDER A CUT. Ground above this block may have dipped a
+			# corner into it (see _opinion), and then this side is drawn
+			# only up to the surface line, like a shaped block's.
+			if n.y == 0 and SMOOTH_CORNERS and _lk_opaque[_block_at(x, y + 1, z)] == 1 \
+					and _smooth(_block_at(x, y + 1, z), x, y + 1, z):
+				var side := 0 if n.z < 0 else (1 if n.x > 0 else (2 if n.z > 0 else 3))
+				var pair: Array = SIDE_CORNERS[side]
+				var c0: Vector2 = CORNER_XZ[pair[0]]
+				var c1: Vector2 = CORNER_XZ[pair[1]]
+				var mine := Vector2(_surface(x, y, z, int(c0.x), int(c0.y)),
+					_surface(x, y, z, int(c1.x), int(c1.y)))
+				if mine.x < 1.0 or mine.y < 1.0:
+					_side_face(x, y, z, side, mine, base_color, top_color,
+						face[3] * jitter, emit)
+					continue
 		var u: Vector3i = face[1]
 		var v: Vector3i = face[2]
 		var shade: float = face[3]

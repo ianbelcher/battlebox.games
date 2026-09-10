@@ -25,12 +25,12 @@ extends Control
 ##
 ## THE FOUR-YEAR-OLD PATH HAS TO SURVIVE ALL OF IT. Play is the big ember
 ## button, it holds focus from the first frame, and it needs no reading:
-## Space, Enter or Ⓐ puts you in a game. WHICH game is QuickPlay's
-## table — the one with people in it, else the always-open one — and the
-## line under the button says which, so nobody is dropped into a world
-## nothing on the screen described. Setting a game up yourself is the
-## second button, and its sheet is the questions a game needs answered
-## before it exists.
+## Space, Enter or Ⓐ puts you in the Lobby — the always-open free world,
+## where you walk around and get the feel of the game — and the line
+## under the button says so. It used to pick whichever game had the most
+## people in it, which put a first-timer in somebody's storm. A game with
+## rules is one you CREATE: that is the second button, and its sheet is
+## the questions a game needs answered before it exists.
 ##
 ## And everything here is REACHABLE WITHOUT A MOUSE. Every control on this
 ## screen was FOCUS_NONE once, which meant a gamepad could do exactly one
@@ -275,15 +275,14 @@ func _build_hero() -> Control:
 	buttons.add_theme_constant_override("separation", _px(12))
 	column.add_child(buttons)
 
-	# PLAY, and it PLAYS. For a while this button was "Start a game" and
-	# opened the setup sheet, because the old "Play now" dropped you into
-	# a world nothing on the screen had described. Both halves of that
-	# are fixed differently now: the list describes every game, and the
-	# line under this button says exactly which one it will put you in
-	# (QuickPlay). A four-year-old presses the big orange button and is
-	# in a game; a grown-up reads the small print first.
+	# PLAY, and it PLAYS: straight into the Lobby. For a while this
+	# button was "Start a game" and opened the setup sheet, and for a
+	# while after that it picked the busiest game going. Now it is one
+	# place, always the same, and the line under it says so. A
+	# four-year-old presses the big orange button and is in the world;
+	# a grown-up reads the small print first.
 	_play_button = _primary_button("Play", UiTheme.T_TITLE + 6)
-	_play_button.pressed.connect(_quick_play)
+	_play_button.pressed.connect(_play_lobby)
 	buttons.add_child(_play_button)
 	# DEFERRED, because this column is not in the tree yet — it is being
 	# built and gets added by the caller. grab_focus() on a node outside
@@ -338,31 +337,36 @@ func _build_name_row() -> Control:
 	# Enter in the name box is the same as pressing Play: typing your
 	# name and hitting Enter is what everybody does, and a box that
 	# swallowed it looked broken.
-	_name_field.text_submitted.connect(func(_t: String) -> void: _quick_play())
+	_name_field.text_submitted.connect(func(_t: String) -> void: _play_lobby())
 	row.add_child(_name_field)
 	return row
 
-## The big button. The game with people in it, else the always-open one
-## — and if the list never came (the lobby is down), the always-open one
-## by its fixed code, which is what Play has always done.
-func _quick_play() -> void:
-	var pick := QuickPlay.choose(_rooms, Room.HOUSE_CODE)
-	if pick.is_empty():
-		_join(Room.HOUSE_CODE, "BattleBox")
-		return
-	_join(str(pick.get("code", "")), str(pick.get("name", pick.get("code", ""))))
+## The big button: the Lobby, by its fixed code — so it works whether or
+## not the games list ever came.
+func _play_lobby() -> void:
+	_join(Room.HOUSE_CODE, Room.HOUSE_NAME)
 
-## The line under Play: where it will put you. Rewritten whenever the
-## list does, so it is never a promise about a game that has since
-## filled up or gone.
+## The line under Play: where it will put you, and who is there. Rewritten
+## whenever the list is, so the count is never stale.
 func _refresh_play_note() -> void:
 	if _play_note == null:
 		return
-	var pick := QuickPlay.choose(_rooms, Room.HOUSE_CODE)
-	if pick.is_empty():
-		_play_note.text = "Jumps straight into the always-open game."
-	else:
-		_play_note.text = "Jumps into %s" % QuickPlay.describe(pick)
+	var text := "Drops you into the Lobby — the always-open world to roam and build in."
+	var humans := _lobby_humans()
+	if humans == 1:
+		text += " 1 person there now."
+	elif humans > 1:
+		text += " %d people there now." % humans
+	_play_note.text = text
+
+## How many people are in the Lobby, from the last list; -1 if it never
+## came or the Lobby was not in it.
+func _lobby_humans() -> int:
+	for entry: Variant in _rooms:
+		if entry is Dictionary and (bool(entry.get("house", false)) \
+				or str(entry.get("code", "")) == Room.HOUSE_CODE):
+			return int(entry.get("humans", 0))
+	return -1
 
 ## Somebody read you a code. Small, because it is the least common way in
 ## and it used to be a full-width form field with a heading over it.
@@ -431,9 +435,8 @@ func _show_rooms(rooms: Array) -> void:
 	_refresh_play_note()
 	for child in _games_box.get_children():
 		child.queue_free()
-	# THE ALWAYS-ON WORLD IS IN THE LIST. It used to be lifted out and
-	# given a button of its own, which meant the one game guaranteed to be
-	# running was the one game the screen never described.
+	# THE LOBBY IS IN THE LIST TOO, described like everything else; Play
+	# is a shortcut to it, not a different door.
 	var others: Array = rooms
 	if others.is_empty():
 		# A titled hole reads as something that failed to load. An empty
@@ -494,8 +497,8 @@ func _room_row(entry: Dictionary) -> Button:
 	# is not why anybody picks a game anyway. How many PEOPLE are in there
 	# is, and that is on the right of this row in mint.
 	var what := GameSetup.summary(entry.get("settings", {}))
-	# The one game that is always there says so, because "why is this one
-	# always at the top" is otherwise a question with no answer on screen.
+	# The Lobby says what it is for, because "why is this one always at
+	# the top" is otherwise a question with no answer on screen.
 	if bool(entry.get("house", false)):
 		what = "Always open · " + what if not what.is_empty() else "Always open"
 	names.add_child(_row_label(what if not what.is_empty() else code,
@@ -1061,8 +1064,8 @@ func _on_failed(what: String, message: String) -> void:
 	_busy = false
 	if _create_button != null:
 		_create_button.disabled = false
-	# A lobby that is down must never block Play: the always-on game is on
-	# a fixed code, so it still works with nothing listed.
+	# A lobby server that is down must never block Play: the Lobby world
+	# is on a fixed code, so it still works with nothing listed.
 	if what == "list":
 		# The list is polled, so a failure is a moment rather than a state
 		# — it says so where the list would be, and says nothing in the

@@ -354,17 +354,16 @@ class RoomArgvTests(unittest.TestCase):
 
 
 class HouseTests(unittest.TestCase):
-    """THE ALWAYS-ON WORLD IS JUST ANOTHER GAME. It used to have a button
-    of its own on the front page — a big "Play now" that dropped you into
-    a world nothing on the screen had described. It is in the list now,
-    saying what it is, so it has to actually BE something."""
+    """THE ALWAYS-ON WORLD IS THE LOBBY: the free world Play drops you
+    into, with no storm and no clock. It ran a battle royale for a while,
+    which put every first-timer straight into a shrinking storm."""
 
-    def test_the_always_on_world_is_a_game_somebody_would_join(self):
+    def test_the_lobby_is_a_free_world_with_no_rules(self):
         settings = lobby.clean_settings(lobby.HOUSE_SETTINGS)
         self.assertEqual(settings, lobby.HOUSE_SETTINGS,
                          "the house settings are valid settings")
-        self.assertEqual(settings["mode"], "battle")
-        self.assertEqual(settings["teams"], 5)
+        self.assertEqual(settings["mode"], "creative")
+        self.assertEqual(lobby.HOUSE_NAME, "Lobby")
 
     def test_the_always_on_world_can_hold_a_full_house(self):
         # Five teams of twenty. The seat count is a flag, and 100 has to be

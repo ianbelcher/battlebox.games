@@ -22,16 +22,17 @@ extends Node
 ##   WORLD_ROOM_PUBLIC  1 to be listed on the front page
 ##   WORLD_IDLE_EXIT    seconds alone before quitting; 0 never quits
 
-## The always-on public game has no code and never exits. Every other room
-## is created on demand and reaped.
+## The Lobby: the always-on free world Play drops you into. It has a fixed
+## code and never exits. Every other room is created on demand and reaped.
 const HOUSE_CODE := "house"
+const HOUSE_NAME := "Lobby"
 
 ## Checked this often rather than every frame; a room ending a few hundred
 ## milliseconds late costs nothing.
 const POLL_SECONDS := 2.0
 
 var code := HOUSE_CODE
-var display_name := "BattleBox"
+var display_name := HOUSE_NAME
 var is_public := true
 ## Seconds with nobody connected before this process quits. Zero means
 ## never, which is what the house room runs with.
@@ -49,7 +50,7 @@ var _ever_joined := false
 
 func _init() -> void:
 	code = EnvConfig.text("WORLD_ROOM_CODE", HOUSE_CODE)
-	display_name = EnvConfig.text("WORLD_ROOM_NAME", "BattleBox")
+	display_name = EnvConfig.text("WORLD_ROOM_NAME", HOUSE_NAME)
 	is_public = EnvConfig.text("WORLD_ROOM_PUBLIC", "1") == "1"
 	idle_exit_seconds = maxf(0.0, EnvConfig.decimal("WORLD_IDLE_EXIT", 0.0))
 

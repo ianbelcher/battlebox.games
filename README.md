@@ -8,8 +8,8 @@ A voxel game that runs in a browser. Built for children; playable at
 whole of it — clone it and run your own.
 
 The front page asks who you are and has one big button. **Play** puts
-you in the game with the most people in it, or the always-open one, and
-the line under the button says which before you press it. Pressing it
+you in the Lobby: the always-open free world, to roam and build in and
+get the feel of the game, with no storm and no clock. Pressing it
 takes you through a loading screen — the sign, a bar, "Loading
 BattleBox… 38 of 90" — and straight into a seat: no second "press a
 button to join". A room that was waiting for somebody opens its round

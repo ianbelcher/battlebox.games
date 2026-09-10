@@ -82,9 +82,10 @@ The world menu is now three things and no settings: how the round is
 going, the code that gets a friend in, and the way out to the front page.
 `game/tests/menu_controls.gd` fails if any of the old rows come back.
 
-The always-on world is not special either, beyond not closing when the
-last person leaves. It is spawned with settings like any other room,
-listed like any other room, and says what it is like any other room.
+The always-on world is the Lobby: a free world with no rules, where Play
+puts you. It is not special either, beyond not closing when the last
+person leaves. It is spawned with settings like any other room, listed
+like any other room, and says what it is like any other room.
 
 ## The client
 
@@ -92,7 +93,6 @@ listed like any other room, and says what it is like any other room.
 | --- | --- |
 | `main.gd` | The shell: screens, the connect/reconnect loop, the server bootstrap |
 | `lobby_screen.gd` | The first screen — who you are, Play, the games running, or set one up |
-| `quick_play.gd` | Which game Play puts you in: people first, then the always-open one. Pure; no nodes |
 | `title_backdrop.gd` | What is behind it: sky, skyline, drifting blocks |
 | `neon_wordmark.gd` | BattleBox, as the neon sign the intro ends on — see `tools/make_wordmark.py` |
 | `game_setup.gd` | The table of what a new game can be. Pure; no nodes |
@@ -241,6 +241,15 @@ Meshes are face-culled with per-vertex ambient occlusion, including the
 AO-aware quad-diagonal flip that stops the classic dark-corner artefact.
 No textures at all: colour comes from per-position jitter, and wind sway
 and water are shaders driven by vertex data in UV2.
+
+Natural ground is shaped, in the picture only — collision is whole
+blocks. Every top corner of a block of ground is a vertex the ground
+shares, with one height that every block touching it reads (see the rule
+above `Mesher._smooth`): a step is a ramp, a stair is a slope, a diagonal
+hillside is one plane, and a lone block or a one-wide hole stays square.
+`game/tests/unit/ground_shape_test.gd` pins the corner heights, and
+`game/tests/ground_look.gd` renders a made-up chunk from a fixed camera
+so the shape can be looked at without walking a client up a hill.
 
 ## Nothing is persisted
 

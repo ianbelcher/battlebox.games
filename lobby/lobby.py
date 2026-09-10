@@ -179,23 +179,24 @@ DEFAULT_SETTINGS = {
     "bot_hearts": 8,
 }
 
-# THE ALWAYS-ON WORLD IS JUST ANOTHER GAME. It is listed like any other,
-# joined like any other, and says what it is like any other. The one thing
-# that makes it special is that it does not close when the last person
-# leaves — see WORLD_IDLE_EXIT in spawn().
+# THE LOBBY. The always-on world is where Play puts you: a free world to
+# walk around, build in and get the feel of the game, with no storm, no
+# clock and no round to lose. Anything with rules is a game somebody
+# CREATES — that is what the second button is for. It ran a battle royale
+# for a while, which meant the first thing a new player ever saw was a
+# shrinking storm and a scoreboard.
 #
-# It had a button of its own on the front page, which was the confusing
-# part: a big "Play now" that dropped you into a world nothing on the
-# screen had described. So it runs a battle royale across five teams with
-# a crowd of computer players in it, and it says so in the list like
-# everything else — somebody arriving alone walks into a game that is
-# already happening rather than into an empty field.
+# Otherwise it is just another room: listed like any other, joined like
+# any other, and it says what it is like any other. The one thing that
+# makes it special is that it does not close when the last person leaves
+# — see WORLD_IDLE_EXIT in spawn().
 #
 # The seat count is `--house-players` rather than a constant because it is
 # the one number here that costs CPU: every seat a person is not in is a
 # computer player pathfinding on that room's single thread.
-HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, mode="battle", map="classic",
-                      teams=5, minutes=10, size=400)
+HOUSE_NAME = "Lobby"
+HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, mode="creative", map="classic",
+                      fly="everyone", size=400)
 
 
 def _snap(raw: dict, field: str, allowed, fallback):
@@ -296,11 +297,11 @@ class Lobby:
     # -- room lifecycle ------------------------------------------------
 
     async def start_house(self) -> None:
-        """The always-on game. There is always somewhere to play, and it
-        is up before anybody asks for it."""
+        """The Lobby: the always-on world Play drops you into. There is
+        always somewhere to play, and it is up before anybody asks."""
         settings = dict(HOUSE_SETTINGS, size=self.world_size,
                         players=self.house_players)
-        await self.spawn(HOUSE_CODE, "BattleBox", True, house=True,
+        await self.spawn(HOUSE_CODE, HOUSE_NAME, True, house=True,
                          settings=settings)
 
     async def spawn(self, code: str, display_name: str, is_public: bool,
