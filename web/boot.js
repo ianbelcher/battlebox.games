@@ -32,12 +32,12 @@
 // return visit the gate is often unnecessary — and the honest way to find
 // out is to TRY: play() rejects immediately when autoplay is refused.
 //
-// So a visit that got sound remembers it (BEEN_HEARD), and the next visit
-// starts the video straight away. If the browser says no, the promise
-// rejects within a frame or two, the flag is dropped and the title screen
-// appears exactly as it would have. The stored bit is a guess about what
-// the browser will allow; play() is the answer. Never treat the bit as
-// the answer — Safari in particular will refuse long after Chrome stops.
+// So the title screen is for the FIRST visit only (BEEN_HERE). Every visit
+// after that starts the video straight away and TRIES it with sound: play()
+// rejects within a frame or two when autoplay is refused, and then the
+// intro simply plays muted. The title screen never comes back — a
+// returning player has seen it, and being asked to press Play on every
+// visit is exactly the thing they should not have to do.
 //
 // `playsinline` is for iOS, which otherwise takes it full-screen.
 (function () {
@@ -45,11 +45,15 @@
 
   var DEMO = 'demo.mp4';
 
-  // Set only after sound has actually been HEARD for a few seconds, which
-  // is roughly what a browser is scoring too. Sound that was allowed for
-  // half a second and then stopped is not evidence of anything.
-  var BEEN_HEARD = 'bb.heard';
-  var HEARD_AFTER_SECONDS = 4;
+  // THE TITLE SCREEN IS FOR THE FIRST VISIT ONLY. It exists because a
+  // browser will not play sound without a gesture, so the very first time
+  // somebody has to press something. Set the moment they do. After that
+  // the intro simply plays: with sound if the browser now allows it, and
+  // MUTED if it does not — never the title screen again. It used to come
+  // back whenever autoplay was refused, and it used to need four seconds
+  // of audible video before it counted a visit at all, so anyone who
+  // skipped the intro saw the title screen every single time.
+  var BEEN_HERE = 'bb.visited';
 
   var boot = null;
   var video = null;
@@ -238,6 +242,10 @@
     var open = function () {
       if (opened) { return; }
       opened = true;
+      // Pressing it IS the visit. Remembered here, not after some amount
+      // of video has played: skipping the intro must not bring the title
+      // screen back tomorrow.
+      remember(BEEN_HERE, true);
       gate.classList.add('bb-gone');
       window.setTimeout(function () {
         if (gate.parentNode) { gate.parentNode.removeChild(gate); }
@@ -313,21 +321,6 @@
     playUnmuted().catch(playMuted);
   }
 
-  // Evidence, not optimism: the flag goes on only once the video has been
-  // AUDIBLE and PLAYING for several seconds, which is roughly what a
-  // browser scores too. A play() that was allowed and then immediately
-  // paused or muted proves nothing about the next visit.
-  function watchForRealAudio() {
-    var check = function () {
-      if (video.muted || video.volume === 0 || video.paused) { return; }
-      if (video.currentTime >= HEARD_AFTER_SECONDS) {
-        remember(BEEN_HEARD, true);
-        video.removeEventListener('timeupdate', check);
-      }
-    };
-    video.addEventListener('timeupdate', check);
-  }
-
   var abandonAll = function () {
     gameReady = true;
     pressed = true;
@@ -359,25 +352,18 @@
     document.body.classList.add('bb-booting');
     document.body.appendChild(boot);
 
-    watchForRealAudio();
-
-    if (!remembered(BEEN_HEARD)) {
+    if (!remembered(BEEN_HERE)) {
       buildGate();
       return;
     }
-    // Been here, heard it play. Ask for the intro outright — and put the
-    // title screen up after all if the browser turns out to disagree.
-    playUnmuted().then(function () {
-      // A moment before arming the skip, so a pointer event still in
-      // flight from the click that opened the tab cannot dismiss the
-      // intro before a single frame of it has been seen.
-      window.setTimeout(listen, 600);
-    }).catch(function () {
-      remember(BEEN_HEARD, false);
-      video.pause();
-      try { video.currentTime = 0; } catch (e) { /* not seekable yet */ }
-      buildGate();
-    });
+    // Been here before. The intro plays straight away: with sound if the
+    // browser allows it, muted if it does not. Either way there is no
+    // title screen — a returning player has seen it.
+    playUnmuted().catch(playMuted);
+    // A moment before arming the skip, so a pointer event still in flight
+    // from the click that opened the tab cannot dismiss the intro before
+    // a single frame of it has been seen.
+    window.setTimeout(listen, 600);
   }
 
   if (document.readyState === 'loading') {

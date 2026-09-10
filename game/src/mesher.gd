@@ -261,8 +261,19 @@ func _heights(x: int, y: int, z: int) -> PackedFloat32Array:
 	var hz_s := 0.0 if (not s and n) else 1.0
 	var hx_w := 0.0 if (not w and e) else 1.0
 	var hx_e := 0.0 if (not e and w) else 1.0
-	return PackedFloat32Array([minf(hx_w, hz_n), minf(hx_e, hz_n),
-		minf(hx_e, hz_s), minf(hx_w, hz_s)])
+	# SLOPING ON BOTH AXES — the block at the outer corner of a diagonal
+	# hillside — a corner that is up on one axis and down on the other
+	# sits HALFWAY. The lower of the two made a spike: one corner up,
+	# three down, and a diagonal stair was a row of spikes. At halfway the
+	# two half corners and the high and low ones lie in one plane, so the
+	# hillside is a flat slope running diagonally, which is what it is.
+	var both := (hz_n != hz_s) and (hx_w != hx_e)
+	var corners := PackedFloat32Array()
+	for pair: Array in [[hx_w, hz_n], [hx_e, hz_n], [hx_e, hz_s], [hx_w, hz_s]]:
+		var hx: float = pair[0]
+		var hz: float = pair[1]
+		corners.append((hx + hz) * 0.5 if both else minf(hx, hz))
+	return corners
 
 ## Sides 0 N, 1 E, 2 S, 3 W; each runs between two corners, clockwise
 ## seen from above: N is NW→NE, E is NE→SE, S is SE→SW, W is SW→NW.

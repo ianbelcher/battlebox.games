@@ -78,7 +78,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const look = (page) => page.evaluate(() => ({
   gate: !!document.getElementById('bb-gate'),
   heard: (() => {
-    try { return localStorage.getItem('bb.heard'); } catch (e) { return 'UNREADABLE'; }
+    try { return localStorage.getItem('bb.visited'); } catch (e) { return 'UNREADABLE'; }
   })(),
   video: (() => {
     const v = document.querySelector('#bb-boot video');
@@ -117,18 +117,16 @@ async function visit(policy) {
     let at = await visit('document-user-activation-required');
     let saw = await look(at.page);
     check(saw.gate, 'a first visit shows the title screen');
-    check(saw.heard === null, `nothing is remembered yet (heard=${saw.heard})`);
+    check(saw.heard === null, `nothing is remembered yet (visited=${saw.heard})`);
     check(saw.video && saw.video.paused, 'the intro waits behind it');
 
     await at.page.click('#bb-enter');
-    await wait(7000);
+    await wait(3000);
     saw = await look(at.page);
     check(!saw.gate, 'pressing Play takes the title screen away');
     check(saw.video && !saw.video.muted && !saw.video.paused,
       'and the intro plays WITH SOUND, which is the point of the screen');
-    check(saw.video && saw.video.at >= 4,
-      `it ran past 4s of audible video (at=${saw.video && saw.video.at})`);
-    check(saw.heard === '1', `so the visit is remembered (heard=${saw.heard})`);
+    check(saw.heard === '1', `and the visit is remembered by the press (visited=${saw.heard})`);
     await at.browser.close();
 
     // --- coming back, to a browser that now allows it -------------------
@@ -140,14 +138,14 @@ async function visit(policy) {
       'the intro just plays, with sound, unprompted');
     await at.browser.close();
 
-    // --- coming back, to a browser that refuses anyway ------------------
+    // --- coming back, to a browser that refuses sound -------------------
     at = await visit('document-user-activation-required');
     await wait(2000);
     saw = await look(at.page);
-    check(saw.gate, 'a refused autoplay puts the title screen back');
-    check(saw.heard === null, `and drops the guess (heard=${saw.heard})`);
-    check(saw.video && saw.video.at < 1,
-      `leaving the intro at its start, not part-played (at=${saw.video && saw.video.at})`);
+    check(!saw.gate, 'a refused autoplay STILL shows no title screen');
+    check(saw.video && !saw.video.paused && saw.video.muted,
+      'the intro plays anyway, muted');
+    check(saw.heard === '1', `and the visit stays remembered (visited=${saw.heard})`);
     await at.browser.close();
   } finally {
     server.close();
