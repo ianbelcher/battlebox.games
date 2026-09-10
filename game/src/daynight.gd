@@ -72,12 +72,23 @@ func _ready() -> void:
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	sun.directional_shadow_max_distance = 120.0
 	sun.shadow_bias = 0.03
+	# THE SHADOWS SHOOK. The sun turns a little every frame, and each turn
+	# re-projects the shadow map, so every shadow edge crawled by a texel
+	# and every surface at a grazing angle flickered in and out of its own
+	# shadow — "they move smoothly but they're jittery". Two things hide
+	# it: a wider filter, so an edge is a soft band a texel's crawl cannot
+	# be seen inside; and a bigger normal bias, so a surface stops
+	# arguing with its own shadow map as the angle changes.
+	sun.shadow_blur = 2.5
+	sun.shadow_normal_bias = 2.4
 	sun.light_color = Color(1.0, 0.96, 0.88)
 	add_child(sun)
 	moon = DirectionalLight3D.new()
 	moon.shadow_enabled = true
 	moon.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	moon.directional_shadow_max_distance = 90.0
+	moon.shadow_blur = 3.0
+	moon.shadow_normal_bias = 2.4
 	# Near-white, not blue. The sky shader draws the moon's DISC from this
 	# colour times the light's energy, and at the low energy the moon
 	# needs (see MOON_ENERGY) a blue-grey disc came out barely above the
