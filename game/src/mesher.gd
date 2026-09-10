@@ -418,12 +418,12 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		_tri("opaque", [o, o + Vector3(1, 0, 1), o + Vector3(0, 0, 1)], Vector3.DOWN,
 			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
 
-## LAMPS CLOSE TOGETHER BECOME ONE. The compatibility renderer lights a
-## mesh with at most eight lamps, and a chunk is one mesh: a hall with
-## twenty glowstones in it was lit by its first eight and dark past
-## them, which read as the light dying as you walked across the room.
-## Fewer, stronger lamps light the whole of it, and chunk_view caps what
-## is left at the renderer's eight.
+## LAMPS CLOSE TOGETHER BECOME ONE, and the strongest come first. A
+## chunk keeps a capped number of lamps (chunk_view.light_cap), and it
+## used to keep the first ones in walking order — all along one side of
+## a hall, the rest dark — which read as the light dying as you walked
+## across the room. Merged and sorted, the cap keeps the brightest,
+## spread across the chunk, and each reaches further.
 const LAMP_MERGE := 7.0
 func _merged(lights: Array) -> Array:
 	lights.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:

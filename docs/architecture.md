@@ -255,9 +255,9 @@ the mesh is closed, and `game/tests/ground_look.gd` renders a made-up
 chunk from a fixed camera so the shape can be looked at without walking
 a client up a hill.
 
-Lamps in a chunk are merged by the mesher and capped at eight by
-`chunk_view.gd`, because the compatibility renderer lights a mesh with
-eight lamps at most and a chunk is one mesh.
+Lamps in a chunk are merged by the mesher, sorted by strength, and
+capped by `chunk_view.gd`, so the cap keeps the brightest spread across
+the chunk rather than the first few in walking order.
 
 The world is a square slab with a bedrock floor and a bedrock wall around
 its outermost ring, floor to sky. The Lobby's map is locked: a reset

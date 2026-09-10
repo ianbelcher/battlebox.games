@@ -85,7 +85,13 @@ const POOL_DEEP := 5
 ## shores, rather than one glowing table of magma you could run across.
 ## And the islands are joined: on a grid, wherever a line crosses water
 ## between two shores, an arched bridge of cobble spans it.
-const CAVERN_LAKE := 0.04
+##
+## MOSTLY LAND. The threshold sits well below the noise's middle, so
+## about a fifth of the floor is water; at the middle it was half, and
+## with the shore only a block above the table, the halls read as one
+## flooded room with rocks in it. The land climbs three blocks over the
+## first few strides from the water, so a lake sits in a basin.
+const CAVERN_LAKE := -0.3
 const BRIDGE_GRID := 40
 const BRIDGE_REACH := 44
 const BRIDGE_HALF_WIDTH := 2
@@ -328,11 +334,11 @@ func cavern_basin(wx: int, wz: int) -> float:
 func cavern_land_y(basin: float) -> int:
 	if basin < CAVERN_LAKE:
 		return -1
-	return POOL_TOP + 1 + mini(int((basin - CAVERN_LAKE) * 16.0), 5)
+	return POOL_TOP + 1 + mini(int((basin - CAVERN_LAKE) * 12.0), 7)
 
 ## The bed under a lake column: deeper the further from the shore.
 func cavern_bed_y(basin: float) -> int:
-	return POOL_TOP - 2 - mini(int((CAVERN_LAKE - basin) * 12.0), 4)
+	return POOL_TOP - 2 - mini(int((CAVERN_LAKE - basin) * 12.0), 5)
 
 ## The floor of the caverns under this column, with room to stand, or -1.
 func cavern_floor_at(wx: int, wz: int) -> int:
@@ -415,9 +421,9 @@ func _cavern_shaft(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h:
 
 ## Stalagmites, stalactites, crystals, glowstone, mushrooms. The caverns
 ## world gets a few more of the things that glow, because light is the
-## whole of what makes a dark place a place — a FEW more: a renderer
-## lights a chunk with eight lamps at most, and a floor carpeted in
-## glowstone was lit in patches and dark between them.
+## whole of what makes a dark place a place — a FEW more: a chunk keeps
+## only so many lamps, and a floor carpeted in glowstone was lit in
+## patches and dark between them.
 func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int,
 		deep: bool) -> void:
 	var lamp := 0.05 if deep else 0.03

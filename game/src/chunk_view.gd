@@ -13,9 +13,13 @@ var match_mode := false
 const MAX_INFLIGHT_MESHES := 3
 ## Lights per chunk. Twenty, from ten: underground every glowing block
 ## is a light and eight was a cave with two lamps in it.
-## EIGHT, because that is how many lamps the compatibility renderer will
-## light one mesh with; the mesher merges neighbours so eight is enough.
-var light_cap := 8
+## A DOZEN LAMPS PER CHUNK. It was twenty, taken in the order the mesher
+## walked the chunk — bottom to top, row by row — so a hall with more
+## lamps than that kept the ones along one side and dropped the rest,
+## and the light died as you walked across the room. The mesher now
+## merges neighbouring lamps and sorts by strength, so what the cap
+## keeps is the brightest, spread across the chunk.
+var light_cap := 12
 const REQUEST_BATCH := 40
 const REQUEST_RETRY_SECONDS := 6.0
 

@@ -1004,6 +1004,9 @@ func _local_move(delta: float) -> void:
 				_reel_accum = 0.0
 				# Reeling whirr: rapid quiet clicks while being pulled.
 				Sfx.play("click", -16.0, randf_range(1.5, 1.8))
+	# What the step-up below still owes: the movement each blocked axis
+	# did not get to make this frame.
+	var owed := Vector3.ZERO
 	for axis: Vector3 in [Vector3.RIGHT, Vector3.BACK]:
 		var step: float = velocity.dot(axis) * delta
 		if absf(step) < 0.0001:
@@ -1011,6 +1014,7 @@ func _local_move(delta: float) -> void:
 		var attempt := next + axis * step
 		if _collides(attempt):
 			blocked_h = true
+			owed += axis * step
 		else:
 			next = attempt
 	# The world edge. The slab is SQUARE, so clamp each axis on its own —
@@ -1028,23 +1032,42 @@ func _local_move(delta: float) -> void:
 	# and swimming into a bank hops you out of the water.
 	var pushing := dir.length_squared() > 0.01
 	var room_up := false
+	var up_attempt := next + owed + Vector3(0, STEP_UP_PROBE, 0)
 	if blocked_h and pushing:
-		var up_attempt := next + Vector3(velocity.x * delta, STEP_UP_PROBE,
-			velocity.z * delta)
 		room_up = not _collides(up_attempt) \
 			and not _collides(next + Vector3(0, STEP_UP_PROBE, 0))
 	match ClimbRule.decide(blocked_h, pushing, room_up, on_floor, in_water,
 			_climbing, downed, fly_mode):
 		ClimbRule.STEP_UP:
-			# A KERB IS A HOP; THE TOP OF A CLIMB IS A MANTLE. Stepping up
-			# off the ground wants a proper little jump, and 7.2 against
-			# gravity 22 is 1.18 blocks, which clears a one-block step.
-			# Finishing a climb wants to be carried over the lip instead
-			# of thrown at it — see CLIMB_TOP_LIFT.
+			# A KERB IS A STEP, TAKEN IN STRIDE. On the ground, a one-block
+			# step is climbed THIS frame: up onto it and on across it by
+			# the movement the wall just refused, then set down on its
+			# top. Nothing is lost sideways, so a run up a hillside is a
+			# run. It was a hop — 7.2 up, against gravity 22 — which
+			# stopped you dead at the foot of every block for the fifth
+			# of a second the feet took to clear it: all of the run went
+			# into the air and none of it over the step.
+			#
+			# Out of the water it is still a hop, because a swimmer has
+			# no floor to be set down on; and the top of a climb is a
+			# mantle, carried over the lip instead of thrown at it — see
+			# CLIMB_TOP_LIFT.
 			if _climbing:
 				_top_out = CLIMB_TOP_SECONDS
-			else:
+			elif in_water:
 				velocity.y = 7.2
+			else:
+				next = up_attempt
+				# Down onto the step, a twentieth of a block at a time,
+				# so the feet land ON it rather than a probe's height
+				# above it.
+				for i in 22:
+					var lower := next - Vector3(0, 0.05, 0)
+					if _collides(lower):
+						break
+					next = lower
+				velocity.y = 0.0
+				on_floor = true
 			_climbing = false
 		ClimbRule.CLIMB:
 			velocity.y = maxf(velocity.y, WALL_CLIMB_SPEED)
