@@ -13,13 +13,16 @@ var match_mode := false
 const MAX_INFLIGHT_MESHES := 3
 ## Lights per chunk. Twenty, from ten: underground every glowing block
 ## is a light and eight was a cave with two lamps in it.
-## A DOZEN LAMPS PER CHUNK. It was twenty, taken in the order the mesher
-## walked the chunk — bottom to top, row by row — so a hall with more
-## lamps than that kept the ones along one side and dropped the rest,
-## and the light died as you walked across the room. The mesher now
-## merges neighbouring lamps and sorts by strength, so what the cap
-## keeps is the brightest, spread across the chunk.
-var light_cap := 12
+## EIGHT LAMPS PER CHUNK, AND A REACH SHORT OF A CHUNK. The renderer
+## lights each chunk with a fixed number of the lamps whose reach touches
+## it (rendering/limits/opengl/max_lights_per_object), taken in the order
+## they come off the camera's cull — not the nearest. Past that number a
+## lamp is simply not there, and WHICH lamps are lost changes as the
+## view turns and the order reshuffles: a crate's light in one frame,
+## gone the next. So the lamps a chunk can put into the budget of its
+## neighbours are bounded: eight each, reaching eleven blocks, merged by
+## the mesher into fewer and stronger, the brightest kept.
+var light_cap := 8
 const REQUEST_BATCH := 40
 const REQUEST_RETRY_SECONDS := 6.0
 
@@ -459,10 +462,9 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 		light.position = spec.pos
 		light.light_color = spec.color
 		light.light_energy = spec.energy * 1.4
-		# FOURTEEN BLOCKS, from seven and a half, and a gentler falloff:
-		# a lamp that lit its own block and nothing else was no help in
-		# a hall forty blocks across.
-		light.omni_range = 14.0
+		# ELEVEN BLOCKS: enough to light a hall, short enough that a
+		# lamp touches few chunks beyond its own — see light_cap.
+		light.omni_range = 11.0
 		light.omni_attenuation = 0.9
 		light.shadow_enabled = false
 		holder.add_child(light)

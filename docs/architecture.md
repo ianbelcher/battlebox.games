@@ -255,9 +255,13 @@ the mesh is closed, and `game/tests/ground_look.gd` renders a made-up
 chunk from a fixed camera so the shape can be looked at without walking
 a client up a hill.
 
-Lamps in a chunk are merged by the mesher, sorted by strength, and
-capped by `chunk_view.gd`, so the cap keeps the brightest spread across
-the chunk rather than the first few in walking order.
+Lights are a budget. The renderer lights each chunk with a fixed number
+of the lamps whose reach touches it, taken in cull order rather than by
+distance, so past the budget a lamp is simply missing and which one is
+missing changes as the view turns. Lamps in a chunk are therefore merged
+by the mesher, sorted by strength, and capped by `chunk_view.gd` with a
+reach short of a chunk; only people carry a lantern, not computer
+players; crates fade their light with distance.
 
 The world is a square slab with a bedrock floor and a bedrock wall around
 its outermost ring, floor to sky. The Lobby's map is locked: a reset

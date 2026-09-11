@@ -386,15 +386,22 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 	# own tag: that hid it from the person next to you on the sofa too.
 	# The spectator camera is the exception and always sees it.
 	set_overhead_layers(RenderLayers.OVERHEAD_SPECTATOR)
-	# Every character carries a modest warm lantern so night isn't a void —
-	# dim enough that it never blooms or floodlights a drop cluster.
-	_glow = OmniLight3D.new()
-	_glow.light_energy = 0.3
-	_glow.omni_range = 7.0
-	_glow.light_color = Color(1.0, 0.9, 0.7)
-	_glow.shadow_enabled = false
-	_glow.position = Vector3(0, 1.6, 0)
-	add_child(_glow)
+	# A PERSON carries a modest warm lantern so night isn't a void — dim
+	# enough that it never blooms or floodlights a drop cluster. Computer
+	# players carry none. Every character used to, and in a Lobby with a
+	# hundred of them that was a hundred lamps: the renderer lights each
+	# chunk with a fixed number of the lamps whose reach touches it, taken
+	# in the order they come off the camera's cull, so with lanterns to
+	# spare a crate's light was in one frame and gone the next as the view
+	# turned a few degrees and the order reshuffled.
+	if _human:
+		_glow = OmniLight3D.new()
+		_glow.light_energy = 0.3
+		_glow.omni_range = 7.0
+		_glow.light_color = Color(1.0, 0.9, 0.7)
+		_glow.shadow_enabled = false
+		_glow.position = Vector3(0, 1.6, 0)
+		add_child(_glow)
 	if is_local:
 		_highlight = MeshInstance3D.new()
 		var box := BoxMesh.new()
