@@ -804,7 +804,8 @@ func _nearest_player_dist(id: String) -> float:
 func sv_shot(slot: int, cell: Vector3i, kind: int) -> void:
 	if not multiplayer.is_server():
 		return
-	var id := Game.player_id(multiplayer.get_remote_sender_id(), slot)
+	var peer := multiplayer.get_remote_sender_id()
+	var id := Game.player_id(peer, slot)
 	var state: Dictionary = player_state.get(id, {})
 	if state.is_empty() or Vector3(cell).distance_to(state.pos) > 300.0:
 		return
@@ -961,16 +962,25 @@ func sv_shot(slot: int, cell: Vector3i, kind: int) -> void:
 			return
 	var current := store.get_block(cell)
 	if current == Blocks.AIR or Blocks.is_liquid(current) or not can_carve(cell, current):
+		# The shooter's own client predicts a soft block popping the instant
+		# their pellet lands (OrbView._physics_process) rather than waiting
+		# on this round trip. When that guess was wrong — a protected CTF
+		# mound, most likely — put the real block back for them.
+		_refuse_edit(peer, cell)
 		return
 	# Pellets only chew through soft materials and wood — stone+ shrugs.
 	if Blocks.hardness(current) > 1 and current != Blocks.BOOM:
+		_refuse_edit(peer, cell)
 		return
 	if current == Blocks.BOOM:
 		for entry: Dictionary in terrain._bombs:
 			if entry.pos == cell:
+				_refuse_edit(peer, cell)
 				return
 		terrain._bombs.append({"pos": cell, "at_msec": Time.get_ticks_msec() + 2500})
 		cl_fuse_fx.rpc(cell)
+		# The digger predicted this block away; it only lit a fuse.
+		_refuse_edit(peer, cell)
 		return
 	if Blocks.is_collectible(current):
 		state.treasures = int(state.treasures) + 1

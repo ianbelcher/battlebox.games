@@ -87,11 +87,13 @@ const POOL_DEEP := 5
 ## between two shores, an arched bridge of cobble spans it.
 ##
 ## MOSTLY LAND. The threshold sits well below the noise's middle, so
-## about a fifth of the floor is water; at the middle it was half, and
-## with the shore only a block above the table, the halls read as one
-## flooded room with rocks in it. The land climbs three blocks over the
-## first few strides from the water, so a lake sits in a basin.
-const CAVERN_LAKE := -0.3
+## about an eighth of the floor is water — a fifth (-0.3) still read in
+## play as a floor with lakes IN it rather than islands in a lake. At
+## the middle it was half, and with the shore only a block above the
+## table, the halls read as one flooded room with rocks in it. The land
+## climbs three blocks over the first few strides from the water, so a
+## lake sits in a basin.
+const CAVERN_LAKE := -0.4
 const BRIDGE_GRID := 40
 const BRIDGE_REACH := 44
 const BRIDGE_HALF_WIDTH := 2

@@ -135,6 +135,20 @@ func _physics_process(delta: float) -> void:
 		if not died and Blocks.is_solid(world.chunks.get_block(cell)):
 			died = true
 			if orb.mine:
+				# LOCAL PREDICTION. A soft block pops the instant a pellet
+				# lands rather than waiting a full round trip for the
+				# server's echo — the digger already gets this (see
+				# World.send_edit) and a rapid-fire gun felt like shooting
+				# through everything without it. Only the plain "pop the
+				# one cell" weapons predict; anything that does more
+				# (blasts, ice, paint, the block sucker...) is left to the
+				# server, which is also who corrects a wrong guess here —
+				# a protected CTF mound, most likely — via _refuse_edit.
+				if orb.kind not in [1, 2, 3, 4, 8, 9, 10, 11, 12, 14, 15, 18, 19]:
+					var hit_block: int = world.chunks.get_block(cell)
+					if hit_block != Blocks.BOOM and Blocks.is_breakable(hit_block) \
+							and Blocks.hardness(hit_block) <= 1:
+						world.chunks.apply_edit_now(cell, Blocks.AIR)
 				world.sv_shot.rpc_id(1, orb.slot, cell, orb.kind)
 				if orb.kind == 2:
 					# Grapple: a guided zip that routes AROUND the hooked
