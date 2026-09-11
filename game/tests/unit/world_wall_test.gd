@@ -56,8 +56,10 @@ func test_a_caverns_stand_is_in_a_hall_with_headroom() -> void:
 			check(y < WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST,
 				"(%d,%d) stands under the crust: y=%d" % [wx, wz, y])
 			for up in [1, 2, 3]:
-				equal(store.get_block(Vector3i(wx, y + up, wz)), Blocks.AIR,
-					"(%d,%d) has air %d over its floor" % [wx, wz, up])
+				# Open, not necessarily empty: a mushroom on the floor is
+				# something a body walks through.
+				check(not Blocks.is_solid(store.get_block(Vector3i(wx, y + up, wz))),
+					"(%d,%d) has room %d over its floor" % [wx, wz, up])
 	check(checked > 20, "enough columns offered somewhere to stand (%d)" % checked)
 	var spot := store.safe_stand(Vector3(store.find_spawn()), 3.0)
 	check(spot.y < WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST,
