@@ -363,6 +363,7 @@ class HouseTests(unittest.TestCase):
         self.assertEqual(settings, lobby.HOUSE_SETTINGS,
                          "the house settings are valid settings")
         self.assertEqual(settings["mode"], "creative")
+        self.assertEqual(settings["fly"], "humans", "people fly, computers walk")
         self.assertEqual(lobby.HOUSE_NAME, "Lobby")
 
     def test_the_always_on_world_can_hold_a_full_house(self):

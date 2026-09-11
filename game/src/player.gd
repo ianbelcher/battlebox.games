@@ -24,6 +24,16 @@ const WALL_CLIMB_SPEED := 1.0
 ## A lift shorter than this cannot finish a climb by construction,
 ## whatever else is right.
 const STEP_UP_PROBE := 1.05
+## A STEP IS TAKEN IN STRIDE, BUT NOT IN AN INSTANT. The body is on top
+## of the block the moment it steps up — that is what keeps the run a
+## run — and the PICTURE of it catches up over about a seventh of a
+## second, the eye and the avatar rising at about the pace they would
+## drop off the same block. Without this the view jumped a whole block
+## between two frames on every kerb, which read as a hitch even though
+## no speed was lost. The feet are briefly inside the block. That is
+## the price, and it is the right one.
+const STEP_SETTLE_SPEED := 7.0     ## blocks per second the picture rises at
+var _step_settle := 0.0            ## how far the picture still lags below the body
 
 ## FINISHING A CLIMB IS A MANTLE, NOT A HOP — and getting that wrong is
 ## the whole of "you get to the top of the wall and just bounce".
@@ -594,6 +604,14 @@ func teleport(pos: Vector3) -> void:
 	_remote_target = pos
 	velocity = Vector3.ZERO
 	_spawned = true
+	_step_settle = 0.0
+	if _avatar != null:
+		_avatar.position.y = 0.0
+
+## Where the eye is, in the body's frame: the eye line, less however far
+## the picture still lags below the body after a step.
+func eye_offset() -> Vector3:
+	return Vector3(0, EYE_HEIGHT + _step_settle, 0)
 
 func remote_update(pos: Vector3, yaw: float, p_anim: int) -> void:
 	_remote_target = pos
@@ -659,6 +677,11 @@ func selected_block() -> int:
 	return int(held().id) if held().kind == "block" else -1
 
 func _physics_process(delta: float) -> void:
+	# The picture catching up with a step — see STEP_SETTLE_SPEED.
+	if _step_settle != 0.0:
+		_step_settle = move_toward(_step_settle, 0.0, STEP_SETTLE_SPEED * delta)
+		if _avatar != null:
+			_avatar.position.y = _step_settle
 	if is_local:
 		if _spawned and not ui_locked:
 			_local_move(delta)
@@ -1057,6 +1080,7 @@ func _local_move(delta: float) -> void:
 			elif in_water:
 				velocity.y = 7.2
 			else:
+				var from_y := next.y
 				next = up_attempt
 				# Down onto the step, a twentieth of a block at a time,
 				# so the feet land ON it rather than a probe's height
@@ -1066,6 +1090,7 @@ func _local_move(delta: float) -> void:
 					if _collides(lower):
 						break
 					next = lower
+				_step_settle -= next.y - from_y
 				velocity.y = 0.0
 				on_floor = true
 			_climbing = false
@@ -1354,7 +1379,7 @@ const NO_TARGET := Vector3i(0, -99, 0)
 ## and build under your feet mid-jump.
 func _find_fp_targets() -> Array:
 	var chunks := _chunks()
-	var eye := position + Vector3(0, EYE_HEIGHT, 0)
+	var eye := position + eye_offset()
 	var dir := look_dir()
 	var last_open := NO_TARGET
 	var last_cell := Vector3i(floori(eye.x), floori(eye.y), floori(eye.z))

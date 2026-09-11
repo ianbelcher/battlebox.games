@@ -195,8 +195,10 @@ DEFAULT_SETTINGS = {
 # the one number here that costs CPU: every seat a person is not in is a
 # computer player pathfinding on that room's single thread.
 HOUSE_NAME = "Lobby"
+# People fly in the Lobby; the computer players walk. A hundred bots in
+# the air over the island was a sky full of gnats.
 HOUSE_SETTINGS = dict(DEFAULT_SETTINGS, mode="creative", map="classic",
-                      fly="everyone", size=400)
+                      fly="humans", size=400)
 
 
 def _snap(raw: dict, field: str, allowed, fallback):

@@ -392,7 +392,7 @@ func _process(delta: float) -> void:
 			cam.fov = lerpf(cam.fov, FP_FOVS[cell.fp_zoom], 0.25)
 			cam.near = 0.05
 			cam.cull_mask = RenderLayers.camera_mask(player.slot)
-			var eye: Vector3 = player.position + Vector3(0, Player.EYE_HEIGHT, 0)
+			var eye: Vector3 = player.position + player.eye_offset()
 			cam.look_at_from_position(eye, eye + player.look_dir(), Vector3.UP)
 			_update_viewmodel(cell, player)
 			var vm: Node3D = cell.get("vm")
