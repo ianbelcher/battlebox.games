@@ -345,7 +345,8 @@ func cavern_floor_at(wx: int, wz: int) -> int:
 	var land := cavern_land_y(cavern_basin(wx, wz))
 	if land < 0 or land + 3 >= CAVERN_TOP - CAVERN_CRUST:
 		return -1
-	if _hall_open(wx, land + 1, wz, true) and _hall_open(wx, land + 2, wz, true):
+	if _hall_open(wx, land + 1, wz, true) and _hall_open(wx, land + 2, wz, true) \
+			and _hall_open(wx, land + 3, wz, true):
 		return land
 	return -1
 
@@ -426,7 +427,7 @@ func _cavern_shaft(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h:
 ## patches and dark between them.
 func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int,
 		deep: bool) -> void:
-	var lamp := 0.05 if deep else 0.03
+	var lamp := 0.03 if deep else 0.03
 	for y in range(5, h - 3):
 		var here := data[idx(lx, y, lz)]
 		var roll := hash01(wx, y, wz * 7)
@@ -439,9 +440,11 @@ func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		if here != Blocks.AIR:
 			continue
 		if below == Blocks.STONE:
-			if roll < 0.02:
+			# Crystals: a few, not a carpet. Two in a hundred floor cells
+			# made a hall of forty blocks a jewellery shop.
+			if roll < 0.006:
 				var crystals := [Blocks.CRYSTAL_PINK, Blocks.CRYSTAL_BLUE, Blocks.CRYSTAL_GREEN]
-				data[idx(lx, y, lz)] = crystals[int(roll * 150.0) % 3]
+				data[idx(lx, y, lz)] = crystals[int(roll * 500.0) % 3]
 			elif roll < lamp:
 				data[idx(lx, y - 1, lz)] = Blocks.GLOWSTONE
 			elif roll < lamp + 0.03:

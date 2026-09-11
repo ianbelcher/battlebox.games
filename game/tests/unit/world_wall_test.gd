@@ -36,3 +36,29 @@ func test_the_caverns_have_no_magma_and_have_water() -> void:
 			magma += data.count(Blocks.MAGMA)
 	equal(magma, 0, "no magma anywhere")
 	check(water > 200, "lakes under the plain (%d water blocks)" % water)
+
+func test_a_caverns_stand_is_in_a_hall_with_headroom() -> void:
+	# ChunkStore reads its world from the environment; this is the world
+	# a caverns room is spawned with. Every place it offers to stand has
+	# to be under the crust with room for a body, or the body is lifted
+	# out through the rock onto the plain.
+	var store := ChunkStore.new()
+	store.theme = "caverns"
+	store.world_size = 100
+	store.gen = WorldGen.new(20260726, "caverns", 100)
+	var checked := 0
+	for wx in range(-40, 41, 8):
+		for wz in range(-40, 41, 8):
+			var y := store.stand_y(wx, wz)
+			if y < 0:
+				continue
+			checked += 1
+			check(y < WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST,
+				"(%d,%d) stands under the crust: y=%d" % [wx, wz, y])
+			for up in [1, 2, 3]:
+				equal(store.get_block(Vector3i(wx, y + up, wz)), Blocks.AIR,
+					"(%d,%d) has air %d over its floor" % [wx, wz, up])
+	check(checked > 20, "enough columns offered somewhere to stand (%d)" % checked)
+	var spot := store.safe_stand(Vector3(store.find_spawn()), 3.0)
+	check(spot.y < WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST,
+		"the spawn stands in the halls: %s" % spot)

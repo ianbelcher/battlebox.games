@@ -399,19 +399,24 @@ func surface_y(wx: int, wz: int) -> int:
 			return y
 	return 0
 
-## The top of the ground under the caverns' crust with open air on it —
-## the bed of a lake counts, so a column of water is a place to swim to —
-## or -1 where the rock is solid all the way down.
+## The floor of a HALL under the caverns' crust: the top of the ground,
+## or of a lake, with at least three blocks of open air over it. Three,
+## because the crust is threaded with worm tunnels a block or two high,
+## and the first ledge under the crust with air on it was nearly always
+## one of those: a body set down in it was inside the rock, and the
+## "entombed" safety then lifted it straight up through the crust onto
+## the plain — which is where everyone in a caverns game turned up.
+## -1 where there is no such floor in the column.
 func _hall_floor(data: PackedByteArray, lx: int, lz: int) -> int:
-	var open_above := false
+	var open_above := 0
 	for y in range(WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST - 1, 0, -1):
 		var b := data[WorldGen.idx(lx, y, lz)]
 		if b == Blocks.AIR or Blocks.is_cross(b):
-			open_above = true
-		elif open_above:
+			open_above += 1
+		elif open_above >= 3:
 			return y
 		else:
-			open_above = false
+			open_above = 0
 	return -1
 
 ## THE GROUND UNDER A WALKER: the highest block at or just above `from_y`
