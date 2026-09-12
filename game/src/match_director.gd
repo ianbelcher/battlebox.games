@@ -402,7 +402,7 @@ func drop_everyone() -> void:
 					near_weapon = int(other.weapon)
 			if too_close:
 				continue
-			var pool2 := [1, 1, 1, 2, 9, 9, 11, 12, 12, 15, 15, 19]
+			var pool2 := Weapons.CRATE_POOL
 			var pick: int = pool2[randi() % pool2.size()]
 			if pick == near_weapon:
 				pick = pool2[randi() % pool2.size()]

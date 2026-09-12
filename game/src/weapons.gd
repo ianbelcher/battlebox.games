@@ -74,6 +74,16 @@ const SWORD := 13
 const STARTING_KIT := [SWORD, 14, 19]       # sword, flare gun, smoke bomb
 const STARTING_KIT_CTF := [0, 13, 14, 19]   # + little shooter, held
 
+## Supply-crate loot, everywhere crates are placed. Rarer weapons show up
+## less often, by simple repetition.
+##
+## The Little Shooter (id 0) belongs here even though STARTING_KIT already
+## hands it to CTF and holdout: battle royale, King of the Hill and build
+## start WITHOUT it (see STARTING_KIT above), and it used to be nowhere in
+## THEIR loot pool either — the only weapon in the game those modes could
+## never obtain, from the drop to the end of the round.
+const CRATE_POOL := [0, 1, 1, 1, 2, 9, 9, 11, 12, 12, 15, 15, 19]
+
 ## THE ORDER OF THE TOOLS PAGE, which is not the order of this file.
 ##
 ## The registry's own order is the hotbar's, and it has to stay put — ids

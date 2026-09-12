@@ -175,6 +175,13 @@ func begin_capture_hold(seconds: float) -> void:
 
 func begin_knockout_rise() -> void:
 	_knockout_rise = KNOCKOUT_RISE_SECONDS
+	# The rise hands you wings (see the comment above _knockout_rise) but
+	# FlyRule.keeps_flying() only ever CONTINUES flight that is already on
+	# — `if not flying: return false` — so without this, fly_mode stayed
+	# false the whole time you were up there. Descend lives in the
+	# `elif fly_mode:` branch of _local_move, so it was unreachable, and
+	# the double-tap toggle turned flight ON instead of stopping it.
+	fly_mode = true
 	# A grapple in flight OUTLIVES you otherwise, and a zip is a teleport:
 	# it snaps you to its last waypoint at sixty blocks a second, so being
 	# knocked out mid-swing threw the body across the map and started the

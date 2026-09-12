@@ -202,8 +202,7 @@ func tick_crates() -> void:
 		var wz := int(anchor.z + sin(angle) * dist)
 		var y := world.store.surface_y(wx, wz)
 		if crate_ground_ok(wx, wz, y):
-			# Rarer weapons show up less often.
-			var pool := [1, 1, 1, 2, 9, 9, 11, 12, 12, 15, 15, 19]
+			var pool := Weapons.CRATE_POOL
 			world.crates_by_id[_next_crate_id] = {"weapon": pool[randi() % pool.size()],
 				"pos": Vector3(wx + 0.5, y + 1.0, wz + 0.5)}
 			_next_crate_id += 1
