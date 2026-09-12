@@ -53,7 +53,8 @@ var _mesh_jobs: Array = []
 var _mesh_jobs_urgent: Array = []
 var _mesh_results: Array = []
 var _mesh_exit := false
-var _mesh_gen: Dictionary = {}      # cpos -> generation stamp
+var _mesh_gen: Dictionary = {}      # cpos -> generation of the latest submitted job
+var _applied_gen: Dictionary = {}   # cpos -> generation actually on screen
 var _inflight: Dictionary = {}      # cpos -> submit time msec
 
 ## Chunks this client has actually received and kept.
@@ -374,9 +375,20 @@ func _process(_delta: float) -> void:
 	_mesh_mutex.unlock()
 	for result: Dictionary in done:
 		var rpos: Vector2i = result.cpos
-		if not _data.has(rpos) or int(result.get("gen", 0)) != int(_mesh_gen.get(rpos, 0)):
-			continue  # superseded by a newer edit or a sync fallback
-		_inflight.erase(rpos)
+		var rgen: int = int(result.get("gen", 0))
+		# SHOW PROGRESS, DON'T WAIT FOR CALM. This used to require an exact
+		# match against the latest submitted gen, so a chunk re-edited
+		# before its own mesh came back threw that mesh away rather than
+		# show it — and a rapid-fire weapon kept re-editing the chunk it
+		# was shooting faster than a build could finish, so nothing
+		# appeared until the trigger let up and one build finally won the
+		# race. Any result newer than what is already on screen is worth
+		# showing now; a fresher one lands right behind it.
+		if not _data.has(rpos) or rgen <= int(_applied_gen.get(rpos, -1)):
+			continue  # a newer result already showed this chunk
+		_applied_gen[rpos] = rgen
+		if rgen >= int(_mesh_gen.get(rpos, 0)):
+			_inflight.erase(rpos)  # this WAS the latest request
 		_topmaps[rpos] = result.surfaces.get("topmap", PackedByteArray())
 		_apply_surfaces(rpos, result.surfaces)
 	# Stall fallback: if the worker hasn't returned a chunk within 4s,
@@ -400,6 +412,7 @@ func _process(_delta: float) -> void:
 			if not n.is_empty():
 				nb[off] = n
 		var sync_surfaces := Mesher.new().build(_data[spos], nb, spos.x, spos.y)
+		_applied_gen[spos] = int(_mesh_gen[spos])
 		_topmaps[spos] = sync_surfaces.get("topmap", PackedByteArray())
 		_apply_surfaces(spos, sync_surfaces)
 	if not _announced_ready and _mesh_queue.is_empty() and done.is_empty() \
