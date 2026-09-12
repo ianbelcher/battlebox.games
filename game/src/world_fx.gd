@@ -283,7 +283,7 @@ func knockout(center: Vector3) -> void:
 func burst(pos: Vector3i, color: Color) -> void:
 	var particles := CPUParticles3D.new()
 	particles.position = Vector3(pos) + Vector3(0.5, 0.5, 0.5)
-	particles.amount = 14
+	particles.amount = 24
 	# LONG ENOUGH TO ARC AND FALL BACK. At 0.5s they were gone before they
 	# had finished going up.
 	particles.lifetime = 0.9
@@ -307,7 +307,7 @@ func burst(pos: Vector3i, color: Color) -> void:
 	particles.initial_velocity_max = 8.0
 	particles.gravity = Vector3(0, -10, 0)
 	particles.mesh = BoxMesh.new()
-	(particles.mesh as BoxMesh).size = Vector3(0.12, 0.12, 0.12)
+	(particles.mesh as BoxMesh).size = Vector3(0.17, 0.17, 0.17)
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	particles.mesh.material = mat

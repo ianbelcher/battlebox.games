@@ -149,6 +149,13 @@ func _physics_process(delta: float) -> void:
 					if hit_block != Blocks.BOOM and Blocks.is_breakable(hit_block) \
 							and Blocks.hardness(hit_block) <= 1:
 						world.chunks.apply_edit_now(cell, Blocks.AIR)
+						# The colour burst normally rides in on cl_edit's
+						# "old" block — which, once THIS predicted it away,
+						# cl_edit finds already AIR and skips. Fire it here
+						# instead, off the block we just read, so the
+						# shooter still gets it (and gets it instantly).
+						if hit_block != Blocks.CONFETTI:
+							world.fx.burst(cell, Blocks.color_of(hit_block))
 				world.sv_shot.rpc_id(1, orb.slot, cell, orb.kind)
 				if orb.kind == 2:
 					# Grapple: a guided zip that routes AROUND the hooked
