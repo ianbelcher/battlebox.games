@@ -12,7 +12,8 @@ extends RefCounted
 ## which is how "space" ended up in the picker while the server's
 ## _known_map() silently refused it — clicking Space did nothing at all.
 ## Anything that needs to know the maps asks here.
-const THEMES := ["classic", "desert", "isles", "castles", "city", "sky", "space", "caverns"]
+const THEMES := ["classic", "desert", "isles", "castles", "city", "sky", "space", "caverns",
+	"mountain"]
 
 const CHUNK_SIZE := 16
 const CHUNK_H := 80
@@ -179,6 +180,20 @@ func height_at(wx: int, wz: int) -> int:
 		# Mostly ocean, steep little islands everywhere.
 		var bump := maxf(0.0, hills - 0.58) * 110.0
 		return clampi(int(16.0 + bump * falloff + detail * 1.2), 2, CHUNK_H - 12)
+	if theme == "mountain":
+		# ONE HILL, KING OF IT. A single dome around the origin rather
+		# than a range — a mode with a tide that only ever rises needs
+		# exactly one high point left standing at the end, not a
+		# scatter of near-equal peaks to pick between.
+		var reach := float(world_size) * 0.42
+		var mfrac := clampf(dist / reach, 0.0, 1.0)
+		# Broad and fairly flat near the summit (room for a last
+		# stand), steepening underfoot on the way down; texture grows
+		# with distance from the top rather than roughening the one
+		# flat place a fight needs.
+		var dome := 1.0 - pow(mfrac, 1.7)
+		var rugged := (hills * hills * 10.0 + detail * 2.5) * mfrac
+		return clampi(int(SEA_LEVEL - 8.0 + dome * 52.0 + rugged), 2, CHUNK_H - 6)
 	var h := 14.0 + (base * 18.0 + hills * hills * 30.0) * falloff + detail * 1.8
 	return clampi(int(h), 2, CHUNK_H - 12)
 

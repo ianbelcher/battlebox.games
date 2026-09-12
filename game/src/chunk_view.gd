@@ -150,6 +150,12 @@ func _ready() -> void:
 func set_water_shine(on: bool) -> void:
 	(_materials["trans"] as ShaderMaterial).set_shader_parameter("shine", 1.0 if on else 0.0)
 
+## The one water material every chunk's water faces share, for anything
+## that wants to look like water without being voxels — see KingHillMode's
+## rising tide, a single plane rather than a real block anywhere.
+func water_material() -> ShaderMaterial:
+	return _materials["trans"]
+
 ## Queue every resident chunk for a rebuild (AO toggle etc.); the
 ## time-budgeted mesher spreads the cost over frames.
 func remesh_all() -> void:

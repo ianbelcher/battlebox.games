@@ -29,6 +29,7 @@ signal hearts_changed
 signal survival_ended(seconds: float, bonked: int)
 signal match_changed
 signal storm_changed
+signal water_changed
 signal map_list_changed
 signal battle_config_changed
 var client_minutes := 5
@@ -226,6 +227,11 @@ var storm_radius := 0.0
 ## Until the storm next changes what it is doing (see cl_storm).
 var storm_seconds := 0.0
 var storm_center := Vector3.ZERO
+## King of the Hill's tide, in world Y. 0.0 (its idle default, like
+## storm_radius) means no flood is running; see cl_water and KingHillMode.
+var water_level := 0.0
+## Until the water next changes what it is doing (see cl_water).
+var water_seconds := 0.0
 
 # Client
 ## Explosions, fireworks and confetti (client only). See world_fx.gd.
@@ -237,6 +243,7 @@ var monster_view: MonsterView = null
 var orbs: OrbView = null
 var crates: CrateView = null
 var _storm_wall: MeshInstance3D = null
+var _water_plane: MeshInstance3D = null
 var sky: DayNight = null
 var _ready_announced := false
 
@@ -560,6 +567,12 @@ func sv_where(slot: int) -> void:
 		# what a newcomer to a busy game used to get.
 		if match_phase == "BATTLE" and storm_radius >= 0.0 and not rules.has_flags():
 			spot = store.safe_stand(storm_center, maxf(storm_radius * 0.5, 1.0))
+		elif match_phase == "BATTLE" and water_level > 0.0 and not rules.has_flags():
+			# ON THE HILL, same idea, for King of the Hill's tide.
+			# safe_stand does not know the waterline, so this is not
+			# guaranteed dry once the tide is nearly at the summit —
+			# but nowhere else on the map is any drier by then either.
+			spot = store.safe_stand(Vector3.ZERO, 8.0)
 		player_state[id] = {"pos": spot, "treasures": 0,
 			"name": str(entry.name), "hp": max_hp(id)}
 		match_alive[id] = true
@@ -1304,8 +1317,10 @@ func _do_world_reset(map_name := "", new_size := 0) -> void:
 		match_alive.clear()
 		downed_ids.clear()
 		storm_radius = 0.0
+		water_level = 0.0
 		cl_match.rpc("IDLE", 0.0)
 		cl_storm.rpc(0.0, Vector3.ZERO)
+		cl_water.rpc(0.0)
 	reset_scoreboard()
 	cl_reset_result.rpc(true)
 	cl_world_info.rpc(spawn_pos, clock, source, day_length)
@@ -2023,6 +2038,14 @@ func cl_storm(radius: float, center: Vector3 = Vector3.ZERO, seconds := 0.0) -> 
 	storm_seconds = seconds
 	storm_changed.emit()
 
+## `seconds` is until the water next changes what it is doing — the same
+## job storm_seconds does for the wall. See KingHillMode.
+@rpc("authority", "reliable")
+func cl_water(level: float, seconds := 0.0) -> void:
+	water_level = level
+	water_seconds = seconds
+	water_changed.emit()
+
 @rpc("authority", "reliable")
 func cl_stand(id: String, pos: Vector3, loot := false, kit: Array = [],
 		reset_kit := true) -> void:
@@ -2392,6 +2415,23 @@ func _client_setup() -> void:
 	match_changed.connect(func() -> void:
 		if match_phase != "BATTLE":
 			_storm_wall.visible = false)
+	# KING OF THE HILL'S TIDE. One flat sheet sharing the real water
+	# blocks' own material (see ChunkView.water_material) — same colour,
+	# same gentle waves — raised and lowered by moving the whole mesh,
+	# rather than a single one of the blocks it stands in for actually
+	# being touched. Big enough for the largest map on offer (see
+	# game_setup.gd's SIZES) with room past the edges.
+	_water_plane = MeshInstance3D.new()
+	_water_plane.mesh = _build_water_plane_mesh()
+	_water_plane.material_override = chunks.water_material()
+	_water_plane.visible = false
+	add_child(_water_plane)
+	water_changed.connect(func() -> void:
+		_water_plane.visible = match_phase == "BATTLE" and water_level > 0.0
+		_water_plane.position.y = water_level)
+	match_changed.connect(func() -> void:
+		if match_phase != "BATTLE":
+			_water_plane.visible = false)
 	sky = DayNight.new()
 	sky.name = "Sky"
 	add_child(sky)
@@ -2407,6 +2447,50 @@ func _client_setup() -> void:
 	Game.roster_changed.connect(_client_sync_players)
 	_client_sync_players()
 	sv_hello.rpc_id(1)
+
+## A flat sheet of the real water material, subdivided so it can ride the
+## same per-vertex waves a real water block's top face does (see
+## shaders/water.gdshader — anything with UV2.x set moves). 900 blocks is
+## past the largest map game_setup.gd's SIZES offers (800) with room to
+## spare, and it never needs to change size, only height — see
+## _client_setup's water_changed hookup.
+const WATER_PLANE_SPAN := 900.0
+const WATER_PLANE_SEGMENTS := 60
+
+func _build_water_plane_mesh() -> ArrayMesh:
+	var half := WATER_PLANE_SPAN * 0.5
+	var step := WATER_PLANE_SPAN / float(WATER_PLANE_SEGMENTS)
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var uv2 := PackedVector2Array()
+	var normals := PackedVector3Array()
+	var tint := Blocks.color_of(Blocks.WATER)
+	for gz in range(WATER_PLANE_SEGMENTS + 1):
+		for gx in range(WATER_PLANE_SEGMENTS + 1):
+			verts.append(Vector3(-half + float(gx) * step, 0.0, -half + float(gz) * step))
+			colors.append(tint)
+			uv2.append(Vector2(1.0, 0.0))
+			normals.append(Vector3.UP)
+	var indices := PackedInt32Array()
+	for gz in WATER_PLANE_SEGMENTS:
+		for gx in WATER_PLANE_SEGMENTS:
+			var i0 := gz * (WATER_PLANE_SEGMENTS + 1) + gx
+			var i1 := i0 + 1
+			var i2 := i0 + WATER_PLANE_SEGMENTS + 1
+			var i3 := i2 + 1
+			# Winding does not matter here — the shared water material
+			# renders both sides (render_mode cull_disabled).
+			indices.append_array([i0, i2, i1, i1, i2, i3])
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
 
 ## Keep one Player node per roster entry; local ones get their InputSlot and
 ## ask the server where they should stand (saved spot or the spawn).

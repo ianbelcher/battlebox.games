@@ -138,8 +138,8 @@ def free_port() -> int:
 # not work.
 # ---------------------------------------------------------------------
 
-MODES = ("creative", "battle", "ctf", "holdout")
-MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space", "caverns")
+MODES = ("creative", "battle", "ctf", "holdout", "king_hill")
+MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space", "caverns", "mountain")
 SIZES = (50, 100, 200, 400, 800)
 FLY_ANSWERS = ("everyone", "nobody", "computers", "humans")
 # How many players the room has seats for; computer players fill the

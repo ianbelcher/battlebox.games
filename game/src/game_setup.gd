@@ -58,6 +58,7 @@ const MAPS := [
 	{"key": "sky", "label": "Skylands", "note": "Floating ground, a long way down"},
 	{"key": "space", "label": "Space", "note": "Low gravity, no sky"},
 	{"key": "caverns", "label": "Caverns", "note": "Flat on top, a world of caves below"},
+	{"key": "mountain", "label": "Mountain", "note": "One big hill, ringed by the sea"},
 ]
 
 ## HOW BIG, in blocks across. The same five the world menu offers, and

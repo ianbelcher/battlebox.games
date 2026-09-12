@@ -5,7 +5,7 @@ extends Object
 ## key to lobby.py's MODES, which validates on the way in).
 
 static var ALL: Array = [BuildMode.new(), BattleMode.new(), CtfMode.new(),
-	HoldoutMode.new()]
+	HoldoutMode.new(), KingHillMode.new()]
 
 ## The mode for a key, or Just building for a key nobody has written —
 ## which is what an unconfigured room has always been.
