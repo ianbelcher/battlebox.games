@@ -533,9 +533,11 @@ const INFO := {
 	BERRY_BUSH: {"name": "Berry Bush", "color": Color("3f7a38"), "solid": false,
 		"opaque": false, "cross": true, "sway": 0.5, "emit": 0.35, "collect": true},
 	PATH: {"name": "Path", "color": Color("9c7f52"), "top": Color("b5975f"), "solid": true, "opaque": true},
-	# The floor of every world and the wall around it: steel-grey, so the
-	# edge of the map reads as a thing rather than as sky.
-	BEDROCK: {"name": "Bedrock", "color": Color("5b6068"), "top": Color("676c75"),
+	# The floor of every world and the wall around it: light stone, so the
+	# edge of the map reads as a bright, deliberate boundary rather than a
+	# dark cliff swallowed by distance fog. Was steel-grey (#5b6068), which
+	# read as more shadow than wall once it was cut down to ten blocks tall.
+	BEDROCK: {"name": "Bedrock", "color": Color("c7ccd4"), "top": Color("dadee3"),
 		"solid": true, "opaque": true, "unbreakable": true, "rough": 0.5},
 	# --- Building families ---
 	MARBLE: {"name": "Marble", "color": Color("e8e6e0"), "solid": true, "opaque": true},

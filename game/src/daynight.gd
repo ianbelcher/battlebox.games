@@ -34,6 +34,11 @@ const NIGHT_HORIZON := Color("1c2445")
 ## lifted the energy on top, which produced a night you could read a book
 ## by — see the note on MOON_ENERGY.
 const NIGHT_AMBIENT := Color("56658c")
+## Ambient energy at full night, as a fraction of the daytime figure (1.0)
+## below. Was 0.72 — half again, since night was reading as an overcast
+## afternoon rather than night. Only the night end moves: daylight is
+## untouched.
+const NIGHT_AMBIENT_ENERGY := 0.36
 ## How much of the ambient stops coming from the sky at midnight.
 const NIGHT_SKY_PULLBACK := 0.75
 
@@ -48,7 +53,7 @@ const NIGHT_SKY_PULLBACK := 0.75
 ## Keeping it well under the horizon-crossing sun is what makes the whole
 ## day monotonic: brightest at noon, dimmest in the small hours.
 const SUN_ENERGY := 1.4
-const MOON_ENERGY := 0.22
+const MOON_ENERGY := 0.11
 
 ## Where the sun's light fades out and the moon's fades in, in elevation
 ## (sin of the sun's angle: +1 overhead, 0 at the horizon, -1 midnight).
@@ -219,4 +224,5 @@ func _apply(clock: float) -> void:
 	var night := 1.0 - daylight
 	environment.ambient_light_sky_contribution = 1.0 - night * NIGHT_SKY_PULLBACK
 	environment.ambient_light_color = NIGHT_AMBIENT
-	environment.ambient_light_energy = (0.72 + daylight * 0.28) * _gl_boost
+	environment.ambient_light_energy = \
+		(NIGHT_AMBIENT_ENERGY + daylight * (1.0 - NIGHT_AMBIENT_ENERGY)) * _gl_boost

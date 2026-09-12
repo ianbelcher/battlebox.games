@@ -11,18 +11,28 @@ var view_radius := 5
 ## During matches everything stays resident (prefetched in the lobby).
 var match_mode := false
 const MAX_INFLIGHT_MESHES := 3
-## Lights per chunk. Twenty, from ten: underground every glowing block
-## is a light and eight was a cave with two lamps in it.
-## EIGHT LAMPS PER CHUNK, AND A REACH SHORT OF A CHUNK. The renderer
-## lights each chunk with a fixed number of the lamps whose reach touches
-## it (rendering/limits/opengl/max_lights_per_object), taken in the order
-## they come off the camera's cull — not the nearest. Past that number a
-## lamp is simply not there, and WHICH lamps are lost changes as the
-## view turns and the order reshuffles: a crate's light in one frame,
-## gone the next. So the lamps a chunk can put into the budget of its
-## neighbours are bounded: eight each, reaching eleven blocks, merged by
-## the mesher into fewer and stronger, the brightest kept.
-var light_cap := 8
+## HOW MANY LAMPS ARE LIT AT ONCE, ACROSS THE WHOLE WORLD — not per chunk.
+## The renderer has a real hard limit on lights touching one surface
+## (rendering/limits/opengl/max_lights_per_object, 32 here), and this used
+## to be enforced per chunk instead: each chunk allowed its own eight (or
+## twenty, with the "Lights" video setting on — see main._apply_video),
+## taken in mesh-time order, with no say at all in what a NEIGHBOURING
+## chunk was allowed. Nothing stopped several busy chunks' quotas from
+## summing past the real limit at the border between them, and which
+## lamps the renderer then dropped depended on camera angle — a crate's
+## light there in one frame, gone the next, several times a second.
+##
+## Every lamp now exists (still merged by the mesher into fewer, stronger
+## ones per chunk) but starts OFF; `_refresh_light_budget` — run on the
+## same 0.4s cadence as everything else that reacts to where the players
+## are (see World._client_update_focus) — turns on the nearest LIGHT_CAP
+## to any local player and nothing else. The choice only moves when a
+## player actually walks somewhere; it never depends on which way the
+## camera happens to be pointed.
+var light_cap := 24:
+	set(value):
+		light_cap = value
+		_refresh_light_budget()
 const REQUEST_BATCH := 40
 const REQUEST_RETRY_SECONDS := 6.0
 
@@ -36,6 +46,8 @@ var _queued: Dictionary = {}
 var _flickers: Array = []        # [{light, base}]
 var _materials: Dictionary = {}
 var _focus_chunks: Array[Vector2i] = []
+var _focus_positions: Array = []    # Vector3, the raw positions behind _focus_chunks
+var _chunk_lamps: Dictionary = {}   # Vector2i -> Array[{light, pos}], pos in world space
 var _teleporters: Dictionary = {}   # Vector2i chunk -> Array[Vector3] world positions
 
 signal first_chunks_ready
@@ -150,11 +162,40 @@ func has_chunk(cpos: Vector2i) -> bool:
 ## The world tells us where the local players (or the spectator) are looking.
 func set_focus(positions: Array) -> void:
 	_focus_chunks.clear()
+	_focus_positions = positions.duplicate()
 	for pos: Vector3 in positions:
 		var cpos := Vector2i(floori(pos.x / 16.0), floori(pos.z / 16.0))
 		if not _focus_chunks.has(cpos):
 			_focus_chunks.append(cpos)
 	_refresh_interest()
+	_refresh_light_budget()
+
+## NEAREST FIRST. Every lamp exists as a real light the moment its chunk is
+## meshed, but only the LIGHT_CAP closest to a local player are ever on —
+## see the note on `light_cap`. Cheap to redo from scratch each call: a
+## loaded world keeps a few hundred lamps at most, and this only runs on
+## the 0.4s focus cadence, not per frame.
+func _refresh_light_budget() -> void:
+	var scored: Array = []
+	for arr: Array in _chunk_lamps.values():
+		for entry: Dictionary in arr:
+			var light: OmniLight3D = entry.light
+			if is_instance_valid(light):
+				scored.append({"light": light, "d2": _nearest_focus_dist2(entry.pos)})
+	if light_cap <= 0 or _focus_positions.is_empty():
+		for entry: Dictionary in scored:
+			(entry.light as OmniLight3D).visible = false
+		return
+	scored.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a.d2) < float(b.d2))
+	for i in scored.size():
+		(scored[i].light as OmniLight3D).visible = i < light_cap
+
+func _nearest_focus_dist2(pos: Vector3) -> float:
+	var best := 1e18
+	for focus: Vector3 in _focus_positions:
+		best = minf(best, focus.distance_squared_to(pos))
+	return best
 
 func _refresh_interest() -> void:
 	if _focus_chunks.is_empty() or world == null:
@@ -441,6 +482,7 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 	if holder != null:
 		_forget_flickers(holder)
 		holder.queue_free()
+	_chunk_lamps.erase(cpos)
 	holder = Node3D.new()
 	holder.position = Vector3(cpos.x * 16, 0, cpos.y * 16)
 	# Born with the right visibility: chunks beyond the draw distance
@@ -466,25 +508,28 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 	_add_foliage(holder, cpos)
 
 	var lights: Array = surfaces.get("lights", [])
-	var count := 0
+	var made: Array = []
 	for spec: Dictionary in lights:
-		if count >= light_cap:
-			break
-		count += 1
 		var light := OmniLight3D.new()
 		light.position = spec.pos
 		light.light_color = spec.color
 		light.light_energy = spec.energy * 1.4
-		# ELEVEN BLOCKS: enough to light a hall, short enough that a
-		# lamp touches few chunks beyond its own — see light_cap.
+		# ELEVEN BLOCKS: enough to light a hall.
 		light.omni_range = 11.0
 		light.omni_attenuation = 0.9
 		light.shadow_enabled = false
+		# Off until the budget pass (_refresh_light_budget) turns on
+		# whichever lamps are actually nearest a local player.
+		light.visible = false
 		holder.add_child(light)
+		made.append({"light": light, "pos": holder.position + spec.pos})
 		if spec.flicker:
 			_flickers.append({"light": light, "base": spec.energy,
 				"phase": float(spec.pos.x) * 1.7 + float(spec.pos.z) * 0.9})
 			holder.add_child(_campfire_particles(spec.pos))
+	if not made.is_empty():
+		_chunk_lamps[cpos] = made
+		_refresh_light_budget()
 
 func _campfire_particles(pos: Vector3) -> GPUParticles3D:
 	var particles := GPUParticles3D.new()

@@ -2889,8 +2889,11 @@ func cl_boom_fx(pos: Vector3i, power := 2.2) -> void:
 	var center := Vector3(pos) + Vector3(0.5, 0.5, 0.5)
 	Sfx.play("boom", -_nearest_local_dist(center) * 0.35)
 	fx.explosion(center, power)
-	fx.flash_light(center, Color(1.0, 0.7, 0.35), 5.0 + power * 1.6,
-		clampf(power / 2.2, 1.0, 2.4))
+	# Twice as bright as it was, and it used to be gone in under a second —
+	# a blast should light the area for a beat, not strobe it.
+	var boom_reach := clampf(power / 2.2, 1.0, 2.4)
+	fx.flash_light(center, Color(1.0, 0.7, 0.35), (5.0 + power * 1.6) * 2.0,
+		boom_reach, boom_reach)
 	# Harmless, hilarious: anyone close gets launched.
 	for child in players.get_children():
 		if child is Player and child.is_local:

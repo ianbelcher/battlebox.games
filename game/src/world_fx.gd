@@ -199,8 +199,10 @@ func explosion(center: Vector3, power := 2.2) -> void:
 		for node in [debris, embers, smoke]:
 			if is_instance_valid(node):
 				node.queue_free())
+## `fade_seconds` < 0 (the default) keeps the old "gone in half a reach-
+## second" blip, which suits the small stuff (a confetti pop, a firework).
 func flash_light(center: Vector3, color: Color, energy: float,
-		reach := 1.0) -> void:
+		reach := 1.0, fade_seconds := -1.0) -> void:
 	var flash := OmniLight3D.new()
 	flash.position = center
 	flash.light_color = color
@@ -209,7 +211,8 @@ func flash_light(center: Vector3, color: Color, energy: float,
 	flash.shadow_enabled = false
 	add_child(flash)
 	var tween := create_tween()
-	tween.tween_property(flash, "light_energy", 0.0, 0.5 * reach)
+	var fade := fade_seconds if fade_seconds >= 0.0 else 0.5 * reach
+	tween.tween_property(flash, "light_energy", 0.0, fade)
 	tween.tween_callback(func() -> void:
 		if is_instance_valid(flash):
 			flash.queue_free())

@@ -224,11 +224,21 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 			if not in_bounds(wx, wz):
 				continue
 			# THE WALL AROUND THE WORLD. The outermost ring of columns is
-			# bedrock from the floor to the top of the sky, so the edge of
-			# the map is a wall you can see and cannot dig, rather than a
-			# cliff with blue nothing past it.
+			# bedrock, so the edge of the map is a wall you can see and
+			# cannot dig, rather than a cliff with blue nothing past it.
+			#
+			# Only up to ten blocks above sea level, not the whole way to
+			# the sky — a wall that towers out of view read as a featureless
+			# cliff face rather than a boundary. It still tracks whatever is
+			# actually standing next to it, though: nothing here stops a
+			# player moving past the ring in X/Z (unlike a bot's goal, which
+			# is clamped in ChunkStore), so on a tall hill or a caverns
+			# world's plain the wall has to clear the local ground by a real
+			# margin or it stops being a wall and starts being a step.
 			if on_border(wx, wz):
-				for y in CHUNK_H:
+				var wall_top := mini(CHUNK_H - 1,
+					maxi(SEA_LEVEL + 10, height_at(wx, wz) + 14))
+				for y in range(wall_top + 1):
 					data[idx(lx, y, lz)] = Blocks.BEDROCK
 				continue
 			var h := height_at(wx, wz)

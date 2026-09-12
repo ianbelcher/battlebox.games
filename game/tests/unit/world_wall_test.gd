@@ -1,13 +1,19 @@
 extends TestCase
 ## The wall around the world, and where the caverns world starts you.
 
-func test_the_edge_of_the_world_is_a_wall_to_the_sky() -> void:
+func test_the_edge_of_the_world_is_a_wall_ten_above_sea_level() -> void:
 	var gen := WorldGen.new(7, "classic", 64)
 	# x = 32 is the last column inside a 64-wide slab: chunk 2, lx 0.
 	var data := gen.generate_chunk(2, 0)
-	for y in [0, 20, 60, WorldGen.CHUNK_H - 1]:
+	# Ten above sea level, or the local ground plus a clearing margin,
+	# whichever is taller — a wall that towers to the top of the world
+	# regardless of what is next to it reads as a cliff, not a boundary.
+	var wall_top := maxi(WorldGen.SEA_LEVEL + 10, gen.height_at(32, 0) + 14)
+	for y in [0, 20, wall_top]:
 		equal(int(data[WorldGen.idx(0, y, 0)]), Blocks.BEDROCK,
 			"the border column is bedrock at y=%d" % y)
+	equal(int(data[WorldGen.idx(0, wall_top + 1, 0)]), Blocks.AIR,
+		"but open sky above the wall's top")
 	equal(int(data[WorldGen.idx(1, WorldGen.CHUNK_H - 1, 0)]), Blocks.AIR,
 		"the column inside it is not")
 	check(gen.on_border(32, 5) and gen.on_border(-4, -32) and not gen.on_border(31, 31),

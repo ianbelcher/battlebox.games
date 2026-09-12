@@ -418,12 +418,12 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		_tri("opaque", [o, o + Vector3(1, 0, 1), o + Vector3(0, 0, 1)], Vector3.DOWN,
 			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
 
-## LAMPS CLOSE TOGETHER BECOME ONE, and the strongest come first. A
-## chunk keeps a capped number of lamps (chunk_view.light_cap), and it
-## used to keep the first ones in walking order — all along one side of
-## a hall, the rest dark — which read as the light dying as you walked
-## across the room. Merged and sorted, the cap keeps the brightest,
-## spread across the chunk, and each reaches further.
+## LAMPS CLOSE TOGETHER BECOME ONE, and the strongest come first. A dense
+## floor of glowstone used to keep the first lamps in walking order — all
+## along one side of a hall, the rest dark, which read as the light dying
+## as you walked across the room. Merging keeps every chunk's lamp count
+## sane and each survivor reaches further; which ones are actually lit at
+## any moment is decided globally afterwards — see chunk_view.light_cap.
 const LAMP_MERGE := 7.0
 func _merged(lights: Array) -> Array:
 	lights.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
