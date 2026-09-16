@@ -56,6 +56,56 @@ func test_hearts_and_hit_box_grow_together() -> void:
 	check(BodySize.half_width(8.0) > BodySize.half_width(1.0) * 4.0, "much wider")
 	check(BodySize.height(8.0) > BodySize.height(1.0) * 4.0, "much taller")
 
+## THE LADDER IN HEARTS, and it is a ladder and not a curve: one rung is
+## worth one more person, whatever rung you are on.
+##
+## Pinned as exact numbers because this is the difference between Giants
+## being a fight and Giants being a siege, and nothing about a siege shows
+## up in a log. It used to scale with the size itself — 8, 16, 32, 64 — and
+## a giant at the cap lost one of the eight stars over its head every
+## eighth hit.
+func test_a_rung_is_worth_one_more_person() -> void:
+	equal(GiantsMode.hearts_for(8, 1.0), 8, "a person has a person's hearts")
+	equal(GiantsMode.hearts_for(8, 2.0), 16, "one rung: two people")
+	equal(GiantsMode.hearts_for(8, 4.0), 24, "two rungs: three")
+	equal(GiantsMode.hearts_for(8, 8.0), 32, "three rungs, the cap: four")
+
+## …and it follows whatever the room set hearts to, rather than assuming
+## everybody starts on eight.
+func test_it_follows_the_hearts_the_room_was_set_to() -> void:
+	equal(GiantsMode.hearts_for(4, 8.0), 16, "four-heart room, giant at the cap")
+	equal(GiantsMode.hearts_for(1, 8.0), 4, "one-heart room")
+	for base: int in [1, 2, 4, 8]:
+		var last := 0
+		for size: float in [1.0, 2.0, 4.0, 8.0]:
+			var got := GiantsMode.hearts_for(base, size)
+			check(got >= last, "hearts never go DOWN a rung (base %d)" % base)
+			last = got
+
+## Nobody is ever drawn as having hearts they do not have. A giant's row
+## is the same eight stars, and a quarter of them has to move when a
+## quarter of the hearts do — the thing that made the old numbers feel
+## broken was that they did not.
+func test_a_giants_stars_move_when_its_hearts_do() -> void:
+	var top := GiantsMode.hearts_for(8, 8.0)     # 32
+	equal(HeartRow.lit(top, top), 8, "full is a full row")
+	equal(HeartRow.lit(top - 4, top), 7, "four hearts off is one star off")
+	equal(HeartRow.lit(top / 2, top), 4, "half the hearts is half the row")
+	equal(HeartRow.lit(1, top), 1,
+		"one heart left still shows one star, never none")
+	equal(HeartRow.lit(0, top), 0, "and nothing left shows nothing")
+
+## HOW MANY HITS IT ACTUALLY TAKES, which is the only number that answers
+## the complaint. A giant should be a couple of people to get through, not
+## a wall — and the mercy window has to come down as the bar goes up or
+## the two multiply.
+func test_a_giant_at_the_cap_is_about_twice_the_work_of_a_person() -> void:
+	var person := GiantsMode.hearts_for(8, 1.0)
+	var giant := GiantsMode.hearts_for(8, 8.0)
+	check(giant <= person * 4, "a giant is at most four people of hearts")
+	check(giant >= person * 3, "…and at least three, or growing is not a reward")
+
+
 ## And a giant does NOT get to be quick as well. This is the sentence
 ## that keeps a small player in the game.
 func test_a_giant_moves_at_a_persons_pace() -> void:

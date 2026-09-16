@@ -855,6 +855,38 @@ func broadcast_scoreboard() -> void:
 	world.cl_scoreboard.rpc(world.team_wins, world.player_frags, world.matches_played)
 
 ## Match damage between enemies (orbs and blast splash call this).
+## HOW LONG SOMEBODY IS UNTOUCHABLE AFTER A HIT, and why it stopped being
+## a constant.
+##
+## A flat window bounds damage per SECOND, which is exactly right while
+## everybody has the same heart bar — and turns into an invulnerability
+## shield the moment a mode hands somebody more. A Giants giant with four
+## times the hearts and the same window takes four times as long to bring
+## down BECAUSE of the window, on top of the four times it already takes
+## for having the hearts: sixteen times a person, out of two changes
+## neither of which looks like it did that. It does not read as a tough
+## opponent, it reads as one that cannot be hurt at all, and a big shooter
+## emptied into one appears to do nothing.
+##
+## So the window shrinks as the bar grows, at a SQUARE-ROOT rate. Four
+## times the hearts is twice as long to bring down, not sixteen: a bigger
+## pool still buys time, and it buys a fraction of what it used to.
+##
+## The floor matters as much as the rate. Below about a tenth of a second
+## a volley really can delete somebody between two frames, which is the
+## thing this window was put here for in the first place.
+const MERCY_PEOPLE_MS := 800
+const MERCY_BOTS_MS := 250
+const MERCY_FLOOR_MS := 90
+
+func mercy_ms(id: String) -> int:
+	var base := MERCY_BOTS_MS if world.bots.roster.has(id) else MERCY_PEOPLE_MS
+	var ordinary := float(world.MATCH_HP)
+	var bar := float(world.max_hp(id))
+	if bar <= ordinary or ordinary <= 0.0:
+		return base
+	return maxi(MERCY_FLOOR_MS, int(round(float(base) / sqrt(bar / ordinary))))
+
 func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	if world.ctf.guarded(id):
 		return
@@ -863,7 +895,7 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	if world.downed_ids.has(id):
 		return  # players who are OUT are untouchable — get back in, or stay out
 	var now := Time.get_ticks_msec()
-	var mercy := 250 if world.bots.roster.has(id) else 800
+	var mercy := mercy_ms(id)
 	if now - int(_last_hit_ms.get(id, -mercy)) < mercy:
 		return  # brief mercy so one volley can't insta-delete you
 	_last_hit_ms[id] = now

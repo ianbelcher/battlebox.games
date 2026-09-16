@@ -517,15 +517,14 @@ const NAME_OVER_HEARTS: Array[float] = [2.05, 2.42, 2.6]
 ##
 ## Ceiling, not rounding: any hearts left at all show at least one, so
 ## nobody is ever drawn as dead while they are still standing.
-const HEART_CELLS := 8
+## The row of hearts is HeartRow's arithmetic; these two names stay
+## because the HUD and the overhead tag both reach for them here, and
+## because a pure function in a file that needs an autoload is a function
+## no test can call. See heart_row.gd.
+const HEART_CELLS := HeartRow.CELLS
 
 static func hearts_shown(hp: int, top: int) -> int:
-	if top <= 0:
-		return 0
-	hp = clampi(hp, 0, top)
-	if top <= HEART_CELLS:
-		return hp
-	return int(ceilf(float(hp) * float(HEART_CELLS) / float(top)))
+	return HeartRow.lit(hp, top)
 
 func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 		friendly := false, top := HEART_CELLS) -> void:
@@ -1646,4 +1645,16 @@ func _animate_kenney(_delta: float) -> void:
 		want = "holding-right"
 	if ap.current_animation != want:
 		ap.play(want, 0.18)
+	# A GIANT'S LEGS GO ROUND SLOWER, in proportion to how big it is.
+	#
+	# Size and speed are separate on purpose (GiantsMode.SPEED), so a
+	# giant crosses the ground at a person's pace — but its legs are eight
+	# times longer, and a clip authored for a person's legs played at a
+	# person's rate means a body the size of a house taking eight strides
+	# a second and sliding over the ground like a toy being pushed.
+	#
+	# One over the size is the rate at which the feet stay planted: twice
+	# as big is half as often, which is the whole of it. It is the
+	# difference between a giant that lumbers and a giant that scurries.
+	ap.speed_scale = 1.0 / maxf(body_size, 0.25)
 

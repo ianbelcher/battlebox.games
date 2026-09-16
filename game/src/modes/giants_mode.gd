@@ -14,8 +14,13 @@ extends GameMode
 ## WHY GROWING IS NOT SIMPLY WINNING. A giant is a bigger target in the
 ## most literal sense — the hit box is the body, so at eight times the
 ## size there is sixty-four times as much of you to shoot at. The hearts
-## are what pay for that: they scale too, so a giant takes longer to
-## bring down at exactly the rate it is easier to hit. What a giant does
+## are what pay for that, and they used to pay far too much: they scaled
+## with the size itself, and the platform's mercy window then scaled the
+## same way again behind them, so a giant at the cap took sixteen times a
+## person to bring down and read as something that simply could not be
+## hurt. Hearts go up by a RUNG now (HEARTS_PER_RUNG) and the window comes
+## down with the bar (MatchDirector.mercy_ms): a giant at the cap takes
+## about twice as long as a person, which is a fight. What a giant does
 ## NOT get is speed. It runs at a person's pace, which at eight times the
 ## size reads as lumbering, and that is the hole a small player plays
 ## through: you cannot outfight a giant but you can outrun one, and it
@@ -47,6 +52,21 @@ const SPEED := 1.0
 ## Do hearts scale with size? See the note at the top for why they
 ## should. Set false and growth becomes pure liability.
 const HEARTS_SCALE := true
+
+## WHAT ONE RUNG OF THE LADDER IS WORTH IN HEARTS: another person's, and
+## NOT another doubling.
+##
+## Hearts used to scale with size itself, so a giant at the cap had eight
+## times eight — sixty-four — and a big shooter emptied into one moved
+## the row of stars over its head by a single star every eight hits. It
+## did not read as a tough opponent, it read as an invulnerable one, which
+## is a different and much worse game.
+##
+## Growing adds a person's worth instead: 8, 16, 24, 32. Still four times
+## the hearts of anybody shooting at you at the top of the ladder, still
+## the reward that makes growing worth it, and a fifth of the row moves
+## every four hits rather than every eight.
+const HEARTS_PER_RUNG := 1.0
 
 ## How much of the loot on the field makes you bigger rather than better
 ## armed, as repetition in the crate pool — the same way Weapons.CRATE_POOL
@@ -150,11 +170,12 @@ func _grow(world: Node, id: String) -> void:
 	if not state.is_empty():
 		state.hp = world.max_hp(id)
 		world.send_hearts(id)
-	world.cl_fanfare.rpc("%s is getting BIGGER" % _name_of(world, id),
-		int(world.roster().get(id, {}).get("team", -1)))
-
-func _name_of(world: Node, id: String) -> String:
-	return str(world.roster().get(id, {}).get("name", "Somebody"))
+	# AND NOTHING IS ANNOUNCED. Growing used to throw a line across every
+	# screen in the game and play a sound with it, which is a lot of
+	# ceremony for a thing you can see happening: the body gets bigger,
+	# in front of everybody, which is the announcement. Six players
+	# trading knockouts meant somebody's screen was being written on
+	# almost continuously, over the top of the fight they were in.
 
 # ---- per player --------------------------------------------------------
 
@@ -166,14 +187,24 @@ func start_size(_world: Node, _id: String) -> float:
 func speed_scale(_world: Node, _id: String) -> float:
 	return SPEED
 
-## HEARTS IN PROPORTION TO SIZE. Eight becomes sixteen, thirty-two,
-## sixty-four — and the HUD draws the same eight hearts draining more
+## HEARTS BY THE RUNG, not by the size. Eight becomes sixteen, twenty-four,
+## thirty-two — and the HUD draws the same eight stars draining more
 ## slowly (Player.hearts_shown), so nothing on screen grows with this and
 ## there is no number anywhere for a child to have to read.
-func max_hp(world: Node, id: String, base: int) -> int:
+##
+## Static and world-free so the whole ladder can be walked in a test: this
+## is the number that decides whether Giants is a fight or a siege, and
+## neither answer shows up in a log.
+static func hearts_for(base: int, size: float) -> int:
 	if not HEARTS_SCALE:
 		return base
-	return maxi(1, int(round(float(base) * world.bodies.size_of(id))))
+	# Rungs, not size: log2 of the size is how many doublings up the
+	# ladder this body is, and each one is worth one more person.
+	var rungs := log(maxf(size, BodySize.PERSON)) / log(GROWTH)
+	return maxi(1, int(round(float(base) * (1.0 + rungs * HEARTS_PER_RUNG))))
+
+func max_hp(world: Node, id: String, base: int) -> int:
+	return hearts_for(base, world.bodies.size_of(id))
 
 ## Everything in the game is available; what is different about Giants is
 ## what the crates hold.
