@@ -139,6 +139,12 @@ def free_port() -> int:
 # ---------------------------------------------------------------------
 
 MODES = ("creative", "battle", "ctf", "holdout", "king_hill", "meeting")
+# The map a mode is given when none was asked for.  The front page always
+# sends a whole object, so this only catches a script or a test — and
+# "meeting" with no map meant a desert island.  A map that WAS asked for
+# is honoured: the suggestion is a suggestion.  Twin of
+# GameMode.suggests_map.
+SUGGESTED_MAPS = {"meeting": "office"}
 # Modes that fill the seats people are not in with computer players —
 # which is all of them but one. A meeting is the people who joined it, so
 # the front page never asks for a seat count and anything that arrives in
@@ -231,6 +237,8 @@ def clean_settings(raw: object) -> dict:
         out["mode"] = raw["mode"]
     if raw.get("map") in MAPS:
         out["map"] = raw["map"]
+    elif out["mode"] in SUGGESTED_MAPS:
+        out["map"] = SUGGESTED_MAPS[out["mode"]]
     out["size"] = _snap(raw, "size", SIZES, DEFAULT_SETTINGS["size"])
     out["players"] = _snap(raw, "players", PLAYER_LIMITS,
                            DEFAULT_SETTINGS["players"])

@@ -552,10 +552,18 @@ static func _office_init() -> void:
 	# --- floors ---------------------------------------------------------
 	# Loop-pile carpet: rough, so the per-position jitter reads as pile
 	# rather than as noise on a painted surface.
-	flat.call(OFFICE_CARPET, "Office Carpet", Color("55585f"), {"rough": 2.8})
-	flat.call(OFFICE_CARPET_BLUE, "Blue Carpet", Color("3f4a63"), {"rough": 2.8})
-	flat.call(OFFICE_CARPET_SAGE, "Sage Carpet", Color("4d5c50"), {"rough": 2.8})
-	flat.call(OFFICE_CARPET_RUST, "Rust Carpet", Color("7a4a3c"), {"rough": 2.8})
+	#
+	# AND MUCH LIGHTER THAN A SWATCH BOOK SUGGESTS. The first set of these
+	# were the colours carpet actually is in a photograph — a proper navy,
+	# a proper charcoal — and the floor came out nearly black. An interior
+	# here is lit by the sky through one wall of glass and by ceiling
+	# panels that EMIT without lighting anything (see CEILING_LIGHT), so
+	# there is far less light falling on a floor than the eye assumes.
+	# These are the same hues held up two stops.
+	flat.call(OFFICE_CARPET, "Office Carpet", Color("8a8d93"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_BLUE, "Blue Carpet", Color("6f7d99"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_SAGE, "Sage Carpet", Color("7f8d7e"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_RUST, "Rust Carpet", Color("a87a63"), {"rough": 2.8})
 	flat.call(OFFICE_VINYL, "Vinyl Plank", Color("a88a66"),
 		{"top": Color("b59470"), "rough": 0.7, "pattern_side": 9, "pattern_top": 9})
 
@@ -571,7 +579,7 @@ static func _office_init() -> void:
 	flat.call(OFFICE_WALL_TEAL, "Teal Wall", Color("2f6f72"), {"rough": 1.0})
 	flat.call(OFFICE_WALL_CLAY, "Clay Wall", Color("a85f4a"), {"rough": 1.0})
 	flat.call(OFFICE_WALL_SAND, "Sand Wall", Color("cbb28d"), {"rough": 1.0})
-	flat.call(CONCRETE_CORE, "Concrete", Color("8f8d88"), {"hard": 2, "rough": 1.6})
+	flat.call(CONCRETE_CORE, "Concrete", Color("a3a19b"), {"hard": 2, "rough": 1.6})
 	flat.call(OFFICE_OAK, "Oak Veneer", Color("b08a54"),
 		{"top": Color("bd9862"), "pattern_side": 9, "pattern_top": 9, "rough": 0.9})
 
@@ -588,7 +596,7 @@ static func _office_init() -> void:
 	EXTRA[CURTAIN_GLASS] = {"name": "Window Wall",
 		"color": Color(0.70, 0.84, 0.90, 0.28), "solid": true, "opaque": false,
 		"translucent": true, "hard": 0}
-	flat.call(MULLION, "Mullion", Color("3c4046"), {"hard": 2, "rough": 0.5})
+	flat.call(MULLION, "Mullion", Color("5a5f68"), {"hard": 2, "rough": 0.5})
 	EXTRA[CURTAIN_EDGE] = {"name": "Window Wall",
 		"color": Color(0.70, 0.84, 0.90, 0.28), "solid": true, "opaque": false,
 		"translucent": true, "unbreakable": true}
@@ -605,17 +613,17 @@ static func _office_init() -> void:
 		EXTRA[id] = spec
 
 	fit.call(DESK, "Desk", "desk", Color("c9b391"), {"top": Color("d4c0a2")})
-	fit.call(MEETING_TABLE, "Meeting Table", "table", Color("8a6440"),
-		{"top": Color("9a7149")})
-	fit.call(CABINET, "Filing Cabinet", "cabinet", Color("7f858c"),
-		{"top": Color("8d939a"), "rough": 0.6})
-	fit.call(PLANTER, "Planter", "planter", Color("6f6a60"), {"rough": 2.0})
+	fit.call(MEETING_TABLE, "Meeting Table", "table", Color("a67c52"),
+		{"top": Color("b88d5e")})
+	fit.call(CABINET, "Filing Cabinet", "cabinet", Color("9aa0a8"),
+		{"top": Color("a8aeb5"), "rough": 0.6})
+	fit.call(PLANTER, "Planter", "planter", Color("8d887c"), {"rough": 2.0})
 
 	var turning := [
-		[OFFICE_CHAIR, "Office Chair", "chair", Color("35373d"), {"rough": 2.2}],
-		[MONITOR, "Monitor", "screen", Color("232529"),
-			{"top": Color("2a2d33"), "emit": 0.5, "rough": 0.25}],
-		[SOFA, "Sofa", "sofa", Color("4a5a6b"), {"rough": 2.6}],
+		[OFFICE_CHAIR, "Office Chair", "chair", Color("5b5f69"), {"rough": 2.2}],
+		[MONITOR, "Monitor", "screen", Color("3a3e46"),
+			{"top": Color("454a54"), "emit": 0.6, "rough": 0.25}],
+		[SOFA, "Sofa", "sofa", Color("70839a"), {"rough": 2.6}],
 		[WHITEBOARD, "Whiteboard", "board", Color("f4f4f0"),
 			{"emit": 0.12, "rough": 0.15}],
 	]

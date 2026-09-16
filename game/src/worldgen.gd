@@ -1652,6 +1652,22 @@ func _office_meeting(data: PackedByteArray, lx: int, lz: int, gx: int, gz: int,
 		# one nearest the corridor the room is entered from.
 		if rz == 0 and absi(rx * 2 - (rw - 1)) <= 2:
 			return
+		# NOT EVERY WALL IS GLASS, and the first version of this — four
+		# glazed walls a room — is why. Thirty of them on a floor plate
+		# means looking through five rooms at once, and the whole storey
+		# went to a pale haze with furniture somewhere inside it. A real
+		# meeting room is glazed where it meets the circulation and solid
+		# where the board hangs, which is both better to look at and
+		# better to be in.
+		var solid_side: int = 1 if hash01(gx, gz, 4105) < 0.5 else -1
+		var solid: bool = rz == rd - 1 \
+			or (solid_side > 0 and rx == rw - 1) or (solid_side < 0 and rx == 0)
+		if solid:
+			var paint: int = [Blocks.OFFICE_WALL, Blocks.OFFICE_WALL,
+				Blocks.OFFICE_WALL_TEAL, Blocks.OFFICE_WALL_CLAY,
+				Blocks.OFFICE_WALL_SAND][int(hash01(gx, gz, 4106) * 5.0) % 5]
+			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1, paint)
+			return
 		# Frosted at sitting height, clear above and below it. A whole
 		# wall of clear glass is a fishbowl and a whole wall of frosted is
 		# a cupboard; the band is what real offices land on.
@@ -1722,9 +1738,15 @@ func _office_booths(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
 	if bx == 0 or bx == 4 or bz == 0 or bz == 4:
 		if bz == 0 and bx == 2:
 			return          # the doorway
-		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.OFFICE_WALL)
-		_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 2, OFFICE_CEIL_Y - 1,
-			Blocks.PARTITION_FROST)
+		# Solid but for the door wall, which is frosted from waist height
+		# so you can tell an occupied booth from an empty one.
+		if bz == 0:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.OFFICE_WALL)
+			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 2, OFFICE_CEIL_Y - 1,
+				Blocks.PARTITION_FROST)
+		else:
+			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
+				Blocks.OFFICE_WALL)
 		return
 	if bx == 2 and bz == 3:
 		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.DESK)

@@ -33,6 +33,14 @@ reading a menu, everyone else's game gone. The world menu now holds three
 things and no settings: how the round is going, the code that gets a
 friend in, and the way out to a different game.
 
+One of the modes is not a game. **Meeting** is a floor of an office
+tower — desks, glass-walled meeting rooms, a lift lobby you all arrive in
+— with nobody to fight, no computer players, and no weapons in the kit.
+Voice chat is already on by default and already carries the whole room,
+so the link that gets a friend into a private game is also the link that
+gets six people into the same room to talk. The Office map can be played
+with any mode; Meeting just opens on it.
+
 One game never closes: the lobby keeps it up whether or not anybody is
 in it. It is otherwise ordinary — listed like the rest, saying what it
 is, joined the same way. When the last person has been gone a couple of
@@ -105,10 +113,10 @@ no-cache on purpose.
   starts one per game on a private port and proxies `/ws?room=<code>` to
   it. See [`game/src/room.gd`](game/src/room.gd).
 - **Gameplay is data.** New animal → `creatures.gd`. New block →
-  `blocks.gd`. New prefab → `structures.gd`. Something new to choose when
-  starting a game → `game_setup.gd`, and its twin in `lobby/lobby.py`. If
-  you are writing a `match` over a kind, there is a table you should be
-  adding a row to.
+  `blocks.gd`. New prefab → `structures.gd`. New game → one file in
+  `game/src/modes/`. Something new to choose when starting a game →
+  `game_setup.gd`, and its twin in `lobby/lobby.py`. If you are writing a
+  `match` over a kind, there is a table you should be adding a row to.
 - **A game is configured before it exists, and not after.** What the
   front page chooses is sent with the create, turned into `WORLD_*`
   environment by the lobby and applied at boot — so a world is
@@ -188,12 +196,28 @@ For anything you can see, take a picture of it — no screen required:
 
 ```sh
 tools/screenshot.sh /tmp/shots
+
+# A map from above, or sliced at one level (the only way to see an interior)
+WORLD_MAP_THEME=office WORLD_MAP_Y=4 WORLD_MAP_SIZE=100 WORLD_MAP_SPAN=8 \
+  WORLD_MAP_ZOOM=6 WORLD_MAP_OUT=/tmp/plan.png \
+  godot --headless --path game --script res://tests/city_map.gd
+
+# Every chip in one picker tab, as a contact sheet
+WORLD_ICON_CATEGORY=office WORLD_ICON_OUT=/tmp/chips.png \
+  xvfb-run -a godot --path game --resolution 900x520 \
+  --rendering-method gl_compatibility res://tests/block_icons.tscn
 ```
 
-That runs the real client under a virtual X server and saves a PNG every
-1.5 seconds, so an interface change can be checked rather than guessed at.
-`CONTRIBUTING.md` has the details, including why the renderer flag it
-passes is load-bearing.
+The first runs the real client under a virtual X server and saves a PNG
+every 1.5 seconds, so an interface change can be checked rather than
+guessed at. `CONTRIBUTING.md` has the details, including why the renderer
+flag it passes is load-bearing.
+
+The other two exist because of the same class of failure in two places
+that never raise. A block whose shape `BlockIcon` has no arm for draws a
+blank square in the picker beside a perfectly good name; a map generator
+that puts a wall through a doorway is a bug you can only see. Both are
+one command and a picture.
 
 The last two matter more than they look. Booting the project proves the
 scripts compile; it does not prove the game works, because an RPC sent to a

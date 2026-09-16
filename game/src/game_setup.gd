@@ -371,6 +371,14 @@ static func clean(raw: Dictionary) -> Dictionary:
 		out["mode"] = str(raw["mode"])
 	if _has_key(raw, MAPS, "map"):
 		out["map"] = str(raw["map"])
+	else:
+		# NO MAP ASKED FOR, and a mode that has one in mind. The front page
+		# always sends a whole object, so this is a script or a test — and
+		# "meeting" with no map meant a desert island. A map that WAS asked
+		# for is still honoured, because the suggestion is a suggestion.
+		var wanted := suggested_map(str(out["mode"]))
+		if not wanted.is_empty():
+			out["map"] = wanted
 	out["size"] = _snap_int(raw, "size", SIZES, DEFAULT_SIZE)
 	out["players"] = _snap_int(raw, "players", PLAYER_LIMITS, DEFAULT_PLAYERS)
 	# A mode that wants no computer players gets none, whatever arrived in
