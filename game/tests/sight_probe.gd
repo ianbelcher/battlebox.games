@@ -173,7 +173,8 @@ func _aim_the_person() -> void:
 	me.fly_mode = true
 	me.velocity = Vector3.ZERO
 	me.position = nearest.position + away.normalized() * STAND_OFF + Vector3(0, 0.6, 0)
-	var eye := me.position + Vector3(0, Player.EYE_HEIGHT, 0)
-	var to := (nearest.position + Vector3(0, 1.0, 0) - eye).normalized()
+	var eye := me.position + me.eye_offset()
+	var to := (nearest.position
+		+ Vector3(0, BodySize.height(nearest.body_size) * 0.55, 0) - eye).normalized()
 	me.look_yaw = atan2(-to.x, -to.z)
 	me.look_pitch = asin(clampf(to.y, -1.0, 1.0))

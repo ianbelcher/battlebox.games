@@ -1035,10 +1035,19 @@ func tick_giants(delta: float) -> void:
 func _giants_say(when: String, id: String) -> void:
 	var size: float = world.bodies.size_of(id)
 	var hp := int(world.player_state.get(id, {}).get("hp", 0))
-	print("GIANTSTEST %s: %s size=%.2f body=%.1fx%.1f hearts=%d/%d reach=%.1f"
+	# WHERE A SHOT WOULD LEAVE FROM, as well as the body it leaves. This
+	# is here because the one size bug that reached a person playing the
+	# game was exactly this number: the muzzle stayed at a person's eye
+	# line while the eye went thirteen blocks up, so a giant fired from
+	# its own ankle. A body measurement that does not include the muzzle
+	# would have said everything was fine.
+	var muzzle: Array = Weapons.shot_ray(Vector3(0, BodySize.eye(size), 0),
+		Vector3(0, 0, -1), true, 0, size)
+	print("GIANTSTEST %s: %s size=%.2f body=%.1fx%.1f hearts=%d/%d reach=%.1f eye=%.1f muzzle=%.1f"
 		% [when, id, size, BodySize.half_width(size) * 2.0, BodySize.height(size),
 			hp, world.max_hp(id),
-			BodySize.melee_reach(world.SWORD_REACH, size)])
+			BodySize.melee_reach(world.SWORD_REACH, size),
+			BodySize.eye(size), (muzzle[0] as Vector3).y])
 
 ## WORLD_TAG_TEST=1: swing a hand and check that being tagged moves who is
 ## It, moves nobody an inch, and takes nobody's hearts.

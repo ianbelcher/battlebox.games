@@ -161,16 +161,21 @@ static func spec(id: int) -> Dictionary:
 ## fixed the long-range miss and made both of those worse, because it
 ## steepened the chord. There is no offset to correct now, so there is
 ## nothing left to get wrong.
-static func shot_ray(eye: Vector3, dir: Vector3, fp: bool, kind: int) -> Array:
+## EVERY OFFSET HERE IS IN BODIES, NOT IN BLOCKS. `size` scales the lot,
+## because all of them describe where a gun sits on a person — clear of
+## the face, off the hip, a third of a block to the side — and on an
+## eight-times giant a third of a block is somewhere inside its own chin.
+static func shot_ray(eye: Vector3, dir: Vector3, fp: bool, kind: int,
+		size := BodySize.PERSON) -> Array:
 	if fp or kind == 17:
 		# Started just clear of the face so it cannot collide with the
-		# shooter on its first step.
-		return [eye + dir * 0.45, dir]
+		# shooter on its first step. A bigger face needs more clearance.
+		return [eye + dir * (0.45 * size), dir]
 	# Third person has no crosshair — aim follows the body — so the shot
 	# can come off the hip where it looks like it should.
 	var side := dir.cross(Vector3.UP)
 	side = side.normalized() if side.length() > 0.01 else Vector3.ZERO
-	return [eye + Vector3(0, -0.34, 0) + side * 0.3 + dir * 0.3, dir]
+	return [eye + (Vector3(0, -0.34, 0) + side * 0.3 + dir * 0.3) * size, dir]
 
 ## HOW LONG THE SHOT IS DRAWN OFF ITS TRUE PATH, in seconds — about ten
 ## frames — and how far to the side and below it starts.
@@ -189,7 +194,7 @@ const MUZZLE_DROP := 0.30
 ## Here on Weapons rather than on OrbView so tests can load it: a script
 ## that references autoloads cannot be loaded by a `--script` test run,
 ## and a test that cannot reach what it is checking passes vacuously.
-static func muzzle_lead(vel: Vector3, age: float) -> Vector3:
+static func muzzle_lead(vel: Vector3, age: float, size := BodySize.PERSON) -> Vector3:
 	var lead := 1.0 - age / MUZZLE_LEAD
 	if lead <= 0.0:
 		return Vector3.ZERO
@@ -198,4 +203,6 @@ static func muzzle_lead(vel: Vector3, age: float) -> Vector3:
 	side = side.normalized() if side.length() > 0.01 else Vector3.RIGHT
 	# Eased, so it slides back onto the line rather than snapping.
 	lead = lead * lead
-	return (side * MUZZLE_SIDE + Vector3(0, -MUZZLE_DROP, 0)) * lead
+	# Scaled by the shooter: the offset is "where the gun is on the body",
+	# so on a giant it is a giant's arm's length down and to the right.
+	return (side * MUZZLE_SIDE + Vector3(0, -MUZZLE_DROP, 0)) * lead * size

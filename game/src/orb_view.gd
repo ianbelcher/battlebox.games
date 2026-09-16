@@ -23,8 +23,18 @@ func shoot_local(player: Player, kind: int) -> void:
 		dir = player.look_dir()
 	else:
 		dir = player.heading.normalized()
-	var eye: Vector3 = player.position + Vector3(0, Player.EYE_HEIGHT, 0)
-	var ray := Weapons.shot_ray(eye, dir, player.fp_mode, kind)
+	# THE EYE, AND THIS BODY'S EYE. It was Player.EYE_HEIGHT — the fixed
+	# 1.62 of a person — so an eight-times giant, whose eye is thirteen
+	# blocks up, fired from somewhere around its big toe: the crosshair
+	# said one thing and the shot left from another, which in first person
+	# is the whole contract broken.
+	#
+	# eye_offset() rather than BodySize.eye() because it is what the
+	# CAMERA uses (SplitScreen._process). In first person the shot is the
+	# sight line, so it has to start at the same point the picture is
+	# taken from, down to the step-settle lag.
+	var eye: Vector3 = player.position + player.eye_offset()
+	var ray := Weapons.shot_ray(eye, dir, player.fp_mode, kind, player.body_size)
 	var origin: Vector3 = ray[0]
 	dir = ray[1]
 	_add_orb(player.player_id, origin, dir, true, player.slot, kind)
@@ -37,6 +47,16 @@ func shoot_local(player: Player, kind: int) -> void:
 		Sfx.play("thoomp", -2.0)
 	else:
 		Sfx.play("whoosh", -3.0, 1.1)
+
+## How big whoever fired this is. Read once, at spawn, rather than every
+## frame: an orb outlives the moment it was fired in, and a shot should
+## keep the muzzle offset it left with even if its shooter has since
+## grown, been knocked down or left the game.
+func _size_of(shooter_id: String) -> float:
+	var world: Node = get_parent()
+	if world == null or world.bodies == null:
+		return BodySize.PERSON
+	return world.bodies.size_of(shooter_id)
 
 func _add_orb(shooter_id: String, origin: Vector3, dir: Vector3, mine: bool, slot: int, kind: int) -> void:
 	var node := MeshInstance3D.new()
@@ -59,6 +79,9 @@ func _add_orb(shooter_id: String, origin: Vector3, dir: Vector3, mine: bool, slo
 		dir = (dir * 0.35 + Vector3.UP).normalized()
 	_orbs.append({"node": node, "vel": dir.normalized() * speed,
 		"shooter_id": shooter_id, "age": 0.0, "mine": mine, "slot": slot,
+		# How big whoever fired it is, so the cosmetic muzzle offset is
+		# an arm's length on THAT body rather than always a person's.
+		"size": _size_of(shooter_id),
 		"kind": kind, "start": origin, "next_whoosh": 0.0,
 		# WHERE THE SHOT REALLY IS. The node is drawn a little to the
 		# bottom-right of it for the first few frames so it appears to
@@ -86,7 +109,8 @@ func _physics_process(delta: float) -> void:
 		orb.age += delta
 		var node: Node3D = orb.node
 		orb.pos = (orb.pos as Vector3) + orb.vel * delta
-		node.position = orb.pos + Weapons.muzzle_lead(orb.vel, float(orb.age))
+		node.position = orb.pos + Weapons.muzzle_lead(orb.vel, float(orb.age),
+			float(orb.get("size", BodySize.PERSON)))
 		if orb.kind == 2:
 			# The hook whooshes while it flies and fizzles when it has gone
 			# too far — you always know whether it's still going or gave up.

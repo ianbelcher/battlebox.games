@@ -1267,7 +1267,8 @@ func _threat_goal(id: String, bot: Dictionary, pos: Vector3, hp: int) -> Vector3
 	# "Armed" means carrying something that shoots. A melee weapon — the
 	# sword, or Tag's hand — is what you have when you have nothing.
 	var armed := not (int(bot.get("weapon", 13)) in Player.MELEE_WEAPONS)
-	var seen := world.clear_shot(pos + Vector3(0, 1.4, 0), at + Vector3(0, 1.0, 0))
+	var seen := world.clear_shot(pos + Vector3(0, _eye_up(id), 0),
+		at + Vector3(0, 1.0, 0))
 	var action := BotThreat.respond(age, hp, pos.distance_to(at), armed, seen,
 		float(bot.get("nerve", 0.6)))
 	bot.threat_act = action
@@ -1892,13 +1893,26 @@ const BOT_MIN_SHOT_GAP := 0.15
 
 const BOT_ROOKIE_SLACK := 1.7
 
-## Seconds a bot waits between shots with the gun it is currently holding.
+## WHERE A COMPUTER PLAYER'S GUN IS, and where it aims on somebody else.
+## Both in blocks above the feet, and both scale with whose body it is:
+## the position on the wire is the FEET, so on a giant a flat 1.4 is an
+## ankle at one end and a shin at the other.
+func _eye_up(id: String) -> float:
+	return 1.4 * maxf(world.bodies.size_of(id), 1.0)
+
+## Aimed at the middle of the target rather than at a fixed metre off the
+## ground — a body is a box, and the middle of it is the part hardest to
+## miss at any size.
+func _aim_up(id: String) -> float:
+	return BodySize.height(world.bodies.size_of(id)) * 0.55
+
 ## How far a computer player can reach with a swing. 2.6 for a person,
 ## and proportional for anything bigger — a giant bot that had to get
 ## within two blocks of you would be a giant standing inside your face.
 func _melee_range(id: String) -> float:
 	return 2.6 * maxf(world.bodies.size_of(id), 1.0)
 
+## Seconds a bot waits between shots with the gun it is currently holding.
 func _bot_shot_delay(bot: Dictionary) -> float:
 	var weapon_cd := float(Weapons.spec(int(bot.get("weapon", 13))).get("cooldown", 1.0))
 	var slack := lerpf(BOT_ROOKIE_SLACK, 1.0, float(bot.get("skill", 0.5)))
@@ -2850,13 +2864,16 @@ func _tick_bots(frame_delta: float) -> void:
 					var where: Vector3 = world.player_state.get(whom, {}).get(
 						"pos", Vector3.INF)
 					if where != Vector3.INF and pos.distance_to(where) < reach \
-							and world.clear_shot(pos + Vector3(0, 1.4, 0),
-								where + Vector3(0, 1.0, 0)):
+							and world.clear_shot(pos + Vector3(0, _eye_up(id), 0),
+								where + Vector3(0, _aim_up(whom), 0)):
 						enemy = whom
 			if enemy != "":
 				var epos: Vector3 = world.player_state[enemy].pos
-				var muzzle := pos + Vector3(0, 1.4, 0)
-				var aim := epos + Vector3(0, 1.0, 0)
+				# BOTH ENDS FOLLOW THE BODY. A giant bot used to shoot from
+				# its ankle, and everybody used to aim at a giant's shin —
+				# which mostly hit the ground in front of it.
+				var muzzle := pos + Vector3(0, _eye_up(id), 0)
+				var aim := epos + Vector3(0, _aim_up(enemy), 0)
 				# Only take the shot if there's something to shoot at —
 				# firing into a wall is just noise.
 				if not (int(bot.weapon) in Player.MELEE_WEAPONS) \

@@ -3065,7 +3065,9 @@ func _refresh_tints(player: Player) -> void:
 	if _chip != null:
 		_chip.visible = not _menu.visible and _treasure_label.text != ""
 	if _water_tint != null and world != null and world.chunks != null:
-		var eye := player.position + Vector3(0, Player.EYE_HEIGHT, 0)
+		# This body's eye: a giant's head is in the air where a person's
+		# would be under, so the blue-over-the-screen has to follow it.
+		var eye := player.position + player.eye_offset()
 		var under: bool = Blocks.is_liquid(world.chunks.get_block(
 			Vector3i(floori(eye.x), floori(eye.y), floori(eye.z))))
 		_water_tint.color.a = lerpf(_water_tint.color.a, 0.35 if under else 0.0, 0.25)
