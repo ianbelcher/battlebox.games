@@ -425,7 +425,7 @@ func remove(id: String) -> void:
 	world.player_state.erase(id)
 	world.match_alive.erase(id)
 	world.downed_ids.erase(id)
-	world.hearts.erase(id)
+	world.bodies.hearts.erase(id)
 	Game.roster.erase(id)
 
 ## The first phonetic name nobody is using. Taking the FIRST free one
@@ -1264,7 +1264,9 @@ func _threat_goal(id: String, bot: Dictionary, pos: Vector3, hp: int) -> Vector3
 	var at: Vector3 = bot.get("threat_at", Vector3.INF)
 	if at == Vector3.INF:
 		return Vector3.INF
-	var armed := int(bot.get("weapon", 13)) != 13
+	# "Armed" means carrying something that shoots. A melee weapon — the
+	# sword, or Tag's hand — is what you have when you have nothing.
+	var armed := not (int(bot.get("weapon", 13)) in Player.MELEE_WEAPONS)
 	var seen := world.clear_shot(pos + Vector3(0, 1.4, 0), at + Vector3(0, 1.0, 0))
 	var action := BotThreat.respond(age, hp, pos.distance_to(at), armed, seen,
 		float(bot.get("nerve", 0.6)))
@@ -1429,7 +1431,7 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 			if rescue != Vector3.INF and _may_leave_post(id, rescue):
 				return rescue
 		# Loot when unarmed.
-		if int(bot.weapon) == 13:
+		if int(bot.weapon) in Player.MELEE_WEAPONS:
 			var best_crate := Vector3.INF
 			var best_d := 70.0
 			for crate: Dictionary in world.crates_by_id.values():
@@ -1470,7 +1472,7 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 			return Vector3(bot.get("saw_at", pos))
 		if enemy != "" and randf() < 0.35 + nerve * 0.65:
 			var epos: Vector3 = world.player_state[enemy].pos
-			var standoff := 1.2 if int(bot.weapon) == 13 \
+			var standoff := 1.2 if int(bot.weapon) in Player.MELEE_WEAPONS \
 				else randf_range(9.0, 14.0) * lerpf(1.35, 0.8, nerve)
 			var jitter := lerpf(7.0, 1.5, nerve)
 			return epos + (pos - epos).normalized() * standoff \
@@ -1891,6 +1893,12 @@ const BOT_MIN_SHOT_GAP := 0.15
 const BOT_ROOKIE_SLACK := 1.7
 
 ## Seconds a bot waits between shots with the gun it is currently holding.
+## How far a computer player can reach with a swing. 2.6 for a person,
+## and proportional for anything bigger — a giant bot that had to get
+## within two blocks of you would be a giant standing inside your face.
+func _melee_range(id: String) -> float:
+	return 2.6 * maxf(world.bodies.size_of(id), 1.0)
+
 func _bot_shot_delay(bot: Dictionary) -> float:
 	var weapon_cd := float(Weapons.spec(int(bot.get("weapon", 13))).get("cooldown", 1.0))
 	var slack := lerpf(BOT_ROOKIE_SLACK, 1.0, float(bot.get("skill", 0.5)))
@@ -2851,7 +2859,8 @@ func _tick_bots(frame_delta: float) -> void:
 				var aim := epos + Vector3(0, 1.0, 0)
 				# Only take the shot if there's something to shoot at —
 				# firing into a wall is just noise.
-				if int(bot.weapon) != 13 and world.clear_shot(muzzle, aim):
+				if not (int(bot.weapon) in Player.MELEE_WEAPONS) \
+						and world.clear_shot(muzzle, aim):
 					# The gun's rhythm, not a flat number. Jitter keeps it
 					# from sounding like a metronome.
 					bot.shoot_cd = _bot_shot_delay(bot) * randf_range(0.88, 1.14)
@@ -2877,11 +2886,17 @@ func _tick_bots(frame_delta: float) -> void:
 						print("BOTORB fired at %s, %.1f blocks away"
 							% [enemy, pos.distance_to(epos)])
 					spawn_orb(id, muzzle, dir, int(bot.weapon))
-				elif int(bot.weapon) == 13 and pos.distance_to(epos) < 2.6:
-					# Sword range: close enough to actually swing at you.
+				elif int(bot.weapon) in Player.MELEE_WEAPONS \
+						and pos.distance_to(epos) < _melee_range(id):
+					# Swinging range: close enough to actually reach you.
 					bot.shoot_cd = _bot_shot_delay(bot) * 0.7
 					world.cl_pos.rpc(id, pos, bot.yaw, 9)
-					world.match_hurt(enemy, 1, pos, id)
+					# THROUGH THE MODE, exactly as a person's swing goes.
+					# This used to call match_hurt directly, which was the
+					# same thing while every melee weapon meant "you are
+					# out" — and would have left the computer players
+					# knocking people over in a game of tag.
+					world.bodies.melee_hit(id, enemy, pos)
 		_lap("bots_look")
 		# A KEEPER WITH NOTHING TO SHOOT AT BUILDS. Only while it is
 		# actually minding its own flag, actually in the round, and there

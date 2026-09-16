@@ -27,8 +27,14 @@ func update_crates(payload: Array) -> void:
 		box.material_override = mat
 		box.position = Vector3(0, 0.5, 0)
 		node.add_child(box)
-		var color: Color = Weapons.spec(weapon).color
-		var gem := ItemFactory.build("weapon", weapon)
+		var color: Color = GROWTH_COLOR if weapon < 0 \
+			else Weapons.spec(weapon).color
+		# A GROWTH CRATE HAS NO WEAPON IN IT, so it cannot show one. It
+		# shows what it does instead: three boxes stacked, each bigger
+		# than the last, which is the only thing on the field that means
+		# "this makes you bigger" without a word of text on it.
+		var gem := _growth_mark() if weapon < 0 \
+			else ItemFactory.build("weapon", weapon)
 		gem.scale = Vector3(1.6, 1.6, 1.6)
 		gem.position = Vector3(0, 1.25, 0)
 		node.add_child(gem)
@@ -73,3 +79,27 @@ func _process(delta: float) -> void:
 		var node: Node3D = entry.node
 		node.rotation.y += delta * 1.2
 		node.get_child(1).position.y = 1.25 + sin(t * 2.0) * 0.12
+
+## THE GROWTH CRATE'S MARK, in Giants' colour: three cubes going up, each
+## half again the one below. Built rather than modelled because it is
+## three boxes and a modelled asset would be three boxes with a download.
+const GROWTH_COLOR := Color("ffb347")
+
+func _growth_mark() -> Node3D:
+	var root := Node3D.new()
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = GROWTH_COLOR
+	mat.emission_enabled = true
+	mat.emission = GROWTH_COLOR
+	mat.emission_energy_multiplier = 0.8
+	var y := 0.0
+	for step: float in [0.16, 0.24, 0.36]:
+		var box := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(step, step, step)
+		box.mesh = mesh
+		box.material_override = mat
+		box.position = Vector3(0, y + step * 0.5, 0)
+		y += step
+		root.add_child(box)
+	return root

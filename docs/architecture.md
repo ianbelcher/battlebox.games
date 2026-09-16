@@ -127,6 +127,7 @@ back-reference, none declaring an RPC:
 | `World/Critters` | `critter_director.gd` | Where animals live and where they wander |
 | `World/Survival` | `survival_director.gd` | Grump raids and supply crates |
 | `World/Probes` | `world_probes.gd` | The `WORLD_*_TEST` dev hooks |
+| `World/Bodies` | `body_director.gd` | How big each player is, how fast, which side they are on, their hearts, and what a swing at one means. The one director that runs on both sides |
 | `World/Fx` | `world_fx.gd` | Client-side bangs and sparkles |
 
 A handful of files carry no state at all and exist purely so the awkward
@@ -178,9 +179,12 @@ The platform asks the mode at fixed points and does what it is told:
 | The seam | What the mode is asked |
 | --- | --- |
 | The front page (`game_setup.gd`) | its key, label and note; which settings it uses (`has_clock`, `has_target`, `picks_teams`, …) |
-| The lobby and the drop (`MatchDirector`) | `deal_teams`, `team_names`, `on_round_start`, `round_seconds`, `kit`, `max_hp` |
+| The lobby and the drop (`MatchDirector`) | `deal_teams`, `team_names`, `on_round_start`, `round_seconds`, `kit`, `max_hp`, `start_size`, `speed_scale` |
 | Every battle tick | `tick(world, delta, seconds_left)` — the mode's own machinery — then `on_time_up` and `winner` |
-| A knockout | `on_knockout`: the revive ladder, or convert, or respawn |
+| A knockout | `on_knockout`: the revive ladder, or convert, or respawn — and **who did it** |
+| A swing at somebody (`BodyDirector`) | `on_melee`: knock them out, tag them, or nothing |
+| The picker, `sv_edit`, the crates | `loadout`: which weapons, blocks and kits this game has in it at all |
+| A crate opened (`SurvivalDirector`) | `on_crate_taken` — a weapon, or one of the other loot kinds |
 | A flag touched (`CtfDirector`) | `on_flag_taken`: a point and a flag that comes back, or a side out |
 | Hearts growing back | `regen_ms` |
 | A late joiner | `joiner_team` |
@@ -193,8 +197,49 @@ closing-circle picture every client draws (`storm_radius`,
 `storm_center`, `cl_storm`), crumbling ground (`terrain.crumble_ring`),
 the flag machinery (bases, poles, carrying, touching, tagging in,
 `send_flag_away`, `knock_out_team`), a line across every screen
-(`cl_fanfare`), standing a player up again (`battle.stand_again`), the
-blocks. The full list is at the bottom of `game_mode.gd`.
+(`cl_fanfare`), standing a player up again (`battle.stand_again`), how
+big somebody is and how fast (`bodies.set_size`, `bodies.set_speed`), which
+side they are on where they stand (`bodies.set_team`), the blocks. The full
+list is at the bottom of `game_mode.gd`.
+
+### Size, speed and what a game is played with
+
+Three of those primitives arrived together, and the reasoning is worth
+keeping because it is what makes them primitives rather than one game's
+mechanic wearing a general name.
+
+**A player's size is a float on the body, not a constant in `player.gd`.**
+`body_size.gd` is what a size MEANS — the collision box, the eye, the hit
+box, how far you reach, how tall a step you take, how high you jump — in
+one place, because seven systems have to agree about it and the one that
+gets forgotten is always hit detection. It touches no node and no
+autoload, so `tests/unit/body_size_test.gd` can ask it anything. At 1.0
+every number in it is the number that used to be hard-coded, so the five
+games that existed before sizes play exactly as they did.
+
+**Size and speed are separate knobs, deliberately.** Giants wants size
+*without* speed — at eight times the size a person's pace reads as
+lumbering, which is the point of being a giant and is the hole a small
+player plays through. Tag wants both at once: whoever is It is twice the
+size *and* twice as fast, or a chase is not a chase. One knob could not
+have served both, and deriving speed from size would have put an
+`if mode == "tag"` back into the platform.
+
+**A loadout says what a game is played WITH** — weapons, blocks, kits,
+what you start holding, what a crate may contain (`loadout.gd`). An empty
+list means everything, so every mode written before it says nothing and
+gets everything, as it always did. It is enforced in three places and has
+to be all three: the picker (you cannot choose it), `sv_edit` (a tampered
+client cannot place it) and the crates (it cannot be found). The picker
+alone would be a suggestion; the server alone would be a child clicking a
+block that silently never appears.
+
+Two games use all three and pull in opposite directions on every one,
+which is the only real test of whether a seam is a seam: **Giants** grows
+you for a knockout or a Growth Crate, scales your hearts with it and
+leaves your speed alone; **Tag** has one fixed size for whoever is It,
+doubles their speed, has exactly one weapon — a hand — and no crates at
+all, and turns a melee hit into a change of sides rather than a knockout.
 
 **To add a game:** one file extending `GameMode` with the hooks it has
 an opinion about, one line in `GameModes.ALL`, its key in `lobby.py`'s
@@ -222,6 +267,7 @@ the game:
 | `blocks.gd` | A new block — colour, whether it glows, whether it can be dug |
 | `structures.gd` | A new stampable prefab |
 | `weapons.gd` | A new weapon — cooldown, speed, blast |
+| `modes/*.gd` | A new game — and `loadout()` says what it is played with |
 | `avatar_factory.gd` | Character parts (and the mix-and-match rules) |
 
 If you are writing a `match` over a kind, look for the table first.

@@ -835,7 +835,7 @@ func _add_player_row(grid: GridContainer, id: String, team_count: int,
 	# THE COUNT LIVES ON THE BUTTON, not in a local: a GDScript lambda
 	# captures by value at creation, so a local `current` was eight on
 	# every press, every press computed four, and the button was stuck.
-	hearts_btn.set_meta("hearts", int(world.hearts_max.get(id, WorldNode.MATCH_HP))
+	hearts_btn.set_meta("hearts", int(world.bodies.hearts_max.get(id, WorldNode.MATCH_HP))
 		if world != null else int(WorldNode.MATCH_HP))
 	hearts_btn.text = "♥ %d" % int(hearts_btn.get_meta("hearts"))
 	hearts_btn.tooltip_text = "How many hearts %s starts a round with" % str(entry.name)

@@ -23,7 +23,10 @@ const WALL_CLIMB_SPEED := 1.0
 ## the top, and the mantle has to actually clear what the probe measured.
 ## A lift shorter than this cannot finish a climb by construction,
 ## whatever else is right.
-const STEP_UP_PROBE := 1.05
+## Scaled by the body: a shrunk player who could not hop a kerb is a
+## child stuck in their own hole, and a giant that could not stride
+## over a fence is not a giant. See BodySize.step_up.
+const STEP_UP_PROBE := BodySize.BASE_STEP_UP
 ## A STEP IS TAKEN IN STRIDE, BUT NOT IN AN INSTANT. The body is on top
 ## of the block the moment it steps up — that is what keeps the run a
 ## run — and the PICTURE of it catches up over about a seventh of a
@@ -65,7 +68,7 @@ var _step_settle := 0.0            ## how far the picture still lags below the b
 ## tests/unit/climb_rule_test.gd checks the two numbers against
 ## STEP_UP_PROBE, so a future edit that makes the lift too small again
 ## fails a test rather than shipping.
-const CLIMB_TOP_LIFT := 4.2       ## blocks per second, held
+const CLIMB_TOP_LIFT := BodySize.BASE_CLIMB_LIFT   ## blocks per second, held
 const CLIMB_TOP_SECONDS := 0.34   ## 4.2 x 0.34 = 1.43 blocks, against 1.05 needed
 
 ## Seconds of mantle left. Deliberately NOT re-armed while it runs: one
@@ -88,7 +91,7 @@ var _climbing := false
 ## the energy for that same height, at any ceiling.
 const BOUNCE_GAIN_BLOCKS := 1.0
 const BOUNCE_CEILING_BLOCKS := 40.0
-const JUMP_VELOCITY := 8.6
+const JUMP_VELOCITY := BodySize.BASE_JUMP
 ## RUNNING IS THE DEFAULT, and there is nothing to hold down for it.
 ##
 ## There was a sprint, and it did nothing: `is_sprint_pressed()` returns
@@ -100,11 +103,11 @@ const JUMP_VELOCITY := 8.6
 ## 5.6 is Minecraft's sprint, up from 4.6, which was its walk. Sneak
 ## (Shift, or the left stick pressed in) still halves it, and halving a
 ## run is a more useful quiet walk than halving a walk was.
-const RUN_SPEED := 5.6
+const RUN_SPEED := BodySize.BASE_RUN
 ## Kept in proportion with the run rather than left where it was. Water
 ## is already the slow part of the map; making the land faster and not
 ## the water would have widened that on its own.
-const SWIM_SPEED := 3.6
+const SWIM_SPEED := BodySize.BASE_SWIM
 
 ## How fast you fly once you are OUT of the round.
 ##
@@ -193,13 +196,82 @@ func begin_knockout_rise() -> void:
 	_climbing = false
 	_top_out = 0.0
 	_lift_to = INF
-const HALF_WIDTH := 0.4
-const HEIGHT := 1.8   # Minecraft's exact player height
+## THE BODY OF A PLAYER OF SIZE 1.0. The numbers live in body_size.gd
+## now, because seven systems have to agree about what a size means and
+## one of them is hit detection; these stay as names so that everything
+## which read Player.HALF_WIDTH still can. What this player actually
+## measures is `body_size` and the BodySize call for it — never these.
+const HALF_WIDTH := BodySize.BASE_HALF_WIDTH
+const HEIGHT := BodySize.BASE_HEIGHT
 const SEND_HZ := 12.0
 const EDIT_REPEAT := 0.24
 ## Eye level for first person — near the top of the head, so blocks read
 ## about waist height like they should.
-const EYE_HEIGHT := 1.62  # Minecraft's exact eye line
+const EYE_HEIGHT := BodySize.BASE_EYE
+
+## HOW BIG THIS ONE IS, and how fast. 1.0 apiece is a person at a
+## person's pace, which is every player in every game that existed before
+## modes could say otherwise.
+##
+## The server owns both: a mode calls world.bodies.set_size(), and it
+## arrives here through cl_size. Nothing on this side ever decides to
+## grow — a client that could would be a client that could cheat by
+## becoming small enough to be unhittable.
+var body_size := BodySize.PERSON
+var speed_scale := 1.0
+
+## The pack characters are built a shade larger than life; that is a
+## property of the model, not of anybody's size, so it multiplies rather
+## than competing with it.
+const AVATAR_SCALE := 1.15
+
+## BECOME THIS BIG. Called on every client from WorldNode.cl_size, and on
+## the server by the mode through world.bodies.set_size().
+##
+## Everything that has to move when a body changes size moves HERE, in
+## one function, because the failure when it does not is silent: the
+## avatar grows, the collision box does not, and a giant wades through
+## walls looking perfectly normal.
+func set_body_size(size: float) -> void:
+	size = BodySize.clamped(size)
+	if is_equal_approx(size, body_size):
+		return
+	var grew := size > body_size
+	body_size = size
+	if _avatar != null:
+		_avatar.scale = Vector3.ONE * AVATAR_SCALE * body_size
+	if _tag != null:
+		_tag.position = Vector3(0, BodySize.tag_height(body_size), 0)
+	if _name_tag != null:
+		_name_tag.position = Vector3(0, BodySize.tag_height(body_size), 0)
+	if _glow != null:
+		_glow.position = Vector3(0, GLOW_HEIGHT * body_size, 0)
+		# The lantern reaches as far as the person carrying it is big,
+		# or a giant walks around inside its own shadow.
+		_glow.omni_range = GLOW_RANGE * maxf(body_size, 1.0)
+	# The item in hand is scaled at build time, so it has to be rebuilt.
+	_hand_sig = ""
+	_refresh_hand()
+	# GROWING INTO THE CEILING. The head goes up, so only growth can bury
+	# you, and _local_move's own "a block appeared where I am standing"
+	# rule then eases you out at five blocks a second. Giving it a shove
+	# here means the very first frame at the new size is already clear
+	# instead of spending a quarter of a second inside the rock.
+	if grew and is_local and world != null and _spawned:
+		var lifted := 0
+		while lifted < MAX_GROWTH_LIFT and _collides(position):
+			position.y += 1.0
+			lifted += 1
+
+## How far up a body a carried lantern hangs, and how far it reaches, at
+## size 1.0.
+const GLOW_HEIGHT := 1.6
+const GLOW_RANGE := 7.0
+## The most blocks a growth spurt will shove you up through to find air.
+## Bounded because an unbounded loop inside solid rock is a hung frame,
+## and a giant that grew inside a mountain is better left to the ordinary
+## "pop upward" rule than spun on forever.
+const MAX_GROWTH_LIFT := 24
 ## Default camera yaw; the split-screen rig updates camera_yaw as the view
 ## spins so "stick up" always moves away from the camera.
 const ISO_ROT := PI / 4.0
@@ -362,7 +434,7 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 	_avatar = AvatarFactory.build_character(entry.get("style", {}))
 	if _avatar == null:
 		_avatar = AvatarFactory.build_character({})
-	_avatar.scale = Vector3(1.15, 1.15, 1.15)
+	_avatar.scale = Vector3.ONE * AVATAR_SCALE * body_size
 	add_child(_avatar)
 	_name = str(entry.name)
 	_human = not bool(entry.get("bot", false))
@@ -375,7 +447,7 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 	_tag.modulate = Color.WHITE
 	_tag.outline_modulate = Color(0.05, 0.05, 0.1, 0.9)
 	_tag.outline_size = 14
-	_tag.position = Vector3(0, 2.1, 0)
+	_tag.position = Vector3(0, BodySize.tag_height(body_size), 0)
 	add_child(_tag)
 	_name_tag = Label3D.new()
 	_name_tag.text = _name if _human else ""
@@ -386,7 +458,7 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 	_name_tag.modulate = Color.WHITE
 	_name_tag.outline_modulate = Color(0.05, 0.05, 0.1, 0.9)
 	_name_tag.outline_size = 12
-	_name_tag.position = Vector3(0, NAME_ALONE_HEIGHT, 0)
+	_name_tag.position = Vector3(0, NAME_ALONE_HEIGHT * body_size, 0)
 	add_child(_name_tag)
 	# Drawn by nobody until a seat's camera has actually seen this body
 	# (SplitScreen._update_overhead_sight). NOT `visible = false` for your
@@ -404,10 +476,10 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 	if _human:
 		_glow = OmniLight3D.new()
 		_glow.light_energy = 0.3
-		_glow.omni_range = 7.0
+		_glow.omni_range = GLOW_RANGE
 		_glow.light_color = Color(1.0, 0.9, 0.7)
 		_glow.shadow_enabled = false
-		_glow.position = Vector3(0, 1.6, 0)
+		_glow.position = Vector3(0, GLOW_HEIGHT, 0)
 		add_child(_glow)
 	if is_local:
 		_highlight = MeshInstance3D.new()
@@ -435,8 +507,28 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 const NAME_ALONE_HEIGHT := 2.05
 const NAME_OVER_HEARTS: Array[float] = [2.05, 2.42, 2.6]
 
+## HOW MANY HEARTS TO DRAW for a player who has `hp` out of `top`, on a
+## display that has room for HEART_CELLS of them.
+##
+## Eight cells always, filled in proportion. A mode that gives a player
+## more hearts than there are cells — Giants gives a giant eight times
+## the usual — is drawn as the same row draining more slowly, rather than
+## as a wall of tiny hearts or as a full bar until the moment of death.
+##
+## Ceiling, not rounding: any hearts left at all show at least one, so
+## nobody is ever drawn as dead while they are still standing.
+const HEART_CELLS := 8
+
+static func hearts_shown(hp: int, top: int) -> int:
+	if top <= 0:
+		return 0
+	hp = clampi(hp, 0, top)
+	if top <= HEART_CELLS:
+		return hp
+	return int(ceilf(float(hp) * float(HEART_CELLS) / float(top)))
+
 func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
-		friendly := false) -> void:
+		friendly := false, top := HEART_CELLS) -> void:
 	if _tag == null:
 		return
 	var rows := 0
@@ -453,9 +545,19 @@ func refresh_overhead(hp: int, team_color: Color, downed_now: bool,
 		# never draws your tag at all, see set_overhead_layers.)
 		_tag.text = ""
 	else:
-		hp = clampi(hp, 0, 8)
-		var top_row := "".rpad(mini(hp, 4), "♥")
-		var bottom_row := "".rpad(maxi(hp - 4, 0), "♥")
+		# ALWAYS EIGHT HEARTS AT MOST, however many this player really
+		# has. A giant with sixty-four of them gets the same two rows,
+		# each heart simply standing for eight — so growing reads as
+		# "my hearts go down slower", which is the whole of what a
+		# five-year-old needs to understand about it, with no number to
+		# read and nothing new on the screen.
+		#
+		# It also fixes a real one waiting to happen: this used to be
+		# rpad(hp - 4), which for a sixty-four-heart giant would have
+		# printed SIXTY hearts across the sky in a single row.
+		var shown := hearts_shown(hp, top)
+		var top_row := "".rpad(mini(shown, 4), "♥")
+		var bottom_row := "".rpad(maxi(shown - 4, 0), "♥")
 		_tag.text = top_row if bottom_row.is_empty() else top_row + "\n" + bottom_row
 		rows = 1 if bottom_row.is_empty() else 2
 	_tag.modulate = Color(team_color.darkened(0.12), 0.9)
@@ -557,8 +659,11 @@ func refresh_from_roster(entry: Dictionary) -> void:
 	var style: Dictionary = AvatarFactory.normalize_style(entry.get("style"))
 	if str(_avatar.get_meta("style", "")) != str(style):
 		var old := _avatar
+		# The REBUILT avatar has to come back at this body's size, not at
+		# the base one: changing your character mid-round would otherwise
+		# shrink a giant back to a person until it next grew.
 		_avatar = AvatarFactory.build_character(style)
-		_avatar.scale = Vector3(1.15, 1.15, 1.15)
+		_avatar.scale = Vector3.ONE * AVATAR_SCALE * body_size
 		_avatar.rotation = old.rotation
 		add_child(_avatar)
 		old.queue_free()
@@ -625,7 +730,7 @@ func teleport(pos: Vector3) -> void:
 ## Where the eye is, in the body's frame: the eye line, less however far
 ## the picture still lags below the body after a step.
 func eye_offset() -> Vector3:
-	return Vector3(0, EYE_HEIGHT + _step_settle, 0)
+	return Vector3(0, BodySize.eye(body_size) + _step_settle, 0)
 
 func remote_update(pos: Vector3, yaw: float, p_anim: int) -> void:
 	_remote_target = pos
@@ -677,11 +782,13 @@ func _refresh_hand() -> void:
 	if item.kind == "empty":
 		return
 	_hand_item = ItemFactory.build(str(item.kind), int(item.id))
-	# Inside the scaled rig: cancel the rig's scale so the item is the size
-	# it would be in the world, then sit it at the hand.
+	# Inside the scaled rig: cancel the rig's scale so the item comes out
+	# the size it would be in the world — TIMES this body's, so a giant
+	# swings a giant sword rather than waving a toothpick, and the reach
+	# it gets in BodySize.melee_reach is the reach you can see.
 	var rig_scale := maxf(arm.get_parent_node_3d().global_basis.get_scale().y, 0.01) \
 		/ maxf(scale.y, 0.01)
-	_hand_item.scale = Vector3.ONE * (1.0 / maxf(rig_scale, 0.01))
+	_hand_item.scale = Vector3.ONE * (body_size / maxf(rig_scale, 0.01))
 	_hand_item.position = Vector3(0, -1.1, 0.2)
 	arm.add_child(_hand_item)
 	for node in _hand_item.find_children("*", "VisualInstance3D", true, false):
@@ -789,13 +896,19 @@ func _solid_at(pos: Vector3) -> bool:
 	return Blocks.is_solid(_chunks().get_block(Vector3i(floori(pos.x), floori(pos.y), floori(pos.z))))
 
 ## Any solid block overlapping the AABB at a candidate position?
+##
+## The box is THIS player's, not a person's: an eight-times giant sweeps
+## a volume of about 6 x 14 x 6 blocks and a shrunk player one a fraction
+## of that. Position is the FEET, so the box grows upward and the ground
+## never comes up through it.
 func _collides(at: Vector3) -> bool:
-	var min_x := floori(at.x - HALF_WIDTH)
-	var max_x := floori(at.x + HALF_WIDTH)
+	var hw := BodySize.half_width(body_size)
+	var min_x := floori(at.x - hw)
+	var max_x := floori(at.x + hw)
 	var min_y := floori(at.y)
-	var max_y := floori(at.y + HEIGHT)
-	var min_z := floori(at.z - HALF_WIDTH)
-	var max_z := floori(at.z + HALF_WIDTH)
+	var max_y := floori(at.y + BodySize.height(body_size))
+	var min_z := floori(at.z - hw)
+	var max_z := floori(at.z + hw)
 	for y in range(min_y, max_y + 1):
 		for z in range(min_z, max_z + 1):
 			for x in range(min_x, max_x + 1):
@@ -880,7 +993,12 @@ func _local_move(delta: float) -> void:
 		capture_lock = maxf(0.0, capture_lock - delta)
 	if _fly_grace > 0.0:
 		_fly_grace = maxf(0.0, _fly_grace - delta)
-	var speed := SWIM_SPEED if in_water else RUN_SPEED
+	# Size does not decide this; the mode does, through speed_scale. A
+	# giant runs at a person's pace (which at eight times the size
+	# reads as lumbering, and is meant to), while whoever is "it" in
+	# Tag is twice the size AND twice as quick.
+	var speed := BodySize.swim(speed_scale) if in_water \
+		else BodySize.run(speed_scale)
 	if input.is_sprint_pressed() and on_floor and not downed:
 		speed *= 1.55
 	elif input.is_sneak_pressed() and on_floor and not downed:
@@ -999,7 +1117,7 @@ func _local_move(delta: float) -> void:
 	else:
 		velocity.y -= GRAVITY * delta
 		if jump_now and on_floor:
-			velocity.y = JUMP_VELOCITY
+			velocity.y = BodySize.jump(body_size)
 
 	# Axis-separated sweep against the voxel grid.
 	var next := position
@@ -1069,10 +1187,13 @@ func _local_move(delta: float) -> void:
 	# and swimming into a bank hops you out of the water.
 	var pushing := dir.length_squared() > 0.01
 	var room_up := false
-	var up_attempt := next + owed + Vector3(0, STEP_UP_PROBE, 0)
+	# A STEP IS AS TALL AS THE BODY TAKING IT. There is already a `step`
+	# in the sweep above, hence the name.
+	var step_up := BodySize.step_up(body_size)
+	var up_attempt := next + owed + Vector3(0, step_up, 0)
 	if blocked_h and pushing:
 		room_up = not _collides(up_attempt) \
-			and not _collides(next + Vector3(0, STEP_UP_PROBE, 0))
+			and not _collides(next + Vector3(0, step_up, 0))
 	match ClimbRule.decide(blocked_h, pushing, room_up, on_floor, in_water,
 			_climbing, downed, fly_mode):
 		ClimbRule.STEP_UP:
@@ -1125,7 +1246,7 @@ func _local_move(delta: float) -> void:
 			_top_out = 0.0
 		else:
 			_top_out = maxf(0.0, _top_out - delta)
-			velocity.y = maxf(velocity.y, CLIMB_TOP_LIFT)
+			velocity.y = maxf(velocity.y, BodySize.climb_lift(body_size))
 			on_floor = false
 			anim = Anim.FLY
 	var vertical := velocity.y * delta
@@ -1325,9 +1446,12 @@ func _local_actions(delta: float) -> void:
 		if item.kind == "weapon":
 			if int(item.id) == 11:
 				return  # Wings work by holding them, not clicking
-			if int(item.id) == 13:
+			# THE THINGS YOU SWING rather than fire. Both go down the
+			# same path and the server asks the mode what landing one
+			# means — a sword takes you out, a hand makes you "it".
+			if int(item.id) in MELEE_WEAPONS:
 				_sword_swing()
-				_edit_cooldown = 0.4
+				_edit_cooldown = float(Weapons.spec(int(item.id)).cooldown)
 				return
 			world.orbs.shoot_local(self, int(item.id))
 			_edit_cooldown = float(Weapons.spec(int(item.id)).cooldown)
@@ -1347,6 +1471,11 @@ func _local_actions(delta: float) -> void:
 				_edit_cooldown = EDIT_REPEAT
 
 ## Sword: a close swing that bonks enemies and chops soft blocks.
+##
+## The Hand swings the same way. What either of them DOES to the person
+## on the other end is the mode's answer, on the server — see
+## GameMode.on_melee — so there is nothing here that knows the difference.
+const MELEE_WEAPONS: Array[int] = [Weapons.SWORD, Weapons.HAND]
 var swing_time := 0.0
 
 func _sword_swing() -> void:
@@ -1367,8 +1496,13 @@ func _sword_swing() -> void:
 			# is the only thing holding that in check; the arc opens from
 			# a 60-degree cone to a full 180 because a lethal swing that
 			# misses somebody standing beside you is just frustrating.
-			if to_other.length() < WorldNode.SWORD_REACH \
-					and (flat_to.length() < 1.2 or flat_to.normalized().dot(face) > 0.0):
+			# A GIANT'S ARM IS A GIANT'S ARM. The reach is proportional, so
+			# an eight-times giant swats from twenty-four blocks — which
+			# is the right answer, is what the eye expects from something
+			# that size, and is exactly the sword it can be seen holding.
+			if to_other.length() < BodySize.melee_reach(WorldNode.SWORD_REACH, body_size) \
+					and (flat_to.length() < 1.2 * body_size \
+						or flat_to.normalized().dot(face) > 0.0):
 				world.sv_sword_hit.rpc_id(1, slot, child.player_id, child.position)
 				hit_someone = true
 	var monster: int = world.monster_view.nearest_to(position + heading * 2.0, 2.2)
@@ -1426,10 +1560,12 @@ func _has_solid_neighbor(cell: Vector3i) -> bool:
 	return false
 
 func _cell_overlaps_self(cell: Vector3i) -> bool:
+	var half_h := BodySize.height(body_size) * 0.5
+	var hw := BodySize.half_width(body_size)
 	var center := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
-	var delta := center - (position + Vector3(0, HEIGHT * 0.5, 0))
-	return absf(delta.x) < HALF_WIDTH + 0.5 and absf(delta.z) < HALF_WIDTH + 0.5 \
-		and delta.y > -HEIGHT * 0.5 - 0.5 and delta.y < HEIGHT * 0.5 + 0.5
+	var delta := center - (position + Vector3(0, half_h, 0))
+	return absf(delta.x) < hw + 0.5 and absf(delta.z) < hw + 0.5 \
+		and delta.y > -half_h - 0.5 and delta.y < half_h + 0.5
 
 func _find_dig_target() -> Vector3i:
 	var chunks := _chunks()
@@ -1455,11 +1591,10 @@ func _find_place_target() -> Vector3i:
 	for cell: Vector3i in candidates:
 		var block := chunks.get_block(cell)
 		if block == Blocks.AIR or Blocks.is_cross(block) or Blocks.is_liquid(block):
-			# Never place a block inside yourself.
-			var center := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
-			var delta := center - (position + Vector3(0, HEIGHT * 0.5, 0))
-			if absf(delta.x) < HALF_WIDTH + 0.5 and absf(delta.z) < HALF_WIDTH + 0.5 \
-					and delta.y > -HEIGHT * 0.5 - 0.5 and delta.y < HEIGHT * 0.5 + 0.5:
+			# Never place a block inside yourself. One test, and it is the
+			# one above — a giant walling itself in is the same mistake as
+			# a person doing it, only much easier to make.
+			if _cell_overlaps_self(cell):
 				continue
 			if not _has_solid_neighbor(cell):
 				continue

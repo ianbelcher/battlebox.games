@@ -130,8 +130,28 @@ func on_time_up(_world: Node) -> void:
 ##   "rules"    the revive ladder decides, as it always has
 ##   "convert"  they change sides and stand up again over there
 ##   "respawn"  they stand up again where their side starts
-func on_knockout(_world: Node, _id: String) -> String:
+##
+## `attacker` is who put them there, or "" for the storm, the tide, a
+## fall, or anything else with nobody behind it. The match director has
+## always known it and used to throw it away here; Giants is the reason
+## it now arrives, because "the one who knocked you out grows" cannot be
+## written without it.
+func on_knockout(_world: Node, _id: String, _attacker: String) -> String:
 	return "rules"
+
+## SOMEBODY GOT HIT IN MELEE — the sword, or anything else swung at arm's
+## length. What that MEANS is the mode's:
+##
+##   "kill"   they go down, which is what a sword has always done
+##   "tag"    nothing happens to their hearts; the mode has handled it
+##   "none"   the swing did not land after all
+##
+## Tag is the whole reason this is a seam. Its one weapon is a hand, and
+## a hand that took hearts off somebody would be a sword with a friendlier
+## name; what it actually does is move which player is "it", and that is a
+## sentence only tag_mode.gd can write.
+func on_melee(_world: Node, _attacker: String, _target: String) -> String:
+	return "kill"
 
 ## `id` on side `team` just touched `from_team`'s flag. What that means
 ## is the mode's: a point and a flag that comes back, or a side out of
@@ -150,6 +170,17 @@ func defenders_push(_world: Node) -> bool:
 func winner(_world: Node, _teams_alive: Array) -> int:
 	return CONTINUE
 
+# ---- what the game is played with --------------------------------------
+
+## THE WEAPONS, BLOCKS AND KITS THIS GAME HAS IN IT. See loadout.gd: an
+## empty list means everything, so the default here is every game as it
+## was before loadouts existed.
+##
+## Built fresh each call rather than held, because a mode may well want
+## to answer differently as a round goes on.
+func loadout(_world: Node) -> Loadout:
+	return Loadout.everything()
+
 # ---- per player --------------------------------------------------------
 
 ## The side a player who joins mid-round goes on; `balanced` is the
@@ -157,9 +188,29 @@ func winner(_world: Node, _teams_alive: Array) -> int:
 func joiner_team(_world: Node, _id: String, balanced: int) -> int:
 	return balanced
 
-## What you are holding at the drop.
-func kit(_world: Node, _id: String) -> Array:
-	return Weapons.STARTING_KIT
+## What you are holding at the drop. Defaults to the loadout's, so a mode
+## that states a loadout does not also have to state a kit.
+func kit(world: Node, _id: String) -> Array:
+	return loadout(world).start
+
+## HOW BIG THIS PLAYER IS at the drop, and every time they stand up
+## again. 1.0 is a person. See body_size.gd.
+##
+## A mode that grows or shrinks somebody mid-round does NOT do it here —
+## it calls `world.bodies.set_size(id, size)` when the thing that causes
+## it happens. This is only the answer to "how big do they start".
+func start_size(_world: Node, _id: String) -> float:
+	return BodySize.PERSON
+
+## HOW FAST THIS PLAYER MOVES, as a multiple of a person's pace.
+##
+## SEPARATE FROM SIZE ON PURPOSE, and the two games that use them are
+## exactly why: a giant keeps a person's pace, so being eight times the
+## size reads as lumbering rather than as winning twice over; and
+## whoever is "it" in Tag is twice the size AND twice the speed, which is
+## what makes a chase a chase. One knob could not have served both.
+func speed_scale(_world: Node, _id: String) -> float:
+	return 1.0
 
 ## Hearts, given what the settings say (`base`).
 func max_hp(_world: Node, _id: String, base: int) -> int:
@@ -169,6 +220,16 @@ func max_hp(_world: Node, _id: String, base: int) -> int:
 func regen_ms(_world: Node, _id: String) -> int:
 	return 3000
 
+## SOMEBODY WALKED INTO A SUPPLY CRATE. `loot` is a weapon id, or one of
+## loadout.gd's special kinds (Loadout.GROWTH).
+##
+## A weapon has already gone into their hotbar by the time this is
+## called; anything else has done nothing at all and is entirely the
+## mode's to act on. Returning is not required — this is news, not a
+## decision.
+func on_crate_taken(_world: Node, _id: String, _loot: int) -> void:
+	pass
+
 # ---- THE PRIMITIVES a mode leans on. All on the platform; none of them
 # ---- knows what a mode is.
 #
@@ -176,6 +237,13 @@ func regen_ms(_world: Node, _id: String) -> int:
 #   world.player_state[id]            {pos, hp, ...} on the server
 #   world.match_alive / downed_ids / out_ids
 #   world.max_hp(id), world.send_hearts(id)
+#   world.bodies.set_size(id, size)   how big somebody is, right now: the
+#                                     body, what shots hit, how far they
+#                                     reach, and the picture. See
+#                                     body_size.gd. Clamped, broadcast,
+#                                     and it lifts anybody who has just
+#                                     grown into solid rock
+
 #   world.battle.eliminate(id) / put_out(id) / finish(winner)
 #   world.battle.seconds_left(), world.battle.team_start_spot(team, seat)
 #   world.battle.stand_again(id, switch_sides)   back up where the side starts

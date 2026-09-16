@@ -94,6 +94,8 @@ const KNOWN := {
 	"WORLD_WIN_TEST": "hand out knockouts and end the round for this team",
 	"WORLD_KICK_TEST": "1 kicks a player and checks they are forgotten",
 	"WORLD_SMOKE_TEST": "1 fires a smoke round at the world",
+	"WORLD_GIANTS_TEST": "seconds into the battle to grow somebody, and report size, hit box and hearts",
+	"WORLD_TAG_TEST": "1 tags somebody: did they change sides, stay put, and keep every heart",
 	"WORLD_MENU_TEST": "1 opens the world menu on its own",
 	"WORLD_MENU_TAB": "leave the world menu on this tab",
 	"WORLD_MENU_PROBE": "1 drives the world menu with synthetic input",

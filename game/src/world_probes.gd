@@ -13,6 +13,10 @@ extends Node
 ##   WORLD_WIN_TEST=<team>      hand out knockouts and end the round
 ##   WORLD_KICK_TEST=1          kick a player and check they are forgotten
 ##   WORLD_SMOKE_TEST=1         fire a smoke round at the world
+##   WORLD_GIANTS_TEST=1        grow somebody by a knockout and by a crate,
+##                              and report size, hit box and hearts
+##   WORLD_TAG_TEST=1           tag somebody: did they change sides, stay
+##                              where they were, and keep every heart
 ##   WORLD_BOTWATCH=1           report computer players that stopped moving
 ##   WORLD_SWITCH_TEST=<theme>  pick a different world MID-ROUND and check
 ##                              the ground actually changed under everyone
@@ -942,7 +946,151 @@ func tick_spread(delta: float) -> void:
 		print("SPREAD: t=%.0fs team %d guard=%d nearest_pair=%.1f sides_covered=%d/4"
 			% [_spread_t, team_i, guard.size(), closest, quadrants.size()])
 
+## WORLD_GIANTS_TEST=1: play a knockout and a Growth Crate for real, and
+## report the size, the hit box and the hearts on either side of each.
+##
+## THE POINT IS THE WHOLE CHAIN, not the arithmetic — the ladder itself is
+## already pinned by tests/unit/giants_test.gd with no world running. What
+## can only be asked here is whether a knockout through the real damage
+## path reaches the mode, whether the size that comes back out goes on the
+## wire, and whether the hearts followed it. Every one of those fails
+## silently: a hook that is never called looks exactly like a hook that
+## decided not to do anything.
+var _giants_t := 0.0
+var _giants_step := 0
+
+func tick_giants(delta: float) -> void:
+	var want := OS.get_environment("WORLD_GIANTS_TEST")
+	if not want.is_valid_int() or want.to_int() < 1 or _giants_step > 8:
+		return
+	if world.match_phase != "BATTLE":
+		return
+	# WORLD_GIANTS_TEST=<seconds into the battle>, and 1 means "as soon as
+	# it is running". Under tools/screenshot.sh give it twenty or more:
+	# software rendering takes that long to finish building the world, and
+	# a giant nobody's camera has loaded yet cannot be looked at.
+	_giants_t += delta
+	if _giants_t < maxf(float(want.to_int()), 1.0) + float(_giants_step) * 5.0:
+		return
+	# THE PERSON GROWS, if there is one — a giant nobody's camera is
+	# pointed at cannot be looked at, and looking at it is the point of
+	# running this under tools/screenshot.sh. Not the `bot` flag on the
+	# roster: a headless autotest player carries that too. The real
+	# question is who the SERVER is driving; anyone it is not is somebody
+	# at a keyboard.
+	var ids: Array = Game.roster.keys()
+	ids.sort()
+	var attacker := ""
+	for id: String in ids:
+		if world.match_alive.has(id) and not world.downed_ids.has(id) \
+				and not world.bots.roster.has(id):
+			attacker = id
+			break
+	if attacker.is_empty():
+		for id: String in ids:
+			if world.match_alive.has(id) and not world.downed_ids.has(id):
+				attacker = id
+				break
+	var victim := ""
+	for id: String in ids:
+		if world.match_alive.has(id) and not world.downed_ids.has(id) \
+				and id != attacker and world.teams_differ(attacker, id):
+			victim = id
+			break
+	if attacker.is_empty() or victim.is_empty():
+		return
+	# MEASURED ON THE SPOT, both sides of the one event. Five seconds
+	# either side of it is five seconds of fifteen computer players
+	# fighting each other, and a growth spurt that somebody else caused
+	# would be read as this one having happened twice.
+	match _giants_step:
+		0:
+			_giants_say("before the knockout", attacker)
+			print("GIANTSTEST %s knocks %s down" % [attacker, victim])
+			world.match_hurt(victim, world.MATCH_HP * 16, Vector3.ZERO, attacker)
+			_giants_say("after  the knockout", attacker)
+			_giants_say("the one who went down", victim)
+		1:
+			_giants_say("before the crate", attacker)
+			print("GIANTSTEST %s opens a Growth Crate" % attacker)
+			world.rules.on_crate_taken(world, attacker, Loadout.GROWTH)
+			_giants_say("after  the crate", attacker)
+		2:
+			# THE CAP. Four more crates from wherever the round has got
+			# to; the size must stop at GiantsMode.MAX_SIZE and the
+			# hearts must stop with it.
+			for _extra in 4:
+				world.rules.on_crate_taken(world, attacker, Loadout.GROWTH)
+			_giants_say("after four more", attacker)
+		_:
+			# WHAT BEING A GIANT COSTS, five seconds at a time. A giant is
+			# a very much bigger target and the computer players can see
+			# it; this is the only place the trade the whole mode rests on
+			# can actually be watched happening.
+			_giants_say("still standing", attacker)
+	_giants_step += 1
+
+## One line saying everything that has to move together. A size that grew
+## while the hearts did not is the bug this exists to catch.
+func _giants_say(when: String, id: String) -> void:
+	var size: float = world.bodies.size_of(id)
+	var hp := int(world.player_state.get(id, {}).get("hp", 0))
+	print("GIANTSTEST %s: %s size=%.2f body=%.1fx%.1f hearts=%d/%d reach=%.1f"
+		% [when, id, size, BodySize.half_width(size) * 2.0, BodySize.height(size),
+			hp, world.max_hp(id),
+			BodySize.melee_reach(world.SWORD_REACH, size)])
+
+## WORLD_TAG_TEST=1: swing a hand and check that being tagged moves who is
+## It, moves nobody an inch, and takes nobody's hearts.
+##
+## The last of those is the one worth a probe. "Nobody is knocked out" is
+## a claim about a path that runs on the server, through the same call a
+## sword makes — and a mode that returned the wrong word from on_melee
+## would produce a game of tag in which the person you tag falls over,
+## which nothing else here would notice.
+var _tag_t := 0.0
+var _tag_done := false
+
+func tick_tag(delta: float) -> void:
+	if OS.get_environment("WORLD_TAG_TEST") != "1" or _tag_done:
+		return
+	if world.match_phase != "BATTLE":
+		return
+	_tag_t += delta
+	if _tag_t < 8.0:
+		return
+	_tag_done = true
+	var it := ""
+	var runner := ""
+	for id: String in Game.roster.keys():
+		var team := int(Game.roster[id].get("team", 0))
+		if team == 1 and it.is_empty():
+			it = id
+		elif team == 0 and runner.is_empty():
+			runner = id
+	if it.is_empty() or runner.is_empty():
+		print("TAGTEST no It (%s) or no runner (%s)" % [it, runner]); return
+	var was_at: Vector3 = world.player_state.get(runner, {}).get("pos", Vector3.ZERO)
+	var was_hp := int(world.player_state.get(runner, {}).get("hp", 0))
+	print("TAGTEST before: It=%s size=%.1f | runner=%s size=%.1f hearts=%d"
+		% [it, world.bodies.size_of(it), runner, world.bodies.size_of(runner), was_hp])
+	world.bodies.melee_hit(it, runner, was_at)
+	var now_at: Vector3 = world.player_state.get(runner, {}).get("pos", Vector3.ZERO)
+	var now_hp := int(world.player_state.get(runner, {}).get("hp", 0))
+	print("TAGTEST after:  It=%s size=%.1f | %s size=%.1f hearts=%d team=%d"
+		% [it, world.bodies.size_of(it), runner, world.bodies.size_of(runner), now_hp,
+			int(Game.roster[runner].get("team", -1))])
+	# MOVED is not expected to be exactly zero: the new It has just
+	# doubled in size, and a body that grows is eased up out of whatever
+	# its feet are now inside (BodyDirector._lift_clear). A fraction of a
+	# block is that. Anything like a teleport is the bug.
+	print("TAGTEST moved=%.2f blocks (a lift, not a teleport), hearts lost=%d (want 0), down=%s (want false)"
+		% [was_at.distance_to(now_at), was_hp - now_hp,
+			str(world.downed_ids.has(runner) or world.out_ids.has(runner))])
+
 func tick(delta: float) -> void:
+	tick_giants(delta)
+	tick_tag(delta)
 	tick_ghost(delta)
 	tick_siege(delta)
 	tick_pole(delta)

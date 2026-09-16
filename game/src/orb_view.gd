@@ -173,10 +173,16 @@ func _physics_process(delta: float) -> void:
 				# players on the same spot, one down and one reviving,
 				# could not be shot at all: every orb hit the body on the
 				# floor and died there.
+				# A BOX, THIS BODY'S SIZE — not a fixed 1.1-block ball
+				# around a point 0.8 above the feet, which fits a person
+				# only because a person is nearly as wide as its slack.
+				# At size 1.0 BodySize.hits_body reaches exactly as far
+				# along each axis as that sphere did, so nothing that was
+				# playable before shoots any differently.
 				if child is Player and child.player_id != orb.shooter_id \
 						and not child.downed \
 						and not world.out_ids.has(child.player_id) \
-						and child.position.distance_to(here - Vector3(0, 0.8, 0)) < 1.1:
+						and BodySize.hits_body(child.position, child.body_size, here):
 					if orb.kind == 1 or orb.kind >= 5:
 						world.sv_shot.rpc_id(1, orb.slot, cell, orb.kind)
 					else:

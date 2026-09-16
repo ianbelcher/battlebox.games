@@ -757,7 +757,7 @@ func _build_picker_pages() -> void:
 				_damage_t = 1.8
 				_damage_from = from_pos)
 		world.hearts_changed.connect(func() -> void:
-			var my_hp := int(world.hearts.get(Game.player_id(
+			var my_hp := int(world.bodies.hearts.get(Game.player_id(
 				multiplayer.get_unique_id(), slot), 8))
 			if my_hp < _prev_hp:
 				_damage_t = maxf(_damage_t, 1.2)
@@ -1078,7 +1078,18 @@ func _toggle_menu(player: Player, open_tab: int) -> void:
 		for entry_slot: Dictionary in player.slots:
 			if str(entry_slot.kind) == "weapon":
 				owned.append(int(entry_slot.id))
-	_pickers[0].set_allowed(owned)
+	# WHAT THIS GAME HAS IN IT, on top of what you happen to be carrying.
+	# Two different restrictions and they compose: Tag has exactly one
+	# weapon, and in a battle you may only pick up a weapon you found.
+	# A game that says nothing offers everything, as it always did.
+	var game_loot: Loadout = world.client_rules.loadout(world) if world != null \
+		else Loadout.everything()
+	_pickers[0].set_allowed(_narrow(owned, game_loot.weapons))
+	_pickers[1].set_allowed(game_loot.blocks)
+	if _pickers.size() > 2:
+		_pickers[2].set_allowed(game_loot.blocks)
+	if _pickers.size() > 3:
+		_pickers[3].set_allowed(game_loot.kits)
 	_refresh_preview()
 	player.ui_locked = true
 	# picker.open() flips child visibility, which yanks the TabContainer onto
@@ -2476,16 +2487,30 @@ func _refresh_identity() -> void:
 		WorldNode.TEAM_COLORS[team] if team >= 0 else Color.WHITE)
 	_treasure_label.text = ""
 	var id := Game.player_id(multiplayer.get_unique_id(), slot)
+	# NO HEARTS IN A GAME NOBODY CAN BE KNOCKED OUT OF. The phase clause
+	# used to stand on its own, which was right while every game with a
+	# round in it also had knockouts — Tag does not, and eight hearts that
+	# can never go down are eight things on the screen that mean nothing.
 	var hearts_on: bool = world != null and (world.survival_active \
-		or world.client_rules.has_knockouts() \
-		or world.match_phase in ["SETUP", "BATTLE"])
-	var hp: int = int(world.hearts.get(id, 8)) if world != null else 8
-	var top: int = int(world.hearts_max.get(id, 8)) if world != null else 8
+		or (world.client_rules.has_knockouts() \
+			and (world.match_phase in ["SETUP", "BATTLE"] \
+				or world.match_phase == "LOBBY" or world.match_phase == "END")))
+	var hp: int = int(world.bodies.hearts.get(id, 8)) if world != null else 8
+	var top: int = int(world.bodies.hearts_max.get(id, 8)) if world != null else 8
 	# Only as many hearts as this player HAS: a two-heart game draws two,
 	# not two lit and six dim, which reads as "nearly dead" from the start.
+	#
+	# And never MORE than there are cells. A mode may give somebody more
+	# hearts than the bar has room for — Giants gives a giant eight times
+	# the usual — and the answer is the same eight hearts draining more
+	# slowly rather than sixty-four tiny ones. Nothing says "x8" anywhere:
+	# a child does not need telling that their hearts are going down
+	# slower than they used to, they can see it.
+	var cells := mini(top, _heart_cells.size())
+	var lit := Player.hearts_shown(hp, top)
 	for i in _heart_cells.size():
-		(_heart_cells[i] as Label).modulate.a = 0.0 if not hearts_on or i >= top \
-			else (1.0 if i < hp else 0.18)
+		(_heart_cells[i] as Label).modulate.a = 0.0 if not hearts_on or i >= cells \
+			else (1.0 if i < lit else 0.18)
 
 func _edit_name() -> void:
 	var entry := _entry()
@@ -2929,8 +2954,8 @@ func _refresh_scoreline(player: Player, delta: float) -> void:
 		# alone it sat at full strength the whole time you were out, a red
 		# ring exactly where the MAP is — the one thing somebody who is out
 		# needs to read. The drained colour says the rest.
-		var vg_hp := int(world.hearts.get(_me(), 8))
-		var vg_top := maxi(1, int(world.hearts_max.get(_me(), 8)))
+		var vg_hp := int(world.bodies.hearts.get(_me(), 8))
+		var vg_top := maxi(1, int(world.bodies.hearts_max.get(_me(), 8)))
 		var vg_frac := float(vg_hp) / float(vg_top)
 		var vg_target := clampf((0.62 - vg_frac) / 0.62, 0.0, 0.75) \
 			if world.match_phase == "BATTLE" else 0.0
@@ -3123,3 +3148,23 @@ func _refresh_hotbar_icons(player: Player) -> void:
 				menu_icon.dimmed = not selected
 				menu_icon.queue_redraw()
 				menu_btn.modulate = Color(1, 1, 1, 1.0) if selected else Color(1, 1, 1, 0.6)
+
+## TWO RESTRICTIONS, BOTH OF WHICH APPLY. Either being empty means "no
+## opinion", so the answer is whichever one has an opinion, or the
+## overlap when both do. Written out because `[]` meaning EVERYTHING is
+## exactly the sort of convention that gets an `and` where it wants an
+## `or`.
+static func _narrow(a: Array, b: Array) -> Array:
+	if a.is_empty():
+		return b.duplicate()
+	if b.is_empty():
+		return a.duplicate()
+	var out: Array = []
+	for item in a:
+		if item in b:
+			out.append(item)
+	# Nothing in common is not "anything goes" — it is nothing, and an
+	# empty list would have said the opposite. Loadout.none() is a list
+	# that matches no real id, which is how you say that.
+	return out if not out.is_empty() else Loadout.none()
+

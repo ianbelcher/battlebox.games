@@ -233,6 +233,17 @@ func _let_the_mode_deal() -> void:
 func drop_everyone() -> void:
 	world.match_phase = "SETUP"
 	_timer = 6.0
+	# EVERYBODY BACK TO THE SIZE OF A PERSON, with the rest of last
+	# round's state — a round begins as its mode makes it, not as the
+	# last one left it, or Giants' second round opens with last round's
+	# winner already eight times everybody else.
+	#
+	# BEFORE the drop, not after it. It sat next to the storm-clearing
+	# further down this function, which reads sensibly and is four
+	# hundred lines too late: the drop asks the mode how big everybody
+	# starts and sets it, and this then wiped the answer. Tag dropped
+	# with an It the same size as everybody it was chasing.
+	world.bodies.reset_sizes()
 	world.match_alive.clear()
 	world.downed_ids.clear()
 	revive_progress.clear()
@@ -331,6 +342,13 @@ func drop_everyone() -> void:
 		var drop := world.ctf.home_spot(team_i, seat) if world.rules.has_flags() \
 			else team_start_spot(team_i, seat)
 		world.cl_stand.rpc(id, drop, world.loot_only, world.rules.kit(world, id), true)
+		# How big, and how fast. Both come from the mode and both default
+		# to a person at a person's pace, which is every game that has no
+		# opinion about either. Set AFTER the stand, because growing
+		# somebody and then teleporting them puts a giant wherever a
+		# person would have fitted.
+		world.bodies.set_size(id, world.rules.start_size(world, id))
+		world.bodies.set_speed(id, world.rules.speed_scale(world, id))
 		if world.bots.roster.has(id):
 			world.bots.roster[id].pos = drop
 			# WORLD_BOT_WEAPON=<id>: hand every computer player that weapon
@@ -376,7 +394,7 @@ func drop_everyone() -> void:
 		print("PITTEST: %d bots dropped into %d-block holes" % [world.bots.roster.size(), depth])
 	# Fresh loot everywhere so late matches aren't scavenged dry.
 	world.crates_by_id.clear()
-	var crate_count := world.survival.crate_target()
+	var crate_count := world.survival.crate_target() if world.loadout().has_crates() else 0
 	var placed := 0
 	var attempts := 0
 	while placed < crate_count and attempts < crate_count * 12:
@@ -402,10 +420,10 @@ func drop_everyone() -> void:
 					near_weapon = int(other.weapon)
 			if too_close:
 				continue
-			var pool2 := Weapons.CRATE_POOL
-			var pick: int = pool2[randi() % pool2.size()]
+			var game_loot := world.loadout()
+			var pick: int = game_loot.roll_crate()
 			if pick == near_weapon:
-				pick = pool2[randi() % pool2.size()]
+				pick = game_loot.roll_crate()
 			world.crates_by_id[world.survival._next_crate_id] = {"weapon": pick, "pos": crate_here}
 			world.survival._next_crate_id += 1
 			placed += 1
@@ -465,7 +483,7 @@ func eliminate(id: String, attacker := "") -> void:
 	# THE MODE MAY HAVE OTHER IDEAS than the revive ladder: a zombie
 	# stands straight back up with the horde, a bitten survivor stands
 	# up as one of them.
-	var verdict := world.rules.on_knockout(world, id)
+	var verdict := world.rules.on_knockout(world, id, attacker)
 	if verdict == "convert" or verdict == "respawn":
 		_emit_feed(id, attacker)
 		stand_again(id, verdict == "convert")
@@ -523,6 +541,12 @@ func stand_again(id: String, switch_sides: bool) -> void:
 		world.bots.roster[id].pos = spot
 	world.send_hearts(id)
 	world.cl_stand.rpc(id, spot, world.loot_only, world.rules.kit(world, id), true)
+	# BACK ON YOUR FEET IS BACK TO THE SIZE YOU START AT, unless the mode
+	# says otherwise — it is asked again rather than told to remember,
+	# which is what lets Tag hand the new "it" its size on the same call
+	# that stands anybody up.
+	world.bodies.set_size(id, world.rules.start_size(world, id))
+	world.bodies.set_speed(id, world.rules.speed_scale(world, id))
 	check_win()
 
 ## One feed line per knockout — downs included (that IS the kill as far

@@ -194,6 +194,10 @@ func tick_crates() -> void:
 	# stop at 14 for the whole world, so once the opening loot had been
 	# picked up — and the computer players are quick about it — a big map
 	# was left with almost nothing on it.
+	# A GAME MAY HAVE NO CRATES AT ALL. Tag's loadout says so, and
+	# scattering boxes nobody may open is worse than scattering none.
+	if not world.loadout().has_crates():
+		return
 	if world.crates_by_id.size() < crate_target():
 		var anchor: Vector3 = positions[randi() % positions.size()]
 		var angle := randf() * TAU
@@ -202,8 +206,10 @@ func tick_crates() -> void:
 		var wz := int(anchor.z + sin(angle) * dist)
 		var y := world.store.surface_y(wx, wz)
 		if crate_ground_ok(wx, wz, y):
-			var pool := Weapons.CRATE_POOL
-			world.crates_by_id[_next_crate_id] = {"weapon": pool[randi() % pool.size()],
+			# WHAT IS IN THE BOX IS THE GAME'S TO SAY. A weapon id, or
+			# one of loadout.gd's other kinds — Giants scatters crates
+			# that make you bigger rather than better armed.
+			world.crates_by_id[_next_crate_id] = {"weapon": world.loadout().roll_crate(),
 				"pos": Vector3(wx + 0.5, y + 1.0, wz + 0.5)}
 			_next_crate_id += 1
 			broadcast_crates()
@@ -215,12 +221,20 @@ func tick_crates() -> void:
 			continue
 		var ppos: Vector3 = world.player_state[id].pos
 		for crate_id: int in world.crates_by_id.keys():
-			if ppos.distance_to(world.crates_by_id[crate_id].pos) < 1.6:
-				var weapon: int = world.crates_by_id[crate_id].weapon
+			# A GIANT REACHES A CRATE FROM FURTHER OUT, because the touch
+			# is measured from its feet and its feet are enormous. Without
+			# this an eight-times giant has to stand on a box to open it.
+			var grab := 1.6 * maxf(world.bodies.size_of(id), 1.0)
+			if ppos.distance_to(world.crates_by_id[crate_id].pos) < grab:
+				var loot: int = world.crates_by_id[crate_id].weapon
 				world.crates_by_id.erase(crate_id)
-				world.cl_crate_taken.rpc(id, weapon)
-				if world.bots.roster.has(id):
-					world.bots.roster[id].weapon = weapon
+				world.cl_crate_taken.rpc(id, loot)
+				# Only a real weapon goes in a hand, or in a computer
+				# player's idea of what it is carrying. Everything else is
+				# the mode's business and nobody else's.
+				if loot >= 0 and world.bots.roster.has(id):
+					world.bots.roster[id].weapon = loot
+				world.rules.on_crate_taken(world, id, loot)
 				broadcast_crates()
 				break
 

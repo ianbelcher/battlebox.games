@@ -458,7 +458,19 @@ func _process(delta: float) -> void:
 				cell.zoom_index = clampi(int(cell.zoom_index) - zoom, 0, ZOOM_SIZES.size() - 1)
 			cell.prev_zoom = zoom
 		cell.size = lerpf(cell.size, ZOOM_SIZES[cell.zoom_index], minf(1.0, delta * 5.0))
-		cam.size = cell.size
+		# THE VIEW GROWS WITH THE BODY. This camera is ORTHOGONAL, so
+		# what decides how big your own character looks on screen is
+		# `size`, not how far back the camera sits — pulling it away
+		# would have changed nothing at all.
+		#
+		# Without it an eight-times giant is a wall of its own torso
+		# filling the window, with the game happening somewhere behind
+		# it. Straight proportion, so a giant takes up as much of the
+		# screen as a person does and sees as much further as it can
+		# stride. Never below 1.0: shrinking must not zoom a small
+		# player in until they cannot see what is about to eat them.
+		var view: float = maxf(player.body_size, 1.0)
+		cam.size = cell.size * view
 		player.camera_yaw = cell.yaw
 		player.camera_pitch = float(cell.get("pitch", DEFAULT_PITCH))
 		# Smooth-follow the player from the current orbit direction.
@@ -466,22 +478,41 @@ func _process(delta: float) -> void:
 		if int(cell.get("view_mode", 0)) == 1:
 			# Top-down map view, north up.
 			player.camera_yaw = 0.0
-			cam.look_at_from_position(rig.position + Vector3(0.01, CAM_HEIGHT + 20.0, 0.01),
+			# High enough to clear the top of this body's head, not
+			# scaled — the world is only 80 blocks deep, and eight times
+			# this height is well above the sky.
+			cam.look_at_from_position(rig.position + Vector3(0.01,
+				CAM_HEIGHT + 20.0 + BodySize.height(player.body_size), 0.01),
 				rig.position, Vector3(0, 0, -1))
 			continue
 		var yaw: float = cell.yaw
 		var pitch := float(cell.get("pitch", DEFAULT_PITCH))
 		var orbit_r := sqrt(CAM_DISTANCE * CAM_DISTANCE + CAM_HEIGHT * CAM_HEIGHT)
 		var offset := Vector3(sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)) * orbit_r
-		cam.look_at_from_position(rig.position + offset, rig.position + Vector3(0, 1.0, 0), Vector3.UP)
+		# THE DISTANCE IS NOT SCALED, and it matters that it is not: this
+		# camera is orthogonal, so how far back it sits changes nothing
+		# about how big anything looks. Multiplying the orbit by the body
+		# parked an eight-times giant's camera 224 blocks out — past the
+		# streamed world — and the whole screen went a flat brown.
+		#
+		# Only where it AIMS follows the body: the middle of it, rather
+		# than a fixed metre off the ground, which on a giant is its ankle.
+		cam.look_at_from_position(rig.position + offset,
+			rig.position + Vector3(0, 1.0 * view, 0), Vector3.UP)
 	# Stream more chunks when someone is zoomed way out.
 	if world != null and world.chunks != null:
+		# HOW FAR THE WIDEST VIEW ON THIS SCREEN ACTUALLY REACHES. It had
+		# been measured and then thrown away — the radius was the video
+		# setting alone — which was harmless while every view was the same
+		# size. A giant's is not: its camera is pulled out in proportion
+		# to its body, so it looks out over ground nobody has streamed.
 		var max_size := 0.0
 		for cell: Dictionary in _cells:
 			if cell.cam != null and not cell.get("fp", false):
-				max_size = maxf(max_size, float(cell.size))
-		world.chunks.view_radius = clampi(
-			int(Game.video.get("dist_blocks", 128)) / 16, 3, 13)
+				max_size = maxf(max_size, float(cell.cam.size))
+		world.chunks.view_radius = clampi(maxi(
+			int(Game.video.get("dist_blocks", 128)) / 16,
+			int(max_size / 16.0)), 3, 13)
 	# The mouse belongs to the keyboard player while they're in first person
 	# — but never while the window is being resized (macOS fights it).
 	var want_capture := false

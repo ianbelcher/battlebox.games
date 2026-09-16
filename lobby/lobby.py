@@ -138,7 +138,8 @@ def free_port() -> int:
 # not work.
 # ---------------------------------------------------------------------
 
-MODES = ("creative", "battle", "ctf", "holdout", "king_hill", "meeting")
+MODES = ("creative", "battle", "ctf", "holdout", "king_hill",
+         "giants", "tag", "meeting")
 # The map a mode is given when none was asked for.  The front page always
 # sends a whole object, so this only catches a script or a test — and
 # "meeting" with no map meant a desert island.  A map that WAS asked for

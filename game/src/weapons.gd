@@ -52,6 +52,17 @@ const WEAPONS := [
 		"blurb": "Splats the landscape into random wool colors"},
 	{"id": 10, "name": "Grump Whistle", "color": Color("8a5fd0"), "cooldown": 2.0, "speed": 30.0,
 		"blurb": "Summons a wild Grump right there", "hidden": true},
+	# TAG'S ONLY WEAPON, and a weapon mostly by where it lives: swung at
+	# arm's length like the sword, down the same sv_sword_hit path, and
+	# then the MODE decides that landing one moves who is "it" rather
+	# than taking anybody's hearts (GameMode.on_melee).
+	#
+	# It is in this table rather than special-cased because everything
+	# that draws a held thing, an icon, a cooldown or a hotbar chip reads
+	# this table, and a weapon that is not in it is a weapon that is
+	# invisible in nine places.
+	{"id": 20, "name": "Hand", "color": Color("ffd9a0"), "cooldown": 0.45, "speed": 1.0,
+		"blurb": "Reach out and TAG somebody. Then run"},
 	# Retired, ids left burned so nothing reuses them on the wire:
 	#   5  Bridge Gun    6  Party Popper    7  Whirl Wand
 	# None of them were any use in a game.
@@ -71,6 +82,7 @@ const WEAPONS := [
 ## fight comes to you — so starting unable to shoot back is just a player
 ## standing in a doorway losing.
 const SWORD := 13
+const HAND := 20
 ## The three that do no damage to anybody: paint a block, drop a star over
 ## a spot, hook yourself up somewhere. A mode with no fighting in it still
 ## wants all three — see MeetingMode.kit.

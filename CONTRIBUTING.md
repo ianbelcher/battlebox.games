@@ -37,6 +37,8 @@ python3 -m unittest discover -s lobby -p 'test_*.py'
 python3 tools/integration_test.py
 python3 tools/integration_test.py --mode battle
 python3 tools/integration_test.py --mode ctf
+python3 tools/integration_test.py --mode giants
+python3 tools/integration_test.py --mode tag
 
 # 5. Rooms: created, joined through the proxy, and reaped
 python3 tools/lobby_test.py
@@ -92,6 +94,26 @@ WORLD_SERVER_URL=ws://127.0.0.1:9080/ws tools/screenshot.sh /tmp/shots
 WORLD_SERVER_URL=ws://127.0.0.1:9080/ws WORLD_ROOM=brave-otter \
   WORLD_AUTOTEST=2 tools/screenshot.sh /tmp/shots 60
 ```
+
+A player's SIZE is the other thing that cannot be reasoned about, for
+exactly the reason a menu cannot: everything else stays green while a
+giant walks through walls or a shot passes through one. Both games that
+change size have a probe that plays the real thing and prints what moved:
+
+```sh
+# Grow somebody by a knockout and by a Growth Crate, twenty seconds into
+# the round. Prints size, hit box, hearts and reach either side of each.
+WORLD_MODE=giants WORLD_GIANTS_TEST=20 godot --headless --path game
+
+# Tag somebody: did they change sides, stay where they were standing, and
+# keep every heart?
+WORLD_MODE=tag WORLD_TAG_TEST=1 godot --headless --path game
+```
+
+Both need a client to join before a round will start, so run one against
+them the way the two-terminal loop at the top of this file does — or point
+`tools/screenshot.sh` at them and LOOK at the giant, which is the only way
+to catch a camera that is inside its own character's chest.
 
 The underground cannot be photographed from above, so it has a picture of
 its own — a vertical slice, one pixel a block, and a number saying how

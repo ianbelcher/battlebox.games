@@ -242,6 +242,18 @@ static func build(kind: String, id: int) -> Node3D:
 		14:  # Flare gun: stubby wide-mouth pistol
 			root.add_child(_box(Vector3(0.1, 0.14, 0.1), Color("c94f4f"), Vector3(0, -0.04, 0.1)))
 			root.add_child(_cyl(0.09, 0.11, 0.2, Color("ff8ac2"), Vector3(0, 0.05, -0.06), Vector3(90, 0, 0)))
+		20:  # The Hand: an open palm with four fingers and a thumb, held
+			# out flat to slap with. It has to read as a HAND at arm's
+			# length from a third-person camera, which is why the fingers
+			# are separate boxes with gaps rather than one paddle.
+			root.add_child(_box(Vector3(0.11, 0.05, 0.13), Color("f0c28a"), Vector3(0, 0, 0.02)))
+			for finger in 4:
+				root.add_child(_box(Vector3(0.022, 0.042, 0.10), Color("f7cf9a"),
+					Vector3(-0.039 + float(finger) * 0.026, 0, -0.10)))
+			var thumb := _box(Vector3(0.028, 0.042, 0.07), Color("f7cf9a"),
+				Vector3(0.075, 0, 0.02))
+			thumb.rotation_degrees = Vector3(0, 28.0, 0)
+			root.add_child(thumb)
 		13:  # Sword: tapered blade with a fuller, a swept crossguard and a
 			# wrapped grip. The old one was three flat slabs stacked up.
 			root.add_child(_cyl(0.032, 0.038, 0.22, Color("4a3524"), Vector3(0, 0, 0.12), Vector3(90, 0, 0)))

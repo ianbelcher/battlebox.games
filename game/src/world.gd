@@ -64,6 +64,22 @@ func set_game_mode(mode: String) -> void:
 func roster() -> Dictionary:
 	return Game.roster
 
+## What this game is played with — weapons, blocks, kits, crate loot. The
+## server's answer; the client's copy comes from the same mode file.
+func loadout() -> Loadout:
+	return rules.loadout(self)
+
+## HOW BIG, and HOW FAST. Declared here because every @rpc is; the
+## thinking behind both is in body_director.gd.
+@rpc("authority", "reliable")
+func cl_size(id: String, size: float) -> void:
+	bodies.apply_size(id, size)
+	_refresh_overheads()
+
+@rpc("authority", "reliable")
+func cl_speed(id: String, scale: float) -> void:
+	bodies.apply_speed(id, scale)
+
 func flag_mode() -> bool:
 	return client_rules.has_flags()
 var map_list: Array = []
@@ -115,7 +131,6 @@ var spawn_pos := Vector3i(0, 30, 0)
 var clock := 0.35            # day fraction: 0 midnight, 0.25 dawn, 0.5 noon
 var source := "procedural"
 var treasures: Dictionary = {}   # player id -> int (client mirror)
-var hearts: Dictionary = {}      # player id -> int, during survival
 var survival_active := false
 var survival_wave := 0
 ## Battle royale: IDLE / LOBBY / DROP / BATTLE / END (mirrored on clients).
@@ -146,6 +161,9 @@ var game_mode := "creative"
 ## Kid-tuned battle health: plenty of hearts, and after any hit you're
 ## untouchable for a moment — no more getting deleted in one volley.
 const MATCH_HP := 8
+## The most hearts anybody may have: a mode may hand out more than the
+## settings asked for. Drawn as eight — see Player.hearts_shown.
+const MAX_HP_CEILING := 512
 const MERCY_MS := 2000
 ## Display names for the teams, A..X by default; renameable from the
 ## Players view. Size always equals team_count.
@@ -214,6 +232,9 @@ var critters_sim: CritterDirector = null
 var survival: SurvivalDirector = null
 ## The WORLD_*_TEST dev hooks (server only). See world_probes.gd.
 var probes: WorldProbes = null
+## How big each player is, how fast, which side they are on, and what a
+## swing at one means. Both sides — see _ready. body_director.gd.
+var bodies: BodyDirector = null
 ## Where everyone is, as far as the server is concerned: the one place
 ## that answers "where is this player". Written by sv_pos for humans and
 ## by the bot director for computer players, so nothing downstream has to
@@ -229,6 +250,11 @@ var _downed: Dictionary = {}
 var _known_roster_ids: Dictionary = {}
 
 func _ready() -> void:
+	# BOTH SIDES NEED IT: it is also where an arriving cl_size is put.
+	bodies = BodyDirector.new()
+	bodies.name = "Bodies"
+	bodies.world = self
+	add_child(bodies)
 	if multiplayer.is_server():
 		_server_setup()
 	else:
@@ -406,6 +432,10 @@ func sv_hello() -> void:
 	for crate_id: int in crates_by_id.keys():
 		payload.append([crate_id, crates_by_id[crate_id].weapon, crates_by_id[crate_id].pos])
 	cl_crates.rpc_id(peer, payload)
+	# WHO IS ALREADY BIG — or a Giants round joined halfway through looks
+	# like ordinary players who kill in one hit.
+	for sized: String in bodies.sizes.keys():
+		cl_size.rpc_id(peer, sized, float(bodies.sizes[sized]))
 	# THE ROUND AS IT STANDS. Everything above describes the world; none of
 	# it says whether a game is being played in it, and a round that is
 	# already running is exactly what somebody joining a server that has
@@ -636,7 +666,9 @@ func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 	if not Game.roster.has(id):
 		return
 	var state: Dictionary = player_state.get(id, {})
-	if state.is_empty() or Vector3(pos).distance_to(state.pos) > EDIT_RANGE:
+	# Grows by however much TALLER a body is — see BodySize.edit_reach.
+	if state.is_empty() or Vector3(pos).distance_to(state.pos) \
+			> BodySize.edit_reach(EDIT_RANGE, bodies.size_of(id)):
 		return
 	var current := store.get_block(pos)
 	if block == Blocks.AIR:
@@ -668,7 +700,9 @@ func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 			player_state[id] = state
 			cl_treasures.rpc(id, state.treasures)
 	else:
-		if not (block in Blocks.HOTBAR):
+		# THE GAME'S OWN BLOCKS, and enforced here as well as in the
+		# picker: the picker is only a suggestion to a tampered client.
+		if not loadout().allows_block(block):
 			_refuse_edit(peer, pos)
 			return
 		if current != Blocks.AIR and not Blocks.is_cross(current) \
@@ -964,7 +998,10 @@ func sv_orb_hit(slot: int, target_id: String, hit_pos: Vector3) -> void:
 	if not Game.roster.has(shooter) or not Game.roster.has(target_id):
 		return
 	var target_state: Dictionary = player_state.get(target_id, {})
-	if target_state.is_empty() or Vector3(target_state.pos).distance_to(hit_pos) > 4.0:
+	# Scaled: the position on the wire is the FEET, and a shot to a
+	# giant's head is legitimately a dozen blocks above them.
+	if target_state.is_empty() or Vector3(target_state.pos).distance_to(hit_pos) \
+			> BodySize.hit_tolerance(ORB_HIT_TOLERANCE, bodies.size_of(target_id)):
 		return
 	if match_phase == "BATTLE" and teams_differ(shooter, target_id):
 		var shooter_pos: Vector3 = player_state.get(shooter, {}).get("pos", hit_pos)
@@ -987,14 +1024,16 @@ func sv_sword_hit(slot: int, target_id: String, hit_pos: Vector3) -> void:
 		return
 	# The server checks the reach itself. The client decides WHEN to swing;
 	# it does not get to decide who was close enough to be hit by it.
+	# Proportional to the ATTACKER — a giant's arm is a giant's arm.
 	var attacker_pos: Vector3 = player_state.get(attacker, {}).get("pos", hit_pos)
-	if attacker_pos.distance_to(Vector3(target_state.pos)) > SWORD_REACH + 1.2:
+	var reach := BodySize.melee_reach(SWORD_REACH, bodies.size_of(attacker)) + 1.2
+	if attacker_pos.distance_to(Vector3(target_state.pos)) > reach:
 		return
 	if match_phase != "BATTLE" or not teams_differ(attacker, target_id):
 		cl_bonk.rpc(target_id, hit_pos)
 		return
-	battle.hurt(target_id, MATCH_HP, attacker_pos, attacker)
-	cl_hit_ok.rpc_id(multiplayer.get_remote_sender_id())
+	if bodies.melee_hit(attacker, target_id, attacker_pos):
+		cl_hit_ok.rpc_id(multiplayer.get_remote_sender_id())
 
 ## Digger: carve a 3x3 tunnel 15 blocks along the aim line, at fire time.
 @rpc("any_peer", "reliable")
@@ -1341,7 +1380,7 @@ func forget_player(id: String) -> void:
 	player_state.erase(id)
 	match_alive.erase(id)
 	downed_ids.erase(id)
-	hearts.erase(id)
+	bodies.hearts.erase(id)
 	cl_eliminated.rpc(id)
 
 func drop_bot(id: String) -> void:
@@ -1797,6 +1836,10 @@ func cl_hit_ok() -> void:
 ## HOW FAR A SWORD REACHES, and it is short on purpose: the reward for
 ## landing one is total, so getting there has to be the hard part.
 const SWORD_REACH := 3.0
+## How far from a body a claimed hit may land before the server calls it
+## nonsense, at size 1.0. A sanity bound, not a hit box: the real test is
+## BodySize.hits_body, in orb_view.gd.
+const ORB_HIT_TOLERANCE := 4.0
 
 ## SIX, up from three: at three a round saw dozens of knockouts and no side
 ## ever out, every pick-up done before anybody could stop it. A hit cancels
@@ -2044,7 +2087,7 @@ func cl_revived(id: String) -> void:
 	out_ids.erase(id)
 	alive_ids[id] = true
 	client_downed.erase(id)
-	hearts[id] = int(hearts_max.get(id, MATCH_HP))
+	bodies.hearts[id] = int(bodies.hearts_max.get(id, MATCH_HP))
 	hearts_changed.emit()
 	match_score_changed.emit()
 	for child in players.get_children():
@@ -2182,7 +2225,7 @@ func cl_feed(attacker_name: String, attacker_team: int,
 func cl_eliminated(id: String) -> void:
 	var was_down := client_downed.has(id)
 	client_downed.erase(id)
-	hearts[id] = 0
+	bodies.hearts[id] = 0
 	hearts_changed.emit()
 	out_ids[id] = true
 	alive_ids.erase(id)
@@ -2295,6 +2338,13 @@ func cl_crates(payload: Array) -> void:
 func cl_crate_taken(id: String, weapon: int) -> void:
 	for child in players.get_children():
 		if child is Player and child.player_id == id and child.is_local:
+			# NOT EVERY CRATE HOLDS A WEAPON. Giants' Growth Crates carry
+			# a loot kind from loadout.gd instead; the server has already
+			# handed it to the mode, and all that is left here is the
+			# sound of having picked something up.
+			if weapon < 0:
+				Sfx.play("collect")
+				return
 			# Into the bar by the one shared rule — already carrying one
 			# and nothing happens, so the bar never fills up with three of
 			# the same shooter. The crate is still yours either way;
@@ -2471,6 +2521,10 @@ func _client_sync_players() -> void:
 		player.name = "P_" + id.replace(":", "_")
 		var input_slot: InputSlot = Game.local_inputs.get(entry.slot) if is_local else null
 		player.setup(id, entry, is_local, input_slot, self)
+		# HOW BIG THEY ALREADY ARE: in a round under way, cl_size lands
+		# before this node exists, so a giant would be drawn — and would
+		# collide — person-sized until it next happened to change.
+		player.set_body_size(bodies.size_of(id))
 		players.add_child(player)
 		if is_local and input_slot is BotSlot:
 			var brain := BotBrain.new()
@@ -2679,7 +2733,7 @@ func cl_survival(active: bool, seconds: float, bonked: int) -> void:
 	survival_active = active
 	if active:
 		survival_wave = 1
-		hearts.clear()
+		bodies.hearts.clear()
 		Sfx.play("boom", -8.0)
 	else:
 		survival_ended.emit(seconds, bonked)
@@ -2749,26 +2803,14 @@ func cl_party_fx(pos: Vector3i) -> void:
 
 @rpc("authority", "reliable")
 func cl_hearts(id: String, hp: int, top := MATCH_HP) -> void:
-	hearts[id] = hp
-	hearts_max[id] = top
+	bodies.hearts[id] = hp
+	bodies.hearts_max[id] = top
 	hearts_changed.emit()
 	_refresh_overheads()
 
 ## Push hearts + team color onto every player's overhead tag.
 func _refresh_overheads() -> void:
-	if players == null:
-		return
-	var local_teams: Dictionary = {}
-	for lid in Game.local_player_ids():
-		local_teams[int(Game.roster.get(lid, {}).get("team", -1))] = true
-	for child in players.get_children():
-		if child is Player:
-			var team := int(Game.roster.get(child.player_id, {}).get("team", -1))
-			var team_color: Color = TEAM_COLORS[team] if team >= 0 and \
-				team < TEAM_COLORS.size() else Color(1, 1, 1)
-			child.refresh_overhead(int(hearts.get(child.player_id, 8)),
-				team_color, client_downed.has(child.player_id),
-				team >= 0 and local_teams.has(team))
+	bodies.refresh_overheads()
 
 signal local_hurt(id: String, from_pos: Vector3)
 
@@ -2787,7 +2829,7 @@ func cl_bonk(id: String, monster_pos: Vector3) -> void:
 
 @rpc("authority", "reliable")
 func cl_downed(id: String) -> void:
-	hearts[id] = 0
+	bodies.hearts[id] = 0
 	hearts_changed.emit()
 	for child in players.get_children():
 		if child is Player and child.player_id == id and child.is_local:
@@ -3051,19 +3093,8 @@ var drop_on_knockout := false
 ## front page (GameSetup "enemies"); the client keeps its own copy.
 var map_enemies := true
 var client_map_enemies := true
-## HOW MANY HEARTS A ROUND STARTS YOU WITH: people, computer players, and
-## anyone the world menu has set by hand (id -> hearts). The client's
-## `hearts_max` mirror arrives with every cl_hearts.
-var hearts_people := MATCH_HP
-var hearts_bots := MATCH_HP
-var hearts_override: Dictionary = {}
-var hearts_max: Dictionary = {}
-
 func max_hp(id: String) -> int:
-	var base := hearts_bots if bool(Game.roster.get(id, {}).get("bot", false)) else hearts_people
-	if hearts_override.has(id):
-		base = int(hearts_override[id])
-	return rules.max_hp(self, id, base)
+	return bodies.max_hp(id)
 
 ## The one way hearts reach clients: what the server holds, and the bar
 ## they are out of, so the HUD draws the right number of them.
@@ -3078,7 +3109,7 @@ func send_hearts(id: String) -> void:
 func sv_set_hearts(target_id: String, count: int) -> void:
 	if not multiplayer.is_server() or not Game.roster.has(target_id):
 		return
-	hearts_override[target_id] = clampi(count, 1, MATCH_HP)
+	bodies.hearts_override[target_id] = clampi(count, 1, MAX_HP_CEILING)
 	var state: Dictionary = player_state.get(target_id, {})
 	if not state.is_empty() and match_alive.has(target_id):
 		state.hp = mini(int(state.get("hp", MATCH_HP)), max_hp(target_id))

@@ -81,9 +81,9 @@ static func apply(world: Node) -> void:
 	if EnvConfig.has("WORLD_MAP_ENEMIES"):
 		world.map_enemies = EnvConfig.flag("WORLD_MAP_ENEMIES")
 	if EnvConfig.has("WORLD_HEARTS"):
-		world.hearts_people = clampi(EnvConfig.number("WORLD_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
+		world.bodies.hearts_people = clampi(EnvConfig.number("WORLD_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
 	if EnvConfig.has("WORLD_BOT_HEARTS"):
-		world.hearts_bots = clampi(EnvConfig.number("WORLD_BOT_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
+		world.bodies.hearts_bots = clampi(EnvConfig.number("WORLD_BOT_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
 	# WHO CAN FLY, as one of FlyRule's four answers turned back into the
 	# pair of defaults the world keeps. Two defaults rather than one
 	# because "computers only" and "humans only" cannot be said with a
