@@ -15,10 +15,18 @@ extends GameMode
 ##   while six people are trying to talk is not company, it is noise. See
 ##   wants_bots(), which is the seam this needed on the platform.
 ##
-##   NOBODY IS ARMED. The kit is the sprayer, the flare and the grapple —
-##   marking a spot, pointing at a spot, and getting across a floor plate
-##   quickly. No sword and no shooters: the first thing anybody would do
-##   with a sword in a meeting is the last thing the meeting needed.
+##   NOBODY IS ARMED, and that is a LOADOUT rather than a kit. A kit is
+##   what you start holding and says nothing about what you can pick up,
+##   so a meeting with a starting kit of harmless tools still had supply
+##   crates full of rockets scattered across the floor by the survival
+##   director. The loadout is the whole answer: four things that do no
+##   damage to anybody, and no crates at all.
+##
+##   What is left is a hand, a paint sprayer (which paints one block in
+##   your colour — draw, mark, sign your work, and the nearest thing this
+##   game already has to writing on a wall), a flare to put a star over a
+##   spot, and a grapple, because a floor plate is big and stairs are
+##   boring.
 ##
 ##   IT OPENS ON THE OFFICE. A meeting on a desert island is a perfectly
 ##   good joke and you can still choose it; it is just not what somebody
@@ -43,6 +51,15 @@ func wants_bots() -> bool:
 func suggests_map() -> String:
 	return "office"
 
-## Marking, pointing, and getting about. See the note at the top.
-func kit(_world: Node, _id: String) -> Array:
-	return [Weapons.SPRAYER, Weapons.FLARE, Weapons.GRAPPLE]
+## Marking, pointing and getting about — and nothing that hurts anybody,
+## in the crates either. See the note at the top.
+##
+## Blocks are left alone: every block in the game, because rearranging the
+## office IS the thing to do in a room with nothing to win, and the
+## fit-out is in the picker under its own tab.
+func loadout(_world: Node) -> Loadout:
+	var out := Loadout.new()
+	out.weapons = [Weapons.HAND, Weapons.SPRAYER, Weapons.FLARE, Weapons.GRAPPLE]
+	out.start = [Weapons.HAND, Weapons.SPRAYER, Weapons.GRAPPLE]
+	out.crate_loot = Loadout.none()
+	return out

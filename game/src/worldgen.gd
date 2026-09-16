@@ -1409,9 +1409,11 @@ func _office_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -
 		# The walkway inside the glass, kept clear the whole way round:
 		# the view is the reason to be on a high floor at all.
 		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET)
-		if edge == 2 and posmod(wx, 11) == 4 and posmod(wz, 11) == 4:
+		if edge == 2 and posmod(wx, 7) == 3 and posmod(wz, 7) == 3:
 			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.PLANTER)
-			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.BAMBOO)
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
+				Blocks.OFFICE_PALM if posmod(wx + wz, 3) == 0
+				else Blocks.OFFICE_PLANT)
 		return
 
 	if maxi(absi(wx), absi(wz)) <= OFFICE_CORE_HALF:
@@ -1469,6 +1471,10 @@ func _office_reception(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int
 		if absi(wx) <= 4:
 			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
 				Blocks.with_facing(Blocks.MONITOR, 2))
+		elif absi(wx) >= 6:
+			# Something green at each end of the run, which is the oldest
+			# signal in the language of reception desks.
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.OFFICE_PALM)
 		return
 
 	# The desk, and somebody behind it. It sits across the way in rather
@@ -1497,7 +1503,7 @@ func _office_reception(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int
 	# Big plants in the corners of the room.
 	if absi(absi(wx) - 12) <= 1 and absi(absi(wz) - 12) <= 1:
 		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.PLANTER)
-		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.LEAVES_LIGHT)
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.OFFICE_PALM)
 
 ## A LOT, and what was rolled for it. `sx` and `sz` are how deep the lot
 ## is on each axis — not a constant, because a lot beside a main corridor
@@ -1612,21 +1618,25 @@ func _office_open_plan(data: PackedByteArray, lx: int, lz: int, gx: int, gz: int
 				Blocks.with_facing(Blocks.OFFICE_CHAIR, 2 if along_x else 1))
 		2:
 			data.encode_u16(bidx(lx, seat_y, lz), Blocks.DESK)
+			# A SCREEN FACES THE PERSON IT BELONGS TO — the one in the
+			# band behind it, looking this way.
 			if posmod(down, 3) == 1:
 				data.encode_u16(bidx(lx, seat_y + 1, lz),
-					Blocks.with_facing(Blocks.MONITOR, 2 if along_x else 1))
+					Blocks.with_facing(Blocks.MONITOR, 0 if along_x else 3))
 		3:
 			data.encode_u16(bidx(lx, seat_y, lz), Blocks.DESK)
 			if posmod(down, 3) == 1:
 				data.encode_u16(bidx(lx, seat_y + 1, lz),
-					Blocks.with_facing(Blocks.MONITOR, 0 if along_x else 3))
+					Blocks.with_facing(Blocks.MONITOR, 2 if along_x else 1))
 		4:
 			data.encode_u16(bidx(lx, seat_y, lz),
 				Blocks.with_facing(Blocks.OFFICE_CHAIR, 0 if along_x else 3))
 		0:
-			# The end of a bank is a cabinet or a plant, not more desk.
+			# The end of a bank is storage with something growing on it,
+			# not more desk.
 			if down == 1 or down == run - 2:
 				data.encode_u16(bidx(lx, seat_y, lz), Blocks.CABINET)
+				data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.OFFICE_PLANT)
 
 ## A MEETING ROOM, and the reason the office map wanted glass in the
 ## palette at all: four walls you can see through, so a floor full of them
@@ -1693,54 +1703,93 @@ func _office_meeting(data: PackedByteArray, lx: int, lz: int, gx: int, gz: int,
 	# The far end: a board to write on and a screen beside it.
 	var cx := rw / 2
 	if rz == rd - 2:
+		# Hung on the back wall, so they look back down the room at the
+		# people round the table.
 		if absi(rx - cx) <= 1:
 			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
-				Blocks.with_facing(Blocks.WHITEBOARD, 2))
+				Blocks.with_facing(Blocks.WHITEBOARD, 0))
 		elif absi(rx - cx) == 3:
 			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
-				Blocks.with_facing(Blocks.MONITOR, 2))
-	elif rz == 1 and rx == 1 and hash01(gx, gz, 4102) < 0.5:
+				Blocks.with_facing(Blocks.MONITOR, 0))
+	elif rz == 1 and (rx == 1 or rx == rw - 2):
 		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.PLANTER)
-		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.FERN)
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
+			Blocks.OFFICE_PALM if hash01(gx, gz, 4102) < 0.4 else Blocks.OFFICE_PLANT)
 
-## BREAKOUT: sofas round low tables on a warmer carpet, and no walls. The
-## part of a floor people actually end up talking in.
+## BREAKOUT: couches on a warmer carpet, and no walls. The part of a
+## floor people actually end up talking in, which is the whole reason a
+## meeting map wants one.
+##
+## MOSTLY SOFAS AND NOT TABLES. The first version put a low table in the
+## middle of every cluster with a sofa either side, and it read as a
+## waiting room — rows of identical two-seaters facing off across a slab.
+## Half the clusters have nothing in the middle now, which is what makes
+## the other half look deliberate.
 func _office_breakout(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
 		sx: int, sz: int) -> void:
 	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET_RUST)
 	if ox < 1 or oz < 1 or ox > sx - 2 or oz > sz - 2:
 		return
 	var seat_y := OFFICE_FLOOR_Y + 1
+	# Clusters on a six-block grid inside the lot, each rolled from the
+	# cluster's own corner so neighbours differ.
+	var kx := ox / 6
+	var kz := oz / 6
 	var cx := posmod(ox, 6)
 	var cz := posmod(oz, 6)
-	if cx >= 2 and cx <= 3 and cz >= 2 and cz <= 3:
-		data.encode_u16(bidx(lx, seat_y, lz), Blocks.MEETING_TABLE)
-	elif cx >= 2 and cx <= 3 and cz == 1:
+	var roll := hash01(kx, kz, 4110)
+	# An L of seating round two sides, facing in.
+	if cx >= 1 and cx <= 3 and cz == 1:
 		data.encode_u16(bidx(lx, seat_y, lz), Blocks.with_facing(Blocks.SOFA, 2))
-	elif cx >= 2 and cx <= 3 and cz == 4:
+		return
+	if cx >= 1 and cx <= 3 and cz == 4:
 		data.encode_u16(bidx(lx, seat_y, lz), Blocks.with_facing(Blocks.SOFA, 0))
-	elif cx == 0 and cz == 0:
+		return
+	if roll < 0.45 and cz >= 1 and cz <= 3 and cx == 0:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.with_facing(Blocks.SOFA, 1))
+		return
+	# Only some clusters get something to put a cup on.
+	if roll > 0.55 and cx == 2 and cz >= 2 and cz <= 3:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.MEETING_TABLE)
+		return
+	# And a plant in the gap between clusters, which is where a real one
+	# goes: in the way of nothing, softening the corner of the seating.
+	if cx == 5 and cz == 5:
 		data.encode_u16(bidx(lx, seat_y, lz), Blocks.PLANTER)
-		data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.LEAVES_LIGHT)
+		data.encode_u16(bidx(lx, seat_y + 1, lz),
+			Blocks.OFFICE_PALM if roll < 0.5 else Blocks.OFFICE_PLANT)
 
-## PHONE BOOTHS: little frosted rooms with a shelf and a stool. What an
-## open-plan floor grows when it has nowhere quiet left.
+## PHONE BOOTHS: little rooms with a shelf and a stool, solid but for a
+## frosted door wall so you can tell an occupied one from an empty one.
+## What an open-plan floor grows when it has nowhere quiet left.
+##
+## ONLY WHOLE BOOTHS GET BUILT, and that is the fix for the thing that
+## looked worst on the floor. A booth is five across, a lot is ten or
+## twelve, and the grid was laid straight down the lot from one edge —
+## so every lot ended with a strip of leftover that got walls and a
+## doorway and no room behind them. It read exactly like what it was:
+## somebody had tried to put something there and it had not worked. The
+## leftover is open floor now.
+const OFFICE_BOOTH := 5
+
 func _office_booths(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
 		sx: int, sz: int) -> void:
 	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET_SAGE)
 	if ox < 1 or oz < 1 or ox > sx - 2 or oz > sz - 2:
 		return
-	# Five across on a six grid, so there is a lane between them.
-	var bx := posmod(ox - 1, 6)
-	var bz := posmod(oz - 1, 6)
-	if bx == 5 or bz == 5:
+	var bx := ox - 1
+	var bz := oz - 1
+	# How many whole booths the lot holds on each axis, and nothing past
+	# them.
+	if bx >= ((sx - 2) / OFFICE_BOOTH) * OFFICE_BOOTH \
+			or bz >= ((sz - 2) / OFFICE_BOOTH) * OFFICE_BOOTH:
 		return
-	if bx == 0 or bx == 4 or bz == 0 or bz == 4:
-		if bz == 0 and bx == 2:
+	var ix := posmod(bx, OFFICE_BOOTH)
+	var iz := posmod(bz, OFFICE_BOOTH)
+	if ix == 0 or ix == OFFICE_BOOTH - 1 or iz == 0 or iz == OFFICE_BOOTH - 1:
+		if iz == 0 and ix == 2:
 			return          # the doorway
-		# Solid but for the door wall, which is frosted from waist height
-		# so you can tell an occupied booth from an empty one.
-		if bz == 0:
+		if iz == 0:
 			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.OFFICE_WALL)
 			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 2, OFFICE_CEIL_Y - 1,
 				Blocks.PARTITION_FROST)
@@ -1748,11 +1797,13 @@ func _office_booths(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
 			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
 				Blocks.OFFICE_WALL)
 		return
-	if bx == 2 and bz == 3:
+	# Inside: a shelf against the back wall with a screen on it, and a
+	# stool pulled up facing them.
+	if ix == 2 and iz == OFFICE_BOOTH - 2:
 		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.DESK)
 		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
-			Blocks.with_facing(Blocks.MONITOR, 2))
-	elif bx == 2 and bz == 2:
+			Blocks.with_facing(Blocks.MONITOR, 0))
+	elif ix == 2 and iz == OFFICE_BOOTH - 3:
 		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz),
 			Blocks.with_facing(Blocks.OFFICE_CHAIR, 2))
 
@@ -1766,12 +1817,14 @@ func _office_kitchen(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
 	var seat_y := OFFICE_FLOOR_Y + 1
 	if oz == sz - 2:
 		data.encode_u16(bidx(lx, seat_y, lz), Blocks.CABINET)
+		# Something growing along the run of units. It was a chest, which
+		# read as a crate somebody had left on the worktop.
 		if posmod(ox, 4) == 1:
-			data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.CHEST)
+			data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.OFFICE_PLANT)
 		return
 	if oz == sz - 3 and posmod(ox, 5) == 2:
 		data.encode_u16(bidx(lx, seat_y, lz), Blocks.PLANTER)
-		data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.FERN)
+		data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.OFFICE_PALM)
 		return
 	if oz >= 3 and oz <= 5 and posmod(ox, 6) >= 2 and posmod(ox, 6) <= 3:
 		if oz == 4:

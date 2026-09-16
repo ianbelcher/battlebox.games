@@ -240,7 +240,14 @@ const WHITEBOARD := 289          # ..292
 ## every other map spends on a bedrock cliff. A window you can dig
 ## through is a hole out of the world.
 const CURTAIN_EDGE := 293
-const NEXT_FREE_ID := 294
+## THE PLANTS. Cross blocks, not cubes: the first version stood a block
+## of Bright Leaves on a planter, and a solid green cube on a tub is what
+## it looked like. These draw as crossed cut-out quads that sway, which
+## is what every other plant in the game does and the reason the game has
+## plants that read as plants.
+const OFFICE_PLANT := 294
+const OFFICE_PALM := 295
+const NEXT_FREE_ID := 296
 
 static func shape_of(id: int) -> String:
 	return str(info(id).get("shape", ""))
@@ -265,20 +272,28 @@ static func orient_stairs(id: int, dir: Vector3) -> int:
 static func turn_base(id: int) -> int:
 	return int(info(id).get("turns", -1))
 
-## Which way a turnable block is round, 0..3 in quadrant_of's order.
+## WHICH WAY A TURNABLE BLOCK'S FRONT POINTS, 0..3 in quadrant_of's
+## order. The front is the side that does the thing: a monitor's screen,
+## a chair's seat, a whiteboard's writing surface, a sofa's cushions.
 static func facing_of(id: int) -> int:
 	var base := turn_base(id)
 	return 0 if base < 0 else id - base
 
-## Turn `id` to the facing quadrant `facing`.
+## Turn `id` so its FRONT faces the quadrant `facing`.
+##
+## It used to mean the opposite — the direction you were looking when you
+## put the thing down, with the front coming out behind it — and that is
+## a double negative every caller has to hold in its head. The office
+## generator did not: every chair it sat at a desk had its back to the
+## table and every monitor faced a wall, and the code said `facing 2` at
+## each of them and looked completely reasonable.
 static func with_facing(id: int, facing: int) -> int:
 	var base := turn_base(id)
 	return id if base < 0 else base + posmod(facing, 4)
 
-## THE PLACEMENT RULE, and it is one sentence: whatever you put down ends
-## up LOOKING AT YOU. A monitor's screen, a chair's seat, a whiteboard's
-## writing surface all face back along the heading, so you place a thing
-## while looking at where it goes and then see the front of it.
+## THE PLACEMENT RULE, and it is still one sentence: whatever you put
+## down ends up LOOKING AT YOU. You place a thing while looking at where
+## it goes, so its front is the quadrant OPPOSITE your heading.
 ##
 ## Stairs are the exception and keep their own older rule — they ascend
 ## the way you are facing, which is what everybody already expects of a
@@ -286,7 +301,7 @@ static func with_facing(id: int, facing: int) -> int:
 static func orient(id: int, dir: Vector3) -> int:
 	if shape_of(id) == "stairs":
 		return orient_stairs(id, dir)
-	return with_facing(id, quadrant_of(dir))
+	return with_facing(id, quadrant_of(dir) + 2)
 
 ## The Minecraft-style building set (ids 101+). Grouped in rows of 8 so
 ## the Blocks tab lines up: stone, deep/dark, earthy, wood, nature, shiny.
@@ -600,6 +615,10 @@ static func _office_init() -> void:
 	EXTRA[CURTAIN_EDGE] = {"name": "Window Wall",
 		"color": Color(0.70, 0.84, 0.90, 0.28), "solid": true, "opaque": false,
 		"translucent": true, "unbreakable": true}
+	EXTRA[OFFICE_PLANT] = {"name": "Office Plant", "color": Color("4f8f45"),
+		"cross": true, "sway": 0.35, "hard": 0}
+	EXTRA[OFFICE_PALM] = {"name": "Office Palm", "color": Color("3f7f52"),
+		"cross": true, "sway": 0.5, "hard": 0}
 
 	# --- furniture -------------------------------------------------------
 	# Every one of these is SOLID: collision in this game is whole blocks
@@ -856,6 +875,22 @@ const HOTBAR: Array[int] = [
 	207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220,
 	221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234,
 	235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246,
+	# The office fit-out. It has to be listed here and not only in the
+	# picker: Loadout.allows_block refuses anything that is not in HOTBAR,
+	# and the server checks it on every sv_edit — so a block missing from
+	# this line is one a child can see in the picker, choose, and then
+	# watch silently fail to appear.
+	OFFICE_CARPET, OFFICE_CARPET_BLUE, OFFICE_CARPET_SAGE, OFFICE_CARPET_RUST,
+	OFFICE_VINYL, CEILING_TILE, CEILING_LIGHT,
+	OFFICE_WALL, OFFICE_WALL_TEAL, OFFICE_WALL_CLAY, OFFICE_WALL_SAND,
+	CONCRETE_CORE, OFFICE_OAK,
+	PARTITION_GLASS, PARTITION_FROST, CURTAIN_GLASS, MULLION,
+	DESK, MEETING_TABLE, CABINET, PLANTER,
+	OFFICE_CHAIR, OFFICE_CHAIR + 1, OFFICE_CHAIR + 2, OFFICE_CHAIR + 3,
+	MONITOR, MONITOR + 1, MONITOR + 2, MONITOR + 3,
+	SOFA, SOFA + 1, SOFA + 2, SOFA + 3,
+	WHITEBOARD, WHITEBOARD + 1, WHITEBOARD + 2, WHITEBOARD + 3,
+	OFFICE_PLANT, OFFICE_PALM,
 ]
 
 ## Picker categories (what each tab shows).
@@ -949,7 +984,7 @@ static func picker_category(cat: String) -> Array:
 				OFFICE_WALL_SAND, CONCRETE_CORE, OFFICE_OAK, MULLION, 104,
 				PARTITION_GLASS, PARTITION_FROST, CURTAIN_GLASS, DOOR_IRON,
 				DESK, MEETING_TABLE, OFFICE_CHAIR, SOFA, CABINET, MONITOR,
-				WHITEBOARD, PLANTER, 132, CHEST]
+				WHITEBOARD, PLANTER, OFFICE_PLANT, OFFICE_PALM, 132, CHEST]
 	return out
 
 ## WHAT A TRAP BLOCK SHOULD LOOK LIKE, given what is beside it.

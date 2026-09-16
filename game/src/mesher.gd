@@ -66,6 +66,10 @@ const CROSS_SIZES := {
 	Blocks.FIRE: Vector2(1.0, 1.3),
 	Blocks.FERN: Vector2(0.85, 0.5),
 	Blocks.DEAD_BUSH: Vector2(0.6, 0.5),
+	# A pot plant fills its tub and stands about waist high; the palm is
+	# the one in the corner everybody walks round.
+	Blocks.OFFICE_PLANT: Vector2(0.85, 0.85),
+	Blocks.OFFICE_PALM: Vector2(0.95, 1.35),
 	Blocks.CATTAIL: Vector2(0.35, 1.1),
 	Blocks.DAISY: Vector2(0.45, 0.5),
 	Blocks.BLUEBELL: Vector2(0.4, 0.55),
@@ -610,13 +614,26 @@ static func _turn(bmin: Vector3, bmax: Vector3, facing: int) -> Array:
 	return [bmin, bmax]
 
 ## Every box of a turnable block, put the way round the block is.
+##
+## A FACING IS WHERE THE FRONT POINTS. The canonical boxes below are
+## written with the back at low Z and the front looking down +Z, which is
+## quadrant 2, so landing the front on quadrant `f` is `f - 2` quarter
+## turns.
+##
+## That arithmetic used to live the other way up — a facing was the
+## direction you were LOOKING when you placed the thing, and the front
+## came out opposite it. It reads fine in one sentence and it is a
+## double negative everywhere else: every chair the office generator sat
+## at a desk ended up with its back to the table, and every monitor
+## faced the wall. A generator asking for "this chair faces south" should
+## get a chair facing south.
 static func _turned(block: int, boxes: Array) -> Array:
-	var facing := Blocks.facing_of(block)
-	if facing == 0:
+	var turns := posmod(Blocks.facing_of(block) - 2, 4)
+	if turns == 0:
 		return boxes
 	var out: Array = []
 	for box: Array in boxes:
-		out.append(_turn(box[0], box[1], facing))
+		out.append(_turn(box[0], box[1], turns))
 	return out
 
 func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int,
@@ -695,22 +712,31 @@ func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int
 			# DESK. A worktop the full width of the cell on four legs, so
 			# one is a desk and a row of them is a bench — which is what
 			# an open-plan floor is actually made of.
-			boxes = [[Vector3(0, 0.72, 0), Vector3(1, 0.8, 1)]]
+			#
+			# THE TOP IS AT THE TOP OF THE CELL, and that is not a detail:
+			# anything you stand ON a desk — a monitor, a plant — begins
+			# at the floor of the cell above, so a worktop that stopped at
+			# 0.8 left every screen in the building floating a fifth of a
+			# block in the air.
+			boxes = [[Vector3(0, 0.86, 0), Vector3(1, 1.0, 1)]]
 			for lx: float in [0.06, 0.84]:
 				for lz: float in [0.06, 0.84]:
 					boxes.append([Vector3(lx, 0, lz),
-						Vector3(lx + 0.1, 0.72, lz + 0.1)])
+						Vector3(lx + 0.1, 0.86, lz + 0.1)])
 		15:
 			# MEETING TABLE. Same trick, but on a plinth rather than legs
 			# so a run of them reads as one long boardroom table.
-			boxes = [[Vector3(0, 0.74, 0), Vector3(1, 0.84, 1)],
-				[Vector3(0.28, 0, 0.28), Vector3(0.72, 0.74, 0.72)]]
+			boxes = [[Vector3(0, 0.88, 0), Vector3(1, 1.0, 1)],
+				[Vector3(0.28, 0, 0.28), Vector3(0.72, 0.88, 0.72)]]
 		12:
-			boxes = [[Vector3(0.03, 0, 0.03), Vector3(0.97, 0.86, 0.97)],
-				[Vector3(0, 0.86, 0), Vector3(1, 0.92, 1)]]
+			# Storage, and a surface at cell height to stand a plant on.
+			boxes = [[Vector3(0.03, 0, 0.03), Vector3(0.97, 0.94, 0.97)],
+				[Vector3(0, 0.94, 0), Vector3(1, 1.0, 1)]]
 		16:
-			boxes = [[Vector3(0.16, 0, 0.16), Vector3(0.84, 0.5, 0.84)],
-				[Vector3(0.12, 0.5, 0.12), Vector3(0.88, 0.58, 0.88)]]
+			# A tub the height of the cell, so what grows out of it starts
+			# at the rim rather than hovering over it.
+			boxes = [[Vector3(0.16, 0, 0.16), Vector3(0.84, 0.88, 0.84)],
+				[Vector3(0.12, 0.88, 0.12), Vector3(0.88, 1.0, 0.88)]]
 		10:
 			# The four turnable fittings are written once facing NORTH and
 			# rotated — see _turn. Canonically the BACK of the thing is at
@@ -780,7 +806,8 @@ static func _plant_shape(block: int) -> int:
 			return 2
 		Blocks.FIRE:
 			return 3
-		Blocks.SAPLING, Blocks.BERRY_BUSH, Blocks.DEAD_BUSH:
+		Blocks.SAPLING, Blocks.BERRY_BUSH, Blocks.DEAD_BUSH, \
+				Blocks.OFFICE_PLANT, Blocks.OFFICE_PALM:
 			return 4
 		Blocks.VINE:
 			return 5

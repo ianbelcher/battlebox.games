@@ -72,6 +72,14 @@ static func apply(world: Node) -> void:
 	# the game rather than a count of anybody in particular.
 	Game.player_limit = GameSetup.seats_for(wanted_players(world.DEFAULT_PLAYERS),
 		GameSetup.SOLO if world.solo else world.team_count)
+	# A MODE THAT WANTS NO COMPUTER PLAYERS GETS NONE, however the room
+	# was started. The lobby already clamps this on the way in and the
+	# front page never draws the row — but a room started straight from
+	# the environment, which is the whole development loop and how the
+	# container runs one, goes through neither. The mode's own rule
+	# belongs where the mode is.
+	if not world.rules.wants_bots():
+		Game.player_limit = 0
 	if EnvConfig.has("WORLD_REVIVE"):
 		world.revive_mode = clampi(
 			EnvConfig.number("WORLD_REVIVE", world.revive_mode),
