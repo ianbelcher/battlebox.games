@@ -73,6 +73,24 @@ func picks_teams() -> bool:
 func uses_bot_hearts() -> bool:
 	return has_knockouts()
 
+## DOES THIS MODE WANT COMPUTER PLAYERS AT ALL? Nearly everything does:
+## filling the seats people are not in is what makes a room the size it
+## was made whether one child is in it or six, and it is why the front
+## page asks for a number of players rather than a number of bots.
+##
+## A mode that says no is saying the people present ARE the game — and
+## then the seat count is not a question worth asking, so the front page
+## stops asking it and the lobby forces it to nobody-but-us on the way in.
+func wants_bots() -> bool:
+	return true
+
+## The map the front page moves to when this mode is chosen, or "" to
+## leave whatever was already picked alone. NOT A LOCK — every map stays
+## in the list — but choosing "Meeting" and being handed a desert island
+## is the front page pretending not to know what you just asked for.
+func suggests_map() -> String:
+	return ""
+
 ## The line over the round card.
 func kicker() -> String:
 	return label.to_upper()

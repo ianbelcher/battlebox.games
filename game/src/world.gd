@@ -1800,6 +1800,8 @@ func sv_select_world(map_name: String) -> void:
 func cl_world_sel(map_name: String) -> void:
 	client_world = map_name
 	if not multiplayer.is_server():
+		if chunks != null:
+			chunks.roof_y = SkyRule.roof_y(map_name)
 		map_list_changed.emit()
 
 func _known_map(map_name: String) -> bool:

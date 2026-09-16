@@ -30,6 +30,17 @@ const MIDNIGHT := 0.0
 ## The maps whose clock does not move, and where it is pinned.
 const HELD := {"caverns": MIDNIGHT, "office": MORNING}
 
+## WHERE THIS MAP'S CEILING IS, or -1 for the outdoor ones that have
+## none. Solid blocks at or above it are meshed into their own surface and
+## put on RenderLayers.ROOF, which the orbit camera declines to draw —
+## without that, a map with a roof on it renders as a grey plane with the
+## player somewhere underneath.
+##
+## Here rather than in the mesher because it is a fact about a MAP, and
+## this is already the file that knows which maps are not landscapes.
+static func roof_y(theme: String) -> int:
+	return WorldGen.OFFICE_CEIL_Y if theme == "office" else -1
+
 ## Does this map's clock move at all?
 static func holds_still(theme: String) -> bool:
 	return HELD.has(theme)

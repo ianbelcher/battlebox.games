@@ -45,6 +45,22 @@ var _mesh_queue: Array[Vector2i] = []
 var _queued: Dictionary = {}
 var _flickers: Array = []        # [{light, base}]
 var _materials: Dictionary = {}
+## WHERE THIS WORLD'S CEILING IS, or below zero for the outdoor maps that
+## have none. Solid blocks at or above it are meshed into their own
+## surface and put on RenderLayers.ROOF, which the orbit and map cameras
+## decline to draw — see the note there. Set by the world when it learns
+## which map it is in.
+var roof_y := -1:
+	set(value):
+		if value == roof_y:
+			return
+		roof_y = value
+		# Everything already on screen was split against the OLD line — or
+		# not split at all. A world reset can change which map this is, and
+		# a chunk that arrived before the map did would keep its ceiling in
+		# the surface the orbit camera draws.
+		for cpos: Vector2i in _data.keys():
+			_queue_mesh(cpos)
 var _focus_chunks: Array[Vector2i] = []
 var _focus_positions: Array = []    # Vector3, the raw positions behind _focus_chunks
 var _chunk_lamps: Dictionary = {}   # Vector2i -> Array[{light, pos}], pos in world space
@@ -122,7 +138,7 @@ func _mesh_worker() -> void:
 			continue
 		var t0 := Time.get_ticks_msec()
 		var surfaces: Dictionary = Mesher.new().build(
-			job.data, job.neighbors, job.cpos.x, job.cpos.y)
+			job.data, job.neighbors, job.cpos.x, job.cpos.y, int(job.get("roof", -1)))
 		var build_ms := Time.get_ticks_msec() - t0
 		if build_ms > 500:
 			push_warning("Slow mesh build: %s took %d ms" % [job.cpos, build_ms])
@@ -405,7 +421,7 @@ func _process(_delta: float) -> void:
 		_inflight[cpos] = Time.get_ticks_msec()
 		_mesh_mutex.lock()
 		_mesh_jobs.append({"cpos": cpos, "data": _data[cpos].duplicate(),
-			"neighbors": neighbors, "gen": gen})
+			"neighbors": neighbors, "gen": gen, "roof": roof_y})
 		_mesh_mutex.unlock()
 		_mesh_sem.post()
 		backlog += 1
@@ -458,7 +474,7 @@ func _process(_delta: float) -> void:
 			var n: PackedByteArray = _data.get(spos + off, PackedByteArray())
 			if not n.is_empty():
 				nb[off] = n
-		var sync_surfaces := Mesher.new().build(_data[spos], nb, spos.x, spos.y)
+		var sync_surfaces := Mesher.new().build(_data[spos], nb, spos.x, spos.y, roof_y)
 		_applied_gen[spos] = int(_mesh_gen[spos])
 		_topmaps[spos] = sync_surfaces.get("topmap", PackedByteArray())
 		_apply_surfaces(spos, sync_surfaces)
@@ -497,18 +513,24 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 	add_child(holder)
 	_holders[cpos] = holder
 
-	for key in ["opaque", "plants", "trans"]:
+	for key in Mesher.SURFACES:
 		if not surfaces.has(key):
 			continue
 		var mesh := ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, surfaces[key])
 		var instance := MeshInstance3D.new()
 		instance.mesh = mesh
-		instance.material_override = _materials[key]
+		# The roof is the terrain material like everything solid; only the
+		# layer it is drawn on differs.
+		instance.material_override = _materials["opaque" if key == "roof" else key]
 		if key != "opaque":
 			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if key == "trans":
 			instance.transparency = 0.0
+		if key == "roof":
+			# Its own layer, so the orbit camera can cut it away and the
+			# first-person one cannot. See RenderLayers.ROOF.
+			instance.layers = RenderLayers.ROOF
 		holder.add_child(instance)
 
 	_add_foliage(holder, cpos)

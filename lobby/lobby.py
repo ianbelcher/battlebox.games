@@ -138,7 +138,13 @@ def free_port() -> int:
 # not work.
 # ---------------------------------------------------------------------
 
-MODES = ("creative", "battle", "ctf", "holdout", "king_hill")
+MODES = ("creative", "battle", "ctf", "holdout", "king_hill", "meeting")
+# Modes that fill the seats people are not in with computer players —
+# which is all of them but one. A meeting is the people who joined it, so
+# the front page never asks for a seat count and anything that arrives in
+# that field came from somewhere that had not read the mode. See
+# GameMode.wants_bots, whose twin this is.
+BOTLESS_MODES = ("meeting",)
 MAPS = ("classic", "desert", "isles", "castles", "city", "sky", "space", "caverns",
         "mountain", "office")
 SIZES = (50, 100, 200, 400, 800)
@@ -228,6 +234,12 @@ def clean_settings(raw: object) -> dict:
     out["size"] = _snap(raw, "size", SIZES, DEFAULT_SETTINGS["size"])
     out["players"] = _snap(raw, "players", PLAYER_LIMITS,
                            DEFAULT_SETTINGS["players"])
+    # A mode that wants no computer players gets none, whatever arrived in
+    # the field.  The front page does not even draw that row for such a
+    # mode, so anything in it came from somewhere that had not read the
+    # mode — and this endpoint is a POST anyone can make.
+    if out["mode"] in BOTLESS_MODES:
+        out["players"] = 0
     out["target"] = _snap(raw, "target", TARGETS, DEFAULT_SETTINGS["target"])
     out["teams"] = _snap(raw, "teams", TEAM_COUNTS, DEFAULT_SETTINGS["teams"])
     out["fly"] = (raw.get("fly") if raw.get("fly") in FLY_ANSWERS

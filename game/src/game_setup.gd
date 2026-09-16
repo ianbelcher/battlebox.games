@@ -179,6 +179,12 @@ static func defaults() -> Dictionary:
 ## storm. See DEFAULT_MODE.
 const OPENS_ON := "battle"
 
+## The map the front page should move to when `mode` is chosen, or "" to
+## leave the choice alone. See GameMode.suggests_map.
+static func suggested_map(mode: String) -> String:
+	var wanted := GameModes.by_key(mode).suggests_map()
+	return wanted if _has_key({"map": wanted}, MAPS, "map") else ""
+
 static func opening_choice() -> Dictionary:
 	var out := defaults()
 	out["mode"] = OPENS_ON
@@ -224,6 +230,11 @@ static func uses(field: String, mode: String) -> bool:
 			# Nobody is on a side in creative, and a mode with fixed sides
 			# does not ask.
 			return rules.picks_teams()
+		"players":
+			# A mode that does not want computer players does not have a
+			# seat count worth asking about — the people who join ARE the
+			# game. See GameMode.wants_bots.
+			return rules.wants_bots()
 		"fly":
 			return true
 		_:
@@ -362,6 +373,11 @@ static func clean(raw: Dictionary) -> Dictionary:
 		out["map"] = str(raw["map"])
 	out["size"] = _snap_int(raw, "size", SIZES, DEFAULT_SIZE)
 	out["players"] = _snap_int(raw, "players", PLAYER_LIMITS, DEFAULT_PLAYERS)
+	# A mode that wants no computer players gets none, whatever arrived in
+	# the field — the front page does not even show the row, so anything
+	# in it came from somewhere that had not read the mode.
+	if not GameModes.by_key(str(out["mode"])).wants_bots():
+		out["players"] = 0
 	out["target"] = _snap_int(raw, "target", TARGETS, DEFAULT_TARGET)
 	out["teams"] = _snap_int(raw, "teams", TEAM_COUNTS, DEFAULT_TEAMS)
 	out["fly"] = str(raw.get("fly", "nobody"))

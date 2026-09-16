@@ -52,6 +52,25 @@ static func every_overhead() -> int:
 static func viewmodel_of(slot: int) -> int:
 	return 1 << (10 + slot)
 
+## THE ROOF OF AN INTERIOR, and the reason this file gained a layer.
+##
+## The orbit camera looks down at your character from above and behind.
+## Outdoors there is nothing up there; on a floor of a building there is a
+## ceiling, and the camera sits inside it — so the office map, the first
+## interior this game has had, rendered as a grey plane with the player
+## somewhere underneath it.
+##
+## A layer answers it exactly, because the question is per-CAMERA and not
+## per-object: the same ceiling should be missing from the view you play
+## in and present in the one you look around in. So the orbit and map
+## views strip this layer and get the floor plan from above, the way every
+## isometric game with an interior in it does; first person keeps it and
+## you see the ceiling over your head where it belongs.
+##
+## The mesher still treats those blocks as opaque, so the walls under them
+## keep their culling and their shading: it is a cutaway, not a hole.
+const ROOF := 1 << 14
+
 ## What one seat's first-person camera may draw. `slot` below zero is the
 ## spectator camera, which belongs to nobody: it sees every body, every
 ## overhead tag, and no viewmodel.
@@ -71,4 +90,4 @@ static func camera_mask(slot: int) -> int:
 ## layer, so a seat in third person saw every tag on the map and a row of
 ## hearts over its own head.
 static func orbit_mask(slot: int) -> int:
-	return (camera_mask(-1) & ~OVERHEAD_SPECTATOR) | overhead_of(slot)
+	return (camera_mask(-1) & ~OVERHEAD_SPECTATOR & ~ROOF) | overhead_of(slot)

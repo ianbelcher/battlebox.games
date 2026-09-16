@@ -87,6 +87,9 @@ var _data: PackedByteArray
 var _neighbors: Dictionary  # Vector2i (unit offsets) -> PackedByteArray
 
 ## Per-surface accumulation.
+## The surfaces a chunk is split into. "roof" is only ever filled on a
+## map that has one — see roof_y.
+const SURFACES := ["opaque", "plants", "trans", "roof"]
 var _verts := {}
 var _normals := {}
 var _colors := {}
@@ -97,7 +100,7 @@ var lights: Array = []
 var teleporters: Array = []   # local-space Vector3i of warp stones
 
 func _init() -> void:
-	for key in ["opaque", "plants", "trans"]:
+	for key in SURFACES:
 		_verts[key] = PackedVector3Array()
 		_normals[key] = PackedVector3Array()
 		_colors[key] = PackedColorArray()
@@ -141,7 +144,15 @@ var _lk_solid := PackedByteArray()
 var _surface_cache: Dictionary = {}
 var _axes_cache: Dictionary = {}
 
-func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Dictionary:
+## THE CUTAWAY LINE. Solid cubes at or above this y go into the "roof"
+## surface instead of "opaque", so a camera can decline to draw them —
+## see RenderLayers.ROOF. Below zero (every outdoor map) nothing is split
+## and the roof surface is never made at all.
+var roof_y := -1
+
+func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
+		p_roof_y := -1) -> Dictionary:
+	roof_y = p_roof_y
 	_lk_opaque = Blocks.LK_OPAQUE
 	_lk_solid = Blocks.LK_SOLID
 	_data = data
@@ -168,9 +179,10 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 					if not MODEL_PLANTS.has(block):
 						_add_cross(block, x, y, z, cx, cz)
 					continue
+				var solid_key := "roof" if roof_y >= 0 and y >= roof_y else "opaque"
 				var shape := int(Blocks.LK_SHAPE[block])
 				if shape != 0:
-					_add_shape(block, shape, x, y, z, cx, cz)
+					_add_shape(block, shape, x, y, z, cx, cz, solid_key)
 					continue
 				if Blocks.LK_TRANS[block] == 1:
 					_add_cube(block, x, y, z, cx, cz, "trans")
@@ -204,7 +216,7 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 						_add_shaped(draw, x, y, z, cx, cz, h)
 						shaped = true
 				if not shaped:
-					_add_cube(draw, x, y, z, cx, cz, "opaque")
+					_add_cube(draw, x, y, z, cx, cz, solid_key)
 				if block == Blocks.TELEPORT:
 					teleporters.append(Vector3i(x, y, z))
 				var light := Blocks.LK_LIGHT[block]
@@ -216,7 +228,7 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 						"flicker": block == Blocks.CAMPFIRE or block == Blocks.FIRE,
 					})
 	var result := {}
-	for key in ["opaque", "plants", "trans"]:
+	for key in SURFACES:
 		if _indices[key].is_empty():
 			continue
 		var arrays := []
@@ -607,7 +619,8 @@ static func _turned(block: int, boxes: Array) -> Array:
 		out.append(_turn(box[0], box[1], facing))
 	return out
 
-func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int) -> void:
+func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int,
+		solid_key := "opaque") -> void:
 	var boxes: Array = []
 	match shape:
 		1:
@@ -720,7 +733,7 @@ func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int
 		14:
 			boxes = _turned(block, [
 				[Vector3(0.02, 0.08, 0.06), Vector3(0.98, 0.98, 0.14)]])
-	var key := "trans" if shape == 6 else "opaque"
+	var key := "trans" if shape == 6 else solid_key
 	var color := Blocks.LK_COLOR[block]
 	var jitter := _jitter(x, y, z, cx, cz)
 	var origin := Vector3(x, y, z)

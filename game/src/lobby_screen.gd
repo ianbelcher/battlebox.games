@@ -860,6 +860,12 @@ func _drop_options() -> Array:
 func _pick(field: String, value: Variant) -> void:
 	_wanted[field] = value
 	if field == "mode":
+		# A mode that comes with a map in mind moves you onto it — see
+		# GameMode.suggests_map. Not a lock: the map row is still there
+		# and every map is still in it.
+		var suggested := GameSetup.suggested_map(str(value))
+		if not suggested.is_empty():
+			_wanted["map"] = suggested
 		# Snapped back onto the table, so nothing survives a mode change
 		# that the new mode has no button for. `private` is the screen's
 		# own and is carried across by hand.

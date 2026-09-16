@@ -71,8 +71,14 @@ const WEAPONS := [
 ## fight comes to you — so starting unable to shoot back is just a player
 ## standing in a doorway losing.
 const SWORD := 13
-const STARTING_KIT := [SWORD, 14, 19]       # sword, flare gun, smoke bomb
-const STARTING_KIT_CTF := [0, 13, 14, 19]   # + little shooter, held
+## The three that do no damage to anybody: paint a block, drop a star over
+## a spot, hook yourself up somewhere. A mode with no fighting in it still
+## wants all three — see MeetingMode.kit.
+const SPRAYER := 18
+const FLARE := 14
+const GRAPPLE := 2
+const STARTING_KIT := [SWORD, FLARE, 19]    # sword, flare gun, smoke bomb
+const STARTING_KIT_CTF := [0, SWORD, FLARE, 19]  # + little shooter, held
 
 ## Supply-crate loot, everywhere crates are placed. Rarer weapons show up
 ## less often, by simple repetition.
