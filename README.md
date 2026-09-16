@@ -206,6 +206,12 @@ WORLD_MAP_THEME=office WORLD_MAP_Y=4 WORLD_MAP_SIZE=100 WORLD_MAP_SPAN=8 \
 WORLD_ICON_CATEGORY=building WORLD_ICON_OUT=/tmp/chips.png \
   xvfb-run -a godot --path game --resolution 900x520 \
   --rendering-method gl_compatibility res://tests/block_icons.tscn
+
+# Every weapon in somebody else's hand, in a given pose
+# (WORLD_HELD_RAW=1 shows it without the hand tilt, which is the bug it fixes)
+WORLD_HELD_CLIP=walk WORLD_ICON_OUT=/tmp/held.png \
+  xvfb-run -a godot --path game --resolution 1400x560 \
+  --rendering-method gl_compatibility res://tests/held_items.tscn
 ```
 
 The first runs the real client under a virtual X server and saves a PNG
@@ -213,11 +219,14 @@ every 1.5 seconds, so an interface change can be checked rather than
 guessed at. `CONTRIBUTING.md` has the details, including why the renderer
 flag it passes is load-bearing.
 
-The other two exist because of the same class of failure in two places
-that never raise. A block whose shape `BlockIcon` has no arm for draws a
-blank square in the picker beside a perfectly good name; a map generator
-that puts a wall through a doorway is a bug you can only see. Both are
-one command and a picture.
+The others exist because of the same class of failure in places that
+never raise. A block whose shape `BlockIcon` has no arm for draws a blank
+square in the picker beside a perfectly good name; a map generator that
+puts a wall through a doorway is a bug you can only see; and a weapon
+inherits the arm it hangs from, so every gun in the game pointed at the
+floor for as long as anybody was walking — while the model loaded, the
+node parented, the clip played and the console stayed clean. Each is one
+command and a picture.
 
 The last two matter more than they look. Booting the project proves the
 scripts compile; it does not prove the game works, because an RPC sent to a

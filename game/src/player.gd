@@ -745,6 +745,19 @@ func remote_update(pos: Vector3, yaw: float, p_anim: int) -> void:
 
 var _hand_item: Node3D = null
 var _hand_sig := ""
+## The clip the arm was in last time the item was posed — so a change of
+## animation re-poses what is in the hand. See hand_tilt_degrees.
+var _arm_clip := ""
+
+## Where in the right arm a held thing sits: down the limb and a little
+## forward of it, which is the hand.
+const HAND_OFFSET := Vector3(0, -1.1, 0.2)
+
+## Which way a held thing points is a fact about the character pack's
+## clips, so AvatarFactory owns it — see the note there, and
+## tests/held_items.tscn for the picture of what it is for.
+static func hand_tilt_degrees(clip: String) -> Vector3:
+	return AvatarFactory.hand_tilt_degrees(clip)
 
 ## Show what's in hand on the right arm — yours and everyone else's.
 func _held_code() -> int:
@@ -788,7 +801,8 @@ func _refresh_hand() -> void:
 	var rig_scale := maxf(arm.get_parent_node_3d().global_basis.get_scale().y, 0.01) \
 		/ maxf(scale.y, 0.01)
 	_hand_item.scale = Vector3.ONE * (body_size / maxf(rig_scale, 0.01))
-	_hand_item.position = Vector3(0, -1.1, 0.2)
+	_hand_item.position = HAND_OFFSET
+	_hand_item.rotation_degrees = hand_tilt_degrees(_arm_clip)
 	arm.add_child(_hand_item)
 	for node in _hand_item.find_children("*", "VisualInstance3D", true, false):
 		(node as VisualInstance3D).layers = render_layer_bit()
@@ -1645,6 +1659,11 @@ func _animate_kenney(_delta: float) -> void:
 		want = "holding-right"
 	if ap.current_animation != want:
 		ap.play(want, 0.18)
+	# The arm has changed what it is doing, so what is in it is re-posed.
+	if want != _arm_clip:
+		_arm_clip = want
+		if _hand_item != null and is_instance_valid(_hand_item):
+			_hand_item.rotation_degrees = hand_tilt_degrees(want)
 	# A GIANT'S LEGS GO ROUND SLOWER, in proportion to how big it is.
 	#
 	# Size and speed are separate on purpose (GiantsMode.SPEED), so a

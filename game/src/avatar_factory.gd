@@ -35,6 +35,37 @@ const ATTRS: Array[String] = ["who", "fit"]
 const LOOPING_ANIMS: Array[String] = ["idle", "walk", "sprint",
 	"holding-right", "sit"]
 
+## THE CLIPS THAT RAISE THE RIGHT ARM, and what they decide.
+##
+## A held item is parented to `arm-right` and inherits its transform;
+## nothing else decides which way a weapon points. The pack raises that
+## arm to the horizontal in `holding-right` — a single key at -90° about
+## X — and leaves it hanging straight down in `walk`, `idle` and
+## `sprint`. A weapon is modelled to fire down -Z, so in a raised arm it
+## points where the character is looking and in a hanging arm the same
+## weapon is a quarter turn out: muzzle at the floor, and with the arm's
+## swing behind it, often at the floor BEHIND its owner. A sword comes
+## out backwards the same way.
+##
+## Nobody stands still in a round, so that was the state a weapon was in
+## almost all of the time. See tests/held_items.tscn for the picture, and
+## `hand_tilt_degrees` for what is done about it.
+##
+## Here and not on Player because this is knowledge about the PACK, like
+## everything else in this file — and because Player names the Game
+## autoload, so nothing on it can be reached by a --script test.
+const ARM_RAISED_CLIPS: Array[String] = ["holding-right", "holding-both",
+	"holding-right-shoot", "holding-both-shoot", "attack-melee-right",
+	"attack-kick-right", "sit", "drive", "pick-up", "interact-right"]
+
+## Which way a thing in the right hand should be turned, given the clip
+## the arm is playing. A hanging arm gets the quarter turn put back; a
+## raised one does not need it, and a SWING must not have it — the sword
+## has to follow the arm through `attack-melee-right`, or the swing is a
+## sword standing still while somebody waves at it.
+static func hand_tilt_degrees(clip: String) -> Vector3:
+	return Vector3.ZERO if clip in ARM_RAISED_CLIPS else Vector3(90, 0, 0)
+
 ## who -> {part name -> Mesh}. Built on first use by instantiating the
 ## character once and lifting its six meshes out; every avatar after that
 ## is six assignments and no scene instantiation.

@@ -32,6 +32,8 @@ const KNOWN := {
 	"WORLD_CLOCK": "pin the day fraction, 0..1, so a given hour can be looked at",
 	"WORLD_MAP_Y": "tests/city_map.gd: slice a map at this level instead of looking down on the roof",
 	"WORLD_ICON_CATEGORY": "tests/block_icons.gd: which picker tab to draw a contact sheet of",
+	"WORLD_HELD_CLIP": "tests/held_items.gd: which animation clip to pose the held weapons in",
+	"WORLD_HELD_RAW": "tests/held_items.gd: 1 skips the hand tilt, to see what it corrects",
 	"WORLD_FAST": "1 shrinks the day to 90s and sapling growth to 8s",
 
 	# --- What a room was ASKED to be -------------------------------------
