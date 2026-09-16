@@ -705,8 +705,13 @@ func _add_foliage(holder: Node3D, cpos: Vector2i) -> void:
 	# Bucketed by MODEL rather than by block, because one block can be
 	# drawn as any of several models — see GRASS_VARIANTS.
 	var buckets: Dictionary = {}
-	for i in data.size():
-		var block := data[i]
+	# ONE BLOCK IS TWO BYTES, so this walks blocks and decodes — it used
+	# to index the array raw, which after the widening read every low and
+	# high byte as if it were a block id. A floor of Office Carpet (256)
+	# has a high byte of 1, which is Grass, so every carpet tile in the
+	# building sprouted a tuft at a garbage position.
+	for i in WorldGen.CHUNK_BLOCKS:
+		var block := data.decode_u16(i * 2)
 		if not FOLIAGE_MODELS.has(block):
 			continue
 		var x := i % 16

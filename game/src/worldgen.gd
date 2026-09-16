@@ -1502,30 +1502,86 @@ func _office_reception(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int
 ## A LOT, and what was rolled for it. `sx` and `sz` are how deep the lot
 ## is on each axis — not a constant, because a lot beside a main corridor
 ## is two blocks shallower than one beside a side street.
-func _office_room(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
-		gx: int, gz: int, ox: int, oz: int, sx: int, sz: int) -> void:
+enum OfficeLot { OPEN, MEETING, BREAKOUT, BOOTHS, KITCHEN }
+
+## WHAT IS IN A LOT. Pure and answerable from the lot's grid position
+## alone, because two things ask it: the generator, filling the columns,
+## and the radar, which draws the whole slab at boot and cannot afford to
+## generate a chunk per sample.
+##
+## CELLULAR IN THE MIDDLE, OPEN AT THE GLASS — which is how a real floor
+## is planned, and for a real reason: the daylight is at the edge, so the
+## desks go there and the rooms that do not need a window go round the
+## core. Rolling every lot off the same table gave a floor with meeting
+## rooms hard against the windows and desks in the dark middle, and it
+## read as a spreadsheet rather than as a place.
+func office_lot_kind(gx: int, gz: int) -> int:
 	var roll := hash01(gx, gz, 4100)
-	# CELLULAR IN THE MIDDLE, OPEN AT THE GLASS — which is how a real
-	# floor is planned, and for a real reason: the daylight is at the
-	# edge, so the desks go there and the rooms that do not need a window
-	# go round the core. Rolling every lot off the same table gave a floor
-	# with meeting rooms hard against the windows and desks in the dark
-	# middle, and it read as a spreadsheet rather than as a place.
 	var half_bays := maxf(float(world_size / 2) / float(OFFICE_BAY) - 1.0, 1.0)
 	var outness := clampf(float(maxi(absi(gx), absi(gz))) / half_bays, 0.0, 1.0)
 	var open_share := lerpf(0.20, 0.72, outness)
 	if roll < open_share:
-		_office_open_plan(data, lx, lz, gx, gz, ox, oz, sx, sz)
-		return
+		return OfficeLot.OPEN
 	var rest := (roll - open_share) / maxf(1.0 - open_share, 0.001)
 	if rest < 0.50:
-		_office_meeting(data, lx, lz, gx, gz, ox, oz, sx, sz)
-	elif rest < 0.72:
-		_office_breakout(data, lx, lz, ox, oz, sx, sz)
-	elif rest < 0.88:
-		_office_booths(data, lx, lz, ox, oz, sx, sz)
-	else:
-		_office_kitchen(data, lx, lz, ox, oz, sx, sz)
+		return OfficeLot.MEETING
+	if rest < 0.72:
+		return OfficeLot.BREAKOUT
+	if rest < 0.88:
+		return OfficeLot.BOOTHS
+	return OfficeLot.KITCHEN
+
+func _office_room(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
+		gx: int, gz: int, ox: int, oz: int, sx: int, sz: int) -> void:
+	match office_lot_kind(gx, gz):
+		OfficeLot.OPEN:
+			_office_open_plan(data, lx, lz, gx, gz, ox, oz, sx, sz)
+		OfficeLot.MEETING:
+			_office_meeting(data, lx, lz, gx, gz, ox, oz, sx, sz)
+		OfficeLot.BREAKOUT:
+			_office_breakout(data, lx, lz, ox, oz, sx, sz)
+		OfficeLot.BOOTHS:
+			_office_booths(data, lx, lz, ox, oz, sx, sz)
+		_:
+			_office_kitchen(data, lx, lz, ox, oz, sx, sz)
+
+## THE OFFICE ON THE RADAR, without generating any of it.
+##
+## Every other map answers this with height_at() and a colour per band,
+## because outdoors the only thing a radar can usefully say is how high
+## the ground is. A floor plate is flat, so that reading paints the whole
+## slab one colour — it came out solid blue, being three blocks up and
+## therefore "under the sea".
+##
+## What a radar CAN usefully say about a building is the plan: where the
+## corridors run, where the core is, and what kind of room each lot holds.
+## All of that is arithmetic on the grid, so this stays as cheap as the
+## height function it replaces.
+func office_overview_at(wx: int, wz: int) -> int:
+	if not in_bounds(wx, wz):
+		return Blocks.AIR
+	if on_border(wx, wz):
+		return Blocks.CURTAIN_EDGE
+	var half := world_size / 2
+	if mini(half - absi(wx), half - absi(wz)) <= OFFICE_PERIMETER:
+		return Blocks.OFFICE_CARPET
+	if maxi(absi(wx), absi(wz)) <= OFFICE_CORE_HALF:
+		return Blocks.CONCRETE_CORE if wz <= -7 and absi(wx) <= 7 \
+			else Blocks.OFFICE_OAK
+	var ax := _office_bay(wx)
+	var az := _office_bay(wz)
+	if int(ax[2]) < 0 or int(az[2]) < 0:
+		return Blocks.OFFICE_CARPET
+	match office_lot_kind(int(ax[0]), int(az[0])):
+		OfficeLot.OPEN:
+			return Blocks.OFFICE_CARPET_BLUE
+		OfficeLot.MEETING:
+			return Blocks.OFFICE_WALL
+		OfficeLot.BREAKOUT:
+			return Blocks.OFFICE_CARPET_RUST
+		OfficeLot.BOOTHS:
+			return Blocks.OFFICE_CARPET_SAGE
+	return Blocks.OFFICE_VINYL
 
 ## OPEN PLAN: banks of desks, back to back, a monitor on each and a chair
 ## pulled up to it. No walls at all — the corridor simply opens into it,

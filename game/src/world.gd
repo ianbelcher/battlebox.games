@@ -67,63 +67,18 @@ func roster() -> Dictionary:
 func flag_mode() -> bool:
 	return client_rules.has_flags()
 var map_list: Array = []
-## Low-res whole-island backdrop for the radar (192x192, 4 blocks/px) so
-## the map shows the world beyond what's rendered, even on slow machines.
+## The radar's low-resolution backdrop — see OverviewMap, which is where
+## what a column reads as from above is decided.
 var overview := PackedByteArray()
 
 func overview_block(wx: int, wz: int) -> int:
-	if overview.is_empty():
-		return 0
-	var ox := wx / 4 + 96
-	var oz := wz / 4 + 96
-	if ox < 0 or ox >= 192 or oz < 0 or oz >= 192:
-		return 0
-	return overview[oz * 192 + ox]
+	var at := OverviewMap.index_of(wx, wz)
+	return 0 if overview.is_empty() or at < 0 else overview[at]
 
-## Server: rough top-block guess from the pure terrain function — cheap,
-## no chunk generation needed. Imported maps skip it (no pure function).
 func _build_overview() -> void:
 	overview = PackedByteArray()
-	if store == null or store.source != "procedural":
-		return
-	overview.resize(192 * 192)
-	for oz in 192:
-		for ox in 192:
-			var wx := (ox - 96) * 4
-			var wz := (oz - 96) * 4
-			# OUTSIDE THE WORLD IS NOTHING. The generator is a pure
-			# function and will happily invent terrain forever, so
-			# without this the radar drew a full island — grass, beaches,
-			# snow — all round a 50-block world, and on the space map it
-			# drew grass and ice over what should be black. Air reads as
-			# the radar's background, which is what "off the map" should
-			# look like.
-			if not store.gen.in_bounds(wx, wz):
-				overview[oz * 192 + ox] = Blocks.AIR
-				continue
-			var h: int = store.gen.height_at(wx, wz)
-			h -= store.gen.lake_depth_at(wx, wz, h)
-			overview[oz * 192 + ox] = _overview_block_for(h)
-## What a column of this height reads as on the radar. Per THEME: the
-## space map has no grass and no snow on it, and painting it with the
-## classic island palette is why it came out looking like Earth.
-func _overview_block_for(h: int) -> int:
-	match store.theme:
-		"desert":
-			return Blocks.SAND if h > WorldGen.SEA_LEVEL else Blocks.WATER
-		"space":
-			# Grey regolith, and the "sea" is the void between craters.
-			return Blocks.STONE if h > WorldGen.SEA_LEVEL else Blocks.AIR
-		"sky":
-			return Blocks.GRASS if h > WorldGen.SEA_LEVEL else Blocks.AIR
-	var block := Blocks.GRASS
-	if h <= WorldGen.SEA_LEVEL:
-		block = Blocks.WATER
-	elif h <= WorldGen.SEA_LEVEL + 2:
-		block = Blocks.SAND
-	elif h > WorldGen.SEA_LEVEL + 22:
-		block = Blocks.SNOW
-	return block
+	if store != null and store.source == "procedural":
+		overview = OverviewMap.build(store.gen, store.theme)
 
 signal reset_vote_started
 signal reset_result(happened: bool)

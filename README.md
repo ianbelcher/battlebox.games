@@ -142,7 +142,7 @@ docs/            architecture.md
 
 ## The voxel pipeline
 
-Chunks are 16×16×80, one byte per block. The server generates them from a
+Chunks are 16×16×80, **two bytes per block**. The server generates them from a
 seed and holds them in memory; a client asks for what it can see and gets
 zstd-compressed blobs over the same socket as everything else. Meshing runs
 on worker threads.

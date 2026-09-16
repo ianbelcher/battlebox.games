@@ -84,10 +84,6 @@ static func apply(world: Node) -> void:
 		world.hearts_people = clampi(EnvConfig.number("WORLD_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
 	if EnvConfig.has("WORLD_BOT_HEARTS"):
 		world.hearts_bots = clampi(EnvConfig.number("WORLD_BOT_HEARTS", world.MATCH_HP), 1, world.MATCH_HP)
-	# The caverns world has no day: the plain is lit by the moon and the
-	# halls by what glows in them. See WorldNode.always_night.
-	if world.always_night():
-		world.clock = 0.0
 	# WHO CAN FLY, as one of FlyRule's four answers turned back into the
 	# pair of defaults the world keeps. Two defaults rather than one
 	# because "computers only" and "humans only" cannot be said with a

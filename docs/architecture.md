@@ -99,7 +99,7 @@ like any other room, and says what it is like any other room.
 | `lobby_client.gd` | The lobby's JSON API, with no UI in it |
 | `ui_theme.gd` | Every colour, radius and font size in every menu |
 | `splitscreen.gd` | 1–4 SubViewports sharing one World3D, one camera each |
-| `render_layers.gd` | Which camera draws what: your own body, your own held item, and the tags over the heads you can see |
+| `render_layers.gd` | Which camera draws what: your own body, your own held item, the tags over the heads you can see, and the roof of an interior — which the orbit camera cuts away and first person keeps |
 | `overhead_sight.gd` | Whether a seat has a clear line to a body, so a name or hearts never float over the wall somebody is hiding behind — and whether a body is close enough and in front to be worth asking about, which is what keeps a hundred-player room from stuttering. Pure; no nodes |
 | `player.gd` | Movement, aim, actions. Hand-rolled voxel AABB, no physics engine |
 | `player_hud.gd` | Per-player overlay: hotbar, radar, the picker, the menus |
@@ -228,9 +228,21 @@ If you are writing a `match` over a kind, look for the table first.
 
 ## The voxel pipeline
 
-Chunks are 16×16×80, one byte per block. The server generates them from a
+Chunks are 16×16×80, **two bytes per block**. The server generates them from a
 seed and holds them in memory; a client asks for what it can see and gets
 zstd-compressed blobs over the same socket as everything else.
+
+It was one byte until the palette filled it exactly — 255 was the trap
+block and there was nowhere left to put a desk. Widening it is cheap
+(twice the memory, still bounded by the world rather than the uptime, and
+very little more on the wire after zstd) and the whole risk was in the
+call sites: `data[idx(...)]` compiles perfectly against a two-byte array
+and silently reads half of the wrong block. So `idx` is gone and
+**`WorldGen.bidx` returns a BYTE offset**, which turned all 212 call sites
+into compile errors that had to be read one at a time. Reads are
+`decode_u16`, writes `encode_u16`, and ids 1..255 still mean exactly what
+they meant — they are the wire format, and what every saved hotbar index
+and every Minecraft import was written against.
 
 Meshing runs on worker threads, which in a browser needs `SharedArrayBuffer`,
 which needs cross-origin isolation, which needs the two `Cross-Origin-*`
@@ -266,6 +278,38 @@ players; crates fade their light with distance.
 The world is a square slab with a bedrock floor and a bedrock wall around
 its outermost ring, floor to sky. The Lobby's map is locked: a reset
 keeps the map a room was made as, and the Lobby refuses a map switch.
+
+## An interior is not a landscape
+
+The office map is the first world in this game that is a BUILDING — one
+storey of a tower, sliced through, with a floor slab at y=3, four blocks
+clear, and a ceiling at y=8. Three assumptions the rest of the code makes
+about a world stop holding, and each is named rather than special-cased
+twice:
+
+- **`ChunkStore.surface_y` searches down from the CEILING**, not from the
+  sky. Searching from the sky finds the slab of the storey above every
+  time, so every spawn, crate and computer player would be placed on a
+  roof nobody can reach. The caverns world hit this first and the office
+  takes the same door.
+- **`ChunkStore.is_interior()`** is why a floor at y=3 is not thrown away
+  for being under a sea the map does not have. Anything that rejects a
+  spot for sitting at or below `WorldGen.SEA_LEVEL` has to ask this first
+  or it rejects the whole map.
+- **`RenderLayers.ROOF`** is the cutaway. The orbit camera looks down at
+  your character from above and behind, so it sits *inside* the ceiling;
+  solid blocks at or above `SkyRule.roof_y` mesh into a surface of their
+  own, and the orbit and map views decline to draw that layer while first
+  person keeps it. The mesher still treats those blocks as opaque, so the
+  walls under them keep their culling and shading — a cutaway, not a hole.
+
+`SkyRule` is the fourth: it holds the two maps whose clock does not move
+(caverns at midnight, the office at mid-morning) and is the one place that
+decides what o'clock a world opens at. The office holds still because its
+ceiling panels are emissive faces rather than real lamps — twenty real
+ones in a room would take the whole of `ChunkView.light_cap` and then
+flicker as people walked about — so what actually lights the floor is the
+sky through the curtain wall.
 
 ## Nothing is persisted
 

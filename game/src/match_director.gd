@@ -591,7 +591,7 @@ func find_team_site(slot: int) -> Vector3:
 		if not world.store.inside_world(wx, wz, 10):
 			continue
 		var y := world.store.stand_y(wx, wz)
-		if y < 0 or (y <= WorldGen.SEA_LEVEL and world.store.theme != "caverns") \
+		if y < 0 or (y <= WorldGen.SEA_LEVEL and not world.store.is_interior()) \
 				or y >= WorldGen.CHUNK_H - 10:
 			continue
 		# Prefer flat: a team standing on a staircase is no use to anyone.

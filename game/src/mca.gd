@@ -93,8 +93,13 @@ func _apply_section(data: PackedByteArray, section: Dictionary) -> void:
 	if palette.is_empty():
 		return
 	var longs: PackedInt64Array = states.get("data", section.get("BlockStates", PackedInt64Array()))
-	# Map the palette once per section.
-	var mapped := PackedByteArray()
+	# Map the palette once per section. PackedInt32Array and not
+	# PackedByteArray: these hold BLOCK IDS, which no longer fit in a byte
+	# (see WorldGen.bidx). Nothing the importer maps to is above 255 today
+	# and a byte array would still be correct — right up until the first
+	# vanilla block somebody points at an office fitting, which would
+	# truncate in silence.
+	var mapped := PackedInt32Array()
 	mapped.resize(palette.size())
 	for i in palette.size():
 		var entry: Dictionary = palette[i]
