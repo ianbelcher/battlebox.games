@@ -30,7 +30,7 @@ func _ready() -> void:
 		_out = "/tmp/block_icons.png"
 	var category := OS.get_environment("WORLD_ICON_CATEGORY")
 	if category.is_empty():
-		category = "office"
+		category = "building"
 	var ids: Array = Blocks.picker_category(category)
 	var grid := GridContainer.new()
 	grid.columns = COLUMNS

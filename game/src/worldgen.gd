@@ -1378,12 +1378,16 @@ func _office_fill(data: PackedByteArray, lx: int, lz: int, y0: int, y1: int,
 ## unbreakable for the same reason the bedrock ring is — it is the
 ## boundary, and a boundary you can dig through is a hole out of the world.
 func _office_edge(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
-	data.encode_u16(bidx(lx, 0, lz), Blocks.BEDROCK)
-	_office_fill(data, lx, lz, 1, OFFICE_FLOOR_Y, Blocks.CONCRETE_CORE)
-	_office_fill(data, lx, lz, OFFICE_CEIL_Y, OFFICE_SLAB_TOP, Blocks.CONCRETE_CORE)
+	# EVERY BLOCK OF THE RING IS UNBREAKABLE, which is what a ring is for.
+	# It was bedrock at the bottom, concrete above and below the glass and
+	# an ordinary mullion every four blocks — so three of the five bands
+	# could be dug through, and behind them is not the outside of the
+	# building, it is the outside of the world.
+	_office_fill(data, lx, lz, 0, OFFICE_FLOOR_Y, Blocks.BEDROCK)
+	_office_fill(data, lx, lz, OFFICE_CEIL_Y, OFFICE_SLAB_TOP, Blocks.BEDROCK)
 	if posmod(wx + wz, 4) == 0:
 		_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
-			Blocks.MULLION)
+			Blocks.MULLION_EDGE)
 	else:
 		_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
 			Blocks.CURTAIN_EDGE)
@@ -1398,9 +1402,23 @@ func _office_ceiling(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) 
 		Blocks.CEILING_LIGHT if lit else Blocks.CEILING_TILE)
 
 func _office_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
-	data.encode_u16(bidx(lx, 0, lz), Blocks.BEDROCK)
-	_office_fill(data, lx, lz, 1, OFFICE_FLOOR_Y - 1, Blocks.CONCRETE_CORE)
-	_office_fill(data, lx, lz, OFFICE_CEIL_Y + 1, OFFICE_SLAB_TOP, Blocks.CONCRETE_CORE)
+	# THE STOREY IS SEALED TOP AND BOTTOM, and the top matters more.
+	#
+	# The slab over the ceiling was ordinary concrete, so anybody — and,
+	# far more often, a computer player working its way out of somewhere
+	# — could dig up through the tiles and end up standing on the roof of
+	# a building with no roof to speak of, looking down into the office
+	# through the hole they came out of. There is nothing up there, there
+	# is nothing to do up there, and a floor plate seen from above is not
+	# a view worth having.
+	#
+	# Bedrock answers it without a rule to explain, a boundary to draw or
+	# damage to apply for standing somewhere: the way out simply is not
+	# there. The same bedrock goes underneath, so the storey is a box with
+	# one breakable skin — the floor, the ceiling and everything between —
+	# inside a shell that is not.
+	_office_fill(data, lx, lz, 0, OFFICE_FLOOR_Y - 1, Blocks.BEDROCK)
+	_office_fill(data, lx, lz, OFFICE_CEIL_Y + 1, OFFICE_SLAB_TOP, Blocks.BEDROCK)
 	_office_ceiling(data, lx, lz, wx, wz)
 
 	var half := world_size / 2

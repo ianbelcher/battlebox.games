@@ -247,7 +247,13 @@ const CURTAIN_EDGE := 293
 ## plants that read as plants.
 const OFFICE_PLANT := 294
 const OFFICE_PALM := 295
-const NEXT_FREE_ID := 296
+## The aluminium between the lights of the curtain wall, unbreakable, and
+## the twin of CURTAIN_EDGE. The boundary ring was glass you could not dig
+## and posts you COULD, every four blocks all the way round the building —
+## a hole out of the world, which is the one thing the ring exists to
+## prevent. Every other map spends its ring on bedrock for exactly this.
+const MULLION_EDGE := 296
+const NEXT_FREE_ID := 297
 
 static func shape_of(id: int) -> String:
 	return str(info(id).get("shape", ""))
@@ -615,6 +621,8 @@ static func _office_init() -> void:
 	EXTRA[CURTAIN_EDGE] = {"name": "Window Wall",
 		"color": Color(0.70, 0.84, 0.90, 0.28), "solid": true, "opaque": false,
 		"translucent": true, "unbreakable": true}
+	EXTRA[MULLION_EDGE] = {"name": "Mullion", "color": Color("5a5f68"),
+		"solid": true, "opaque": true, "unbreakable": true, "rough": 0.5}
 	EXTRA[OFFICE_PLANT] = {"name": "Office Plant", "color": Color("4f8f45"),
 		"cross": true, "sway": 0.35, "hard": 0}
 	EXTRA[OFFICE_PALM] = {"name": "Office Palm", "color": Color("3f7f52"),
@@ -972,20 +980,27 @@ static func picker_category(cat: String) -> Array:
 			out.append_array([TORCH, LANTERN, GLOWSTONE, CAMPFIRE, 147, 148,
 				CRYSTAL_PINK, CRYSTAL_BLUE, CRYSTAL_GREEN, 132,
 				CRAFTING_TABLE, CHEST, FURNACE, DOOR_WOOD, DOOR_IRON, BED])
-		"office":
-			# A TAB OF ITS OWN, because an office fit-out mixed into
-			# Build would be forty grey squares buried among four hundred
-			# coloured ones. Ordered the way a floor is actually put
-			# together: floor, ceiling, walls, glass, then the furniture.
-			out = [OFFICE_CARPET, OFFICE_CARPET_BLUE, OFFICE_CARPET_SAGE,
-				OFFICE_CARPET_RUST, OFFICE_VINYL, 111,
-				CEILING_TILE, CEILING_LIGHT,
-				OFFICE_WALL, OFFICE_WALL_TEAL, OFFICE_WALL_CLAY,
-				OFFICE_WALL_SAND, CONCRETE_CORE, OFFICE_OAK, MULLION, 104,
-				PARTITION_GLASS, PARTITION_FROST, CURTAIN_GLASS, DOOR_IRON,
-				DESK, MEETING_TABLE, OFFICE_CHAIR, SOFA, CABINET, MONITOR,
-				WHITEBOARD, PLANTER, OFFICE_PLANT, OFFICE_PALM, 132, CHEST]
+			out.append_array(OFFICE_SET)
 	return out
+
+## THE OFFICE FIT-OUT, in the order a floor is actually put together:
+## floor, ceiling, walls, glass, then the furniture.
+##
+## It had a tab of its own for about a day. One more tab to page through
+## is a worse problem than a long tab — the Build page is already four
+## hundred blocks and nobody hunts it by scanning, they hunt it by
+## scrolling to roughly where they remember a thing being. So these go on
+## the END of Build, where they are together and easy to point at. If
+## Build is ever split into tabs properly, this is a ready-made one.
+const OFFICE_SET: Array[int] = [
+	OFFICE_CARPET, OFFICE_CARPET_BLUE, OFFICE_CARPET_SAGE, OFFICE_CARPET_RUST,
+	OFFICE_VINYL, CEILING_TILE, CEILING_LIGHT,
+	OFFICE_WALL, OFFICE_WALL_TEAL, OFFICE_WALL_CLAY, OFFICE_WALL_SAND,
+	CONCRETE_CORE, OFFICE_OAK, MULLION,
+	PARTITION_GLASS, PARTITION_FROST, CURTAIN_GLASS,
+	DESK, MEETING_TABLE, OFFICE_CHAIR, SOFA, CABINET, MONITOR,
+	WHITEBOARD, PLANTER, OFFICE_PLANT, OFFICE_PALM,
+]
 
 ## WHAT A TRAP BLOCK SHOULD LOOK LIKE, given what is beside it.
 ##

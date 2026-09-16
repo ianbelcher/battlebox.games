@@ -62,10 +62,20 @@ func test_every_other_mode_still_fills_its_seats() -> void:
 
 ## THE FIT-OUT HAS TO BE PLACEABLE, and it very nearly was not: the
 ## loadout refuses any block outside Blocks.HOTBAR and the server checks
-## that on every edit, so an office block listed only in the picker is one
-## a child can choose and then watch silently fail to appear.
+## that on every edit, so an office block that is in the picker and not in
+## HOTBAR is one a child can choose and then watch silently fail to
+## appear. This also pins that the two lists agree.
 func test_you_can_actually_build_with_the_office() -> void:
 	var kit: Loadout = _meeting().loadout(null)
-	for id: int in Blocks.picker_category("office"):
+	for id: int in Blocks.OFFICE_SET:
 		check(kit.allows_block(id),
 			"%s can be placed" % Blocks.info(id).get("name", str(id)))
+
+## And it is where somebody would look for it. The fit-out had a tab of
+## its own for about a day; it lives on the end of Build now, and a block
+## in OFFICE_SET that is not on that page is one nobody can reach.
+func test_the_fit_out_is_on_the_build_page() -> void:
+	var build: Array = Blocks.picker_category("building")
+	for id: int in Blocks.OFFICE_SET:
+		check(id in build,
+			"%s is on the Build page" % Blocks.info(id).get("name", str(id)))

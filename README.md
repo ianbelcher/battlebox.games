@@ -203,7 +203,7 @@ WORLD_MAP_THEME=office WORLD_MAP_Y=4 WORLD_MAP_SIZE=100 WORLD_MAP_SPAN=8 \
   godot --headless --path game --script res://tests/city_map.gd
 
 # Every chip in one picker tab, as a contact sheet
-WORLD_ICON_CATEGORY=office WORLD_ICON_OUT=/tmp/chips.png \
+WORLD_ICON_CATEGORY=building WORLD_ICON_OUT=/tmp/chips.png \
   xvfb-run -a godot --path game --resolution 900x520 \
   --rendering-method gl_compatibility res://tests/block_icons.tscn
 ```

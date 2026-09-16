@@ -443,6 +443,9 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 ## as you walked across the room. Merging keeps every chunk's lamp count
 ## sane and each survivor reaches further; which ones are actually lit at
 ## any moment is decided globally afterwards — see chunk_view.light_cap.
+## What a lit screen reads as, on the one face of a monitor that is one.
+const SCREEN_COLOR := Color(0.40, 0.58, 0.76)
+
 const LAMP_MERGE := 7.0
 func _merged(lights: Array) -> Array:
 	lights.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -633,7 +636,12 @@ static func _turned(block: int, boxes: Array) -> Array:
 		return boxes
 	var out: Array = []
 	for box: Array in boxes:
-		out.append(_turn(box[0], box[1], turns))
+		var spun := _turn(box[0], box[1], turns)
+		# A box may carry a colour of its own — see the note on the draw
+		# loop below — and turning it must not lose that.
+		if box.size() > 2:
+			spun.append(box[2])
+		out.append(spun)
 	return out
 
 func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int,
@@ -747,10 +755,23 @@ func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int
 				[Vector3(0.16, 0.42, 0.16), Vector3(0.84, 0.54, 0.84)],
 				[Vector3(0.16, 0.54, 0.14), Vector3(0.84, 1.0, 0.26)]])
 		11:
+			# A MONITOR, AND WHICH END OF IT IS THE SCREEN.
+			#
+			# The stand used to stick out of the FRONT — the panel at the
+			# back of the cell with the foot reaching past it — so after
+			# the block was turned to face somebody, what they saw first
+			# was the foot and the panel was on the far side. It read as
+			# the back of a monitor, which is what it was.
+			#
+			# Screen at the front, bezel behind it, then the stalk and
+			# the foot going back. The screen face is its own colour, so
+			# a glance tells you which way one is pointing.
 			boxes = _turned(block, [
-				[Vector3(0.34, 0, 0.36), Vector3(0.66, 0.05, 0.7)],
-				[Vector3(0.46, 0.05, 0.46), Vector3(0.54, 0.42, 0.56)],
-				[Vector3(0.08, 0.36, 0.3), Vector3(0.92, 0.95, 0.38)]])
+				[Vector3(0.34, 0, 0.30), Vector3(0.66, 0.06, 0.60)],
+				[Vector3(0.46, 0.06, 0.44), Vector3(0.54, 0.44, 0.56)],
+				[Vector3(0.08, 0.32, 0.56), Vector3(0.92, 0.95, 0.64)],
+				[Vector3(0.12, 0.36, 0.64), Vector3(0.88, 0.91, 0.66),
+					SCREEN_COLOR]])
 		13:
 			boxes = _turned(block, [
 				[Vector3(0.04, 0, 0.06), Vector3(0.96, 0.26, 0.94)],
@@ -760,12 +781,19 @@ func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int
 			boxes = _turned(block, [
 				[Vector3(0.02, 0.08, 0.06), Vector3(0.98, 0.98, 0.14)]])
 	var key := "trans" if shape == 6 else solid_key
-	var color := Blocks.LK_COLOR[block]
+	var base_color := Blocks.LK_COLOR[block]
 	var jitter := _jitter(x, y, z, cx, cz)
 	var origin := Vector3(x, y, z)
 	for box: Array in boxes:
 		var bmin: Vector3 = box[0]
 		var bmax: Vector3 = box[1]
+		# A THIRD ENTRY IS A COLOUR FOR THAT BOX ALONE. Everything shaped
+		# was one flat colour all over, which is fine for a slab or a
+		# fence and useless for a monitor: a dark grey slab on a dark grey
+		# stand looks identical from the front and the back, so there was
+		# no way to tell which way round one was — and that is exactly
+		# what somebody looking at a desk needs to be able to tell.
+		var color := box[2] as Color if box.size() > 2 else base_color
 		for face_index in 6:
 			var face: Array = FACES[face_index]
 			var n: Vector3i = face[0]

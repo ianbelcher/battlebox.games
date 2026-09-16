@@ -342,6 +342,14 @@ twice:
   for being under a sea the map does not have. Anything that rejects a
   spot for sitting at or below `WorldGen.SEA_LEVEL` has to ask this first
   or it rejects the whole map.
+- **The shell is bedrock.** The slab over the ceiling and the ground
+  under the floor are unbreakable, and so is every band of the boundary
+  ring. A storey with an ordinary concrete roof is one anybody can dig up
+  through — and the computer players did it constantly, working their way
+  out of somewhere and ending up stood on a roof with nothing on it,
+  looking back down through the hole. Bedrock settles it without a rule to
+  explain, a boundary to draw or damage to apply for standing somewhere:
+  the way out is not there. `office_shell_test.gd` keeps it sealed.
 - **`RenderLayers.ROOF`** is the cutaway. The orbit camera looks down at
   your character from above and behind, so it sits *inside* the ceiling;
   solid blocks at or above `SkyRule.roof_y` mesh into a surface of their
