@@ -25,6 +25,7 @@ const CATEGORY_BLURB := {
 	"tools": "Weapons, gadgets and the blocks that do things",
 	"building": "Everything you build with",
 	"kits": "Whole buildings — place one and it appears",
+	"office": "Carpet, glass and furniture — what a floor is made of",
 }
 
 func _init(p_category := "blocks") -> void:

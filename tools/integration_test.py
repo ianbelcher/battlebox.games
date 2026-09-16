@@ -244,11 +244,18 @@ def run(argv: list[str] | None = None) -> int:
         print("\n".join(client_log.splitlines()[-25:]))
         return 1
 
+    wants_critters = os.environ.get("WORLD_THEME", "classic") != "office"
+
     # The server built a world and is serving it to somebody.
     checks.equal(server_report, "role", "server", "server")
     checks.at_least(server_report, "peers", 1, "server")
     checks.at_least(server_report, "chunks", 60, "server")
-    checks.at_least(server_report, "critters", 1, "server")
+    # NOT EVERY MAP HAS ANIMALS. The office is an interior: every creature
+    # in the registry picks its spot by habitat — grass, sand, snow, water
+    # — and a floor of a tower has none of them, so it is meant to come
+    # back empty. See CritterDirector.try_spawn.
+    if wants_critters:
+        checks.at_least(server_report, "critters", 1, "server")
     checks.at_least(server_report, "edits", 1, "server")
     checks.at_least(server_report, "bots", 3, "server")
     # Three server bots plus the client's two local players.
@@ -259,7 +266,8 @@ def run(argv: list[str] | None = None) -> int:
     checks.equal(client_report, "role", "client", "client")
     checks.at_least(client_report, "roster", 5, "client")
     checks.at_least(client_report, "chunks", 60, "client")
-    checks.at_least(client_report, "critters", 1, "client")
+    if wants_critters:
+        checks.at_least(client_report, "critters", 1, "client")
     checks.at_least(client_report, "avatars", 5, "client")
     # The two local seats each built a whole PlayerHud — every panel, the
     # hotbar, the radar and every menu page. This is what makes an

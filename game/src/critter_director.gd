@@ -86,6 +86,12 @@ func cap_for(player_count: int) -> int:
 		world.MAX_CRITTERS)
 
 func try_spawn(anchor: Vector3, night: bool) -> void:
+	# NOTHING LIVES ON THE TWELFTH FLOOR. Every animal in the registry
+	# picks its spot by habitat — grass, sand, snow, water — and an office
+	# has none of those, so they would all fall through to the default and
+	# a boardroom would fill up with sheep.
+	if world.store.theme == "office":
+		return
 	var angle := randf() * TAU
 	var dist := randf_range(10.0, 26.0)
 	var wx := int(anchor.x + cos(angle) * dist)

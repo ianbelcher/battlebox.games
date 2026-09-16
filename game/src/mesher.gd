@@ -580,6 +580,33 @@ func _shape_connects(shape: int, nx: int, ny: int, nz: int) -> bool:
 		return true
 	return Blocks.LK_OPAQUE[n] == 1
 
+## Turn one box from the canonical facing (north, -Z) into `facing`, a
+## quarter turn about the middle of the cell each step. Written once here
+## rather than four times per shape in the match below: the stairs above
+## spell their four cases out and that was already the longest arm of it.
+static func _turn(bmin: Vector3, bmax: Vector3, facing: int) -> Array:
+	match posmod(facing, 4):
+		1:
+			return [Vector3(1.0 - bmax.z, bmin.y, bmin.x),
+				Vector3(1.0 - bmin.z, bmax.y, bmax.x)]
+		2:
+			return [Vector3(1.0 - bmax.x, bmin.y, 1.0 - bmax.z),
+				Vector3(1.0 - bmin.x, bmax.y, 1.0 - bmin.z)]
+		3:
+			return [Vector3(bmin.z, bmin.y, 1.0 - bmax.x),
+				Vector3(bmax.z, bmax.y, 1.0 - bmin.x)]
+	return [bmin, bmax]
+
+## Every box of a turnable block, put the way round the block is.
+static func _turned(block: int, boxes: Array) -> Array:
+	var facing := Blocks.facing_of(block)
+	if facing == 0:
+		return boxes
+	var out: Array = []
+	for box: Array in boxes:
+		out.append(_turn(box[0], box[1], facing))
+	return out
+
 func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int) -> void:
 	var boxes: Array = []
 	match shape:
@@ -651,6 +678,48 @@ func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int
 					boxes.append([Vector3(0.44, 0, 0.56), Vector3(0.56, 1, 1)])
 				if north:
 					boxes.append([Vector3(0.44, 0, 0), Vector3(0.56, 1, 0.44)])
+		9:
+			# DESK. A worktop the full width of the cell on four legs, so
+			# one is a desk and a row of them is a bench — which is what
+			# an open-plan floor is actually made of.
+			boxes = [[Vector3(0, 0.72, 0), Vector3(1, 0.8, 1)]]
+			for lx: float in [0.06, 0.84]:
+				for lz: float in [0.06, 0.84]:
+					boxes.append([Vector3(lx, 0, lz),
+						Vector3(lx + 0.1, 0.72, lz + 0.1)])
+		15:
+			# MEETING TABLE. Same trick, but on a plinth rather than legs
+			# so a run of them reads as one long boardroom table.
+			boxes = [[Vector3(0, 0.74, 0), Vector3(1, 0.84, 1)],
+				[Vector3(0.28, 0, 0.28), Vector3(0.72, 0.74, 0.72)]]
+		12:
+			boxes = [[Vector3(0.03, 0, 0.03), Vector3(0.97, 0.86, 0.97)],
+				[Vector3(0, 0.86, 0), Vector3(1, 0.92, 1)]]
+		16:
+			boxes = [[Vector3(0.16, 0, 0.16), Vector3(0.84, 0.5, 0.84)],
+				[Vector3(0.12, 0.5, 0.12), Vector3(0.88, 0.58, 0.88)]]
+		10:
+			# The four turnable fittings are written once facing NORTH and
+			# rotated — see _turn. Canonically the BACK of the thing is at
+			# low z, so its front looks down +z.
+			boxes = _turned(block, [
+				[Vector3(0.22, 0, 0.22), Vector3(0.78, 0.06, 0.78)],
+				[Vector3(0.44, 0.06, 0.44), Vector3(0.56, 0.42, 0.56)],
+				[Vector3(0.16, 0.42, 0.16), Vector3(0.84, 0.54, 0.84)],
+				[Vector3(0.16, 0.54, 0.14), Vector3(0.84, 1.0, 0.26)]])
+		11:
+			boxes = _turned(block, [
+				[Vector3(0.34, 0, 0.36), Vector3(0.66, 0.05, 0.7)],
+				[Vector3(0.46, 0.05, 0.46), Vector3(0.54, 0.42, 0.56)],
+				[Vector3(0.08, 0.36, 0.3), Vector3(0.92, 0.95, 0.38)]])
+		13:
+			boxes = _turned(block, [
+				[Vector3(0.04, 0, 0.06), Vector3(0.96, 0.26, 0.94)],
+				[Vector3(0.04, 0.26, 0.24), Vector3(0.96, 0.46, 0.96)],
+				[Vector3(0.04, 0.26, 0.06), Vector3(0.96, 0.88, 0.24)]])
+		14:
+			boxes = _turned(block, [
+				[Vector3(0.02, 0.08, 0.06), Vector3(0.98, 0.98, 0.14)]])
 	var key := "trans" if shape == 6 else "opaque"
 	var color := Blocks.LK_COLOR[block]
 	var jitter := _jitter(x, y, z, cx, cz)

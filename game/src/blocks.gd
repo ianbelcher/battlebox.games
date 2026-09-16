@@ -184,23 +184,109 @@ const BEACON_TEAM := 247  # ..254: red blue green yellow purple orange teal pink
 ## 255 stays 255 forever, and everything new lands above it.
 const TRAP := 255
 
+## ---- THE OFFICE (256+) -------------------------------------------------
+##
+## The first blocks past the one-byte wall, and the reason it came down.
+## An office is not built out of cobble and oak: it is carpet tile, painted
+## plasterboard, a suspended ceiling with a light panel every few metres,
+## glass to the floor, and furniture that has to read as furniture at a
+## glance rather than as a coloured cube.
+##
+## FOUR IDS IN A ROW MEANS FOUR WAYS ROUND, exactly like the stairs above,
+## and the entry says so with `turns` pointing back at the first of the
+## four. See Blocks.orient(): whatever you place, its FRONT — the screen,
+## the seat, the writing surface — ends up looking at you.
+
+## Floors. Carpet here is a whole block, not the thin `carpet` shape: it
+## IS the floor of a storey rather than something laid on top of one.
+const OFFICE_CARPET := 256
+const OFFICE_CARPET_BLUE := 257
+const OFFICE_CARPET_SAGE := 258
+const OFFICE_CARPET_RUST := 259
+const OFFICE_VINYL := 260
+## The ceiling. CEILING_LIGHT is the important one: `emit` and NO `light`.
+## A real OmniLight3D per panel would eat the whole of chunk_view's
+## light_cap in one room and then flicker as people walked about; an
+## emissive face costs nothing and, in a room with glass down one side,
+## reads exactly right. See the note on ChunkView.light_cap.
+const CEILING_TILE := 261
+const CEILING_LIGHT := 262
+## Walls and structure.
+const OFFICE_WALL := 263
+const OFFICE_WALL_TEAL := 264
+const OFFICE_WALL_CLAY := 265
+const OFFICE_WALL_SAND := 266
+const CONCRETE_CORE := 267
+const OFFICE_OAK := 268
+## Glazing. PARTITION_* are pane-shaped, so they join up into a frameless
+## screen; CURTAIN_GLASS is a whole block for the outside wall, and
+## MULLION is the dark aluminium between the lights of it.
+const PARTITION_GLASS := 269
+const PARTITION_FROST := 270
+const CURTAIN_GLASS := 271
+const MULLION := 272
+## Furniture. DESK and MEETING_TABLE tile into a bench and a boardroom
+## table; the rest turn.
+const DESK := 273
+const MEETING_TABLE := 274
+const CABINET := 275
+const PLANTER := 276
+const OFFICE_CHAIR := 277        # ..280: N E S W
+const MONITOR := 281             # ..284
+const SOFA := 285                # ..288
+const WHITEBOARD := 289          # ..292
+## THE GLASS AT THE EDGE OF THE WORLD. The same skin as CURTAIN_GLASS and
+## unbreakable, because in the office map it IS the boundary ring — what
+## every other map spends on a bedrock cliff. A window you can dig
+## through is a hole out of the world.
+const CURTAIN_EDGE := 293
+const NEXT_FREE_ID := 294
+
 static func shape_of(id: int) -> String:
 	return str(info(id).get("shape", ""))
 
 static func stairs_facing_of(id: int) -> int:
 	return posmod(id - STAIRS_WOOD, 4)
 
+## Which quadrant a heading points into: 0 north (-z), 1 east, 2 south,
+## 3 west. The one convention every turnable block is written against.
+static func quadrant_of(dir: Vector3) -> int:
+	if absf(dir.x) > absf(dir.z):
+		return 1 if dir.x > 0.0 else 3
+	return 2 if dir.z > 0.0 else 0
+
 ## Rotate a placeable stairs id so it ascends the way the player faces.
 static func orient_stairs(id: int, dir: Vector3) -> int:
 	if shape_of(id) != "stairs":
 		return id
-	var base := id - stairs_facing_of(id)
-	var facing := 0  # north (-z)
-	if absf(dir.x) > absf(dir.z):
-		facing = 1 if dir.x > 0.0 else 3
-	elif dir.z > 0.0:
-		facing = 2
-	return base + facing
+	return id - stairs_facing_of(id) + quadrant_of(dir)
+
+## The first of a turnable block's four ids, or -1 if it does not turn.
+static func turn_base(id: int) -> int:
+	return int(info(id).get("turns", -1))
+
+## Which way a turnable block is round, 0..3 in quadrant_of's order.
+static func facing_of(id: int) -> int:
+	var base := turn_base(id)
+	return 0 if base < 0 else id - base
+
+## Turn `id` to the facing quadrant `facing`.
+static func with_facing(id: int, facing: int) -> int:
+	var base := turn_base(id)
+	return id if base < 0 else base + posmod(facing, 4)
+
+## THE PLACEMENT RULE, and it is one sentence: whatever you put down ends
+## up LOOKING AT YOU. A monitor's screen, a chair's seat, a whiteboard's
+## writing surface all face back along the heading, so you place a thing
+## while looking at where it goes and then see the front of it.
+##
+## Stairs are the exception and keep their own older rule — they ascend
+## the way you are facing, which is what everybody already expects of a
+## stair — so this asks them first.
+static func orient(id: int, dir: Vector3) -> int:
+	if shape_of(id) == "stairs":
+		return orient_stairs(id, dir)
+	return with_facing(id, quadrant_of(dir))
 
 ## The Minecraft-style building set (ids 101+). Grouped in rows of 8 so
 ## the Blocks tab lines up: stone, deep/dark, earthy, wood, nature, shiny.
@@ -409,6 +495,7 @@ static func _static_init() -> void:
 		"solid": true, "opaque": true, "hard": 2}
 	EXTRA[MYCELIUM] = {"name": "Mycelium", "color": Color("8a6242"),
 		"top": Color("7a6d80"), "solid": true, "opaque": true, "hard": 0}
+	_office_init()
 	_build_lookups()
 
 ## HOW MANY IDS THERE CAN BE. A block id used to be one byte and the
@@ -423,8 +510,13 @@ const ID_COUNT := 1024
 ## Flat per-id lookup tables for the mesher's hot loop — dictionary
 ## lookups per voxel were the whole cost of chunk meshing (measured
 ## ~245 ms/chunk before, dominated by info() dict traffic).
+## 9..16 are the office fittings. A shape is only ever a LIST OF BOXES to
+## the mesher (see Mesher._add_shape), so a new one costs an arm of that
+## match and nothing else — collision stays whole-block either way.
 const SHAPE_IDS := {"": 0, "slab": 1, "carpet": 2, "stairs": 3, "fence": 4,
-	"wall": 5, "pane": 6, "door": 7, "bed": 8}
+	"wall": 5, "pane": 6, "door": 7, "bed": 8,
+	"desk": 9, "chair": 10, "screen": 11, "cabinet": 12, "sofa": 13,
+	"board": 14, "table": 15, "planter": 16}
 static var LK_OPAQUE := PackedByteArray()
 ## 1 for anything a body cannot walk through — which is what holds the
 ## ground's shape up beside it, opaque or not.
@@ -445,6 +537,96 @@ static var LK_ROUGH := PackedFloat32Array()
 ## 10 brick bond · 11 stone-brick bond · 12 bark · 13 log rings).
 static var LK_PATTERN_SIDE := PackedByteArray()
 static var LK_PATTERN_TOP := PackedByteArray()
+
+## THE OFFICE PALETTE. Colours are the dull, slightly warm greys a real
+## fit-out is made of rather than the saturated blocks the rest of the
+## game uses — an office that looks like Lego reads as a toy, and the
+## point of the map is that it reads as a place you have worked in.
+static func _office_init() -> void:
+	var flat := func(id: int, name: String, col: Color, extra: Dictionary = {}) -> void:
+		var spec := {"name": name, "color": col, "solid": true, "opaque": true,
+			"hard": 1, "rough": 1.0}
+		spec.merge(extra, true)
+		EXTRA[id] = spec
+
+	# --- floors ---------------------------------------------------------
+	# Loop-pile carpet: rough, so the per-position jitter reads as pile
+	# rather than as noise on a painted surface.
+	flat.call(OFFICE_CARPET, "Office Carpet", Color("55585f"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_BLUE, "Blue Carpet", Color("3f4a63"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_SAGE, "Sage Carpet", Color("4d5c50"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_RUST, "Rust Carpet", Color("7a4a3c"), {"rough": 2.8})
+	flat.call(OFFICE_VINYL, "Vinyl Plank", Color("a88a66"),
+		{"top": Color("b59470"), "rough": 0.7, "pattern_side": 9, "pattern_top": 9})
+
+	# --- ceiling --------------------------------------------------------
+	flat.call(CEILING_TILE, "Ceiling Tile", Color("d8d9d4"),
+		{"rough": 1.8, "emit": 0.06})
+	# emit WITHOUT light, on purpose — see the note above the id.
+	flat.call(CEILING_LIGHT, "Ceiling Light", Color("fdfbf2"),
+		{"top": Color("fffdf6"), "rough": 0.2, "emit": 2.8})
+
+	# --- walls and structure --------------------------------------------
+	flat.call(OFFICE_WALL, "Office Wall", Color("e2e0da"), {"rough": 1.0})
+	flat.call(OFFICE_WALL_TEAL, "Teal Wall", Color("2f6f72"), {"rough": 1.0})
+	flat.call(OFFICE_WALL_CLAY, "Clay Wall", Color("a85f4a"), {"rough": 1.0})
+	flat.call(OFFICE_WALL_SAND, "Sand Wall", Color("cbb28d"), {"rough": 1.0})
+	flat.call(CONCRETE_CORE, "Concrete", Color("8f8d88"), {"hard": 2, "rough": 1.6})
+	flat.call(OFFICE_OAK, "Oak Veneer", Color("b08a54"),
+		{"top": Color("bd9862"), "pattern_side": 9, "pattern_top": 9, "rough": 0.9})
+
+	# --- glazing ---------------------------------------------------------
+	# Frameless: a pane with almost no tint, so a meeting room is a room
+	# you can see into rather than a green box. The frosted one is the
+	# manifestation band — the same glass, turned up.
+	EXTRA[PARTITION_GLASS] = {"name": "Glass Partition",
+		"color": Color(0.86, 0.92, 0.95, 0.16), "solid": true, "opaque": false,
+		"shape": "pane", "hard": 0}
+	EXTRA[PARTITION_FROST] = {"name": "Frosted Partition",
+		"color": Color(0.88, 0.92, 0.94, 0.55), "solid": true, "opaque": false,
+		"shape": "pane", "hard": 0}
+	EXTRA[CURTAIN_GLASS] = {"name": "Window Wall",
+		"color": Color(0.70, 0.84, 0.90, 0.28), "solid": true, "opaque": false,
+		"translucent": true, "hard": 0}
+	flat.call(MULLION, "Mullion", Color("3c4046"), {"hard": 2, "rough": 0.5})
+	EXTRA[CURTAIN_EDGE] = {"name": "Window Wall",
+		"color": Color(0.70, 0.84, 0.90, 0.28), "solid": true, "opaque": false,
+		"translucent": true, "unbreakable": true}
+
+	# --- furniture -------------------------------------------------------
+	# Every one of these is SOLID: collision in this game is whole blocks
+	# (see player.gd), so a desk is something you walk round and can climb
+	# onto, and no amount of shaping in the mesher changes that.
+	var fit := func(id: int, name: String, shape: String, col: Color,
+			extra: Dictionary = {}) -> void:
+		var spec := {"name": name, "color": col, "solid": true, "opaque": false,
+			"shape": shape, "hard": 1, "rough": 1.0}
+		spec.merge(extra, true)
+		EXTRA[id] = spec
+
+	fit.call(DESK, "Desk", "desk", Color("c9b391"), {"top": Color("d4c0a2")})
+	fit.call(MEETING_TABLE, "Meeting Table", "table", Color("8a6440"),
+		{"top": Color("9a7149")})
+	fit.call(CABINET, "Filing Cabinet", "cabinet", Color("7f858c"),
+		{"top": Color("8d939a"), "rough": 0.6})
+	fit.call(PLANTER, "Planter", "planter", Color("6f6a60"), {"rough": 2.0})
+
+	var turning := [
+		[OFFICE_CHAIR, "Office Chair", "chair", Color("35373d"), {"rough": 2.2}],
+		[MONITOR, "Monitor", "screen", Color("232529"),
+			{"top": Color("2a2d33"), "emit": 0.5, "rough": 0.25}],
+		[SOFA, "Sofa", "sofa", Color("4a5a6b"), {"rough": 2.6}],
+		[WHITEBOARD, "Whiteboard", "board", Color("f4f4f0"),
+			{"emit": 0.12, "rough": 0.15}],
+	]
+	for row: Array in turning:
+		var base: int = row[0]
+		for f in 4:
+			var spec: Dictionary = {"name": str(row[1]), "color": row[3] as Color,
+				"solid": true, "opaque": false, "shape": str(row[2]), "hard": 1,
+				"rough": 1.0, "turns": base}
+			spec.merge(row[4] as Dictionary, true)
+			EXTRA[base + f] = spec
 
 static func _build_lookups() -> void:
 	LK_OPAQUE.resize(ID_COUNT)
@@ -491,6 +673,14 @@ static func _build_lookups() -> void:
 		LK_EMIT[id] = float(spec.get("emit", 0.0))
 		LK_LIGHT[id] = float(spec.get("light", 0.0))
 		LK_ROUGH[id] = float(spec.get("rough", 0.0))
+		# A block may also name its own face pattern instead of being
+		# listed in the two tables above — which is how the office
+		# joinery gets plank grain without growing a third copy of the
+		# same list of wood ids.
+		if spec.has("pattern_side"):
+			LK_PATTERN_SIDE[id] = int(spec["pattern_side"])
+		if spec.has("pattern_top"):
+			LK_PATTERN_TOP[id] = int(spec["pattern_top"])
 
 ## Per-block info, indexed by block id:
 ##   color: base albedo
@@ -739,6 +929,19 @@ static func picker_category(cat: String) -> Array:
 			out.append_array([TORCH, LANTERN, GLOWSTONE, CAMPFIRE, 147, 148,
 				CRYSTAL_PINK, CRYSTAL_BLUE, CRYSTAL_GREEN, 132,
 				CRAFTING_TABLE, CHEST, FURNACE, DOOR_WOOD, DOOR_IRON, BED])
+		"office":
+			# A TAB OF ITS OWN, because an office fit-out mixed into
+			# Build would be forty grey squares buried among four hundred
+			# coloured ones. Ordered the way a floor is actually put
+			# together: floor, ceiling, walls, glass, then the furniture.
+			out = [OFFICE_CARPET, OFFICE_CARPET_BLUE, OFFICE_CARPET_SAGE,
+				OFFICE_CARPET_RUST, OFFICE_VINYL, 111,
+				CEILING_TILE, CEILING_LIGHT,
+				OFFICE_WALL, OFFICE_WALL_TEAL, OFFICE_WALL_CLAY,
+				OFFICE_WALL_SAND, CONCRETE_CORE, OFFICE_OAK, MULLION, 104,
+				PARTITION_GLASS, PARTITION_FROST, CURTAIN_GLASS, DOOR_IRON,
+				DESK, MEETING_TABLE, OFFICE_CHAIR, SOFA, CABINET, MONITOR,
+				WHITEBOARD, PLANTER, 132, CHEST]
 	return out
 
 ## WHAT A TRAP BLOCK SHOULD LOOK LIKE, given what is beside it.

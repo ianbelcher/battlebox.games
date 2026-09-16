@@ -174,6 +174,10 @@ func stand_y(gx: int, gz: int) -> int:
 		return -1
 	if theme == "caverns" and y >= WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST:
 		return -1
+	# Standing ON something in the office means standing on the floor or
+	# on a desk, never inside the ceiling void.
+	if theme == "office" and y >= WorldGen.OFFICE_CEIL_Y - 2:
+		return -1
 	var under := get_block(Vector3i(gx, y, gz))
 	if under == Blocks.AIR or Blocks.is_liquid(under):
 		return -1
@@ -395,6 +399,17 @@ func surface_y(wx: int, wz: int) -> int:
 		var floor_y := _hall_floor(data, lx, lz)
 		if floor_y >= 0:
 			return floor_y
+	# AND THE OFFICE IS LIVED IN UNDER ITS OWN CEILING. Searching down
+	# from the sky finds the slab of the storey above every time, so every
+	# spawn, crate and computer player would be placed on the roof of a
+	# building nobody can get onto. Start the search at the ceiling
+	# instead and the answer is the floor, or the desk standing on it.
+	if theme == "office":
+		for y in range(WorldGen.OFFICE_CEIL_Y - 1, -1, -1):
+			var b := data.decode_u16(WorldGen.bidx(lx, y, lz))
+			if b != Blocks.AIR and not Blocks.is_cross(b):
+				return y
+		return 0
 	for y in range(WorldGen.CHUNK_H - 1, -1, -1):
 		var b := data.decode_u16(WorldGen.bidx(lx, y, lz))
 		if b != Blocks.AIR and not Blocks.is_cross(b):
@@ -443,6 +458,14 @@ func walkable_y(wx: int, wz: int, from_y: float) -> int:
 			return -1
 		return y
 	return -1
+
+## A WORLD LIVED IN SOMEWHERE OTHER THAN ON TOP OF ITS TERRAIN. Both of
+## these put people below the waterline of a sea they do not have — the
+## caverns under their crust, the office on a slab at y=3 — so anything
+## that rejects a spot for being at or under WorldGen.SEA_LEVEL has to ask
+## this first or it rejects the whole map.
+func is_interior() -> bool:
+	return theme == "caverns" or theme == "office"
 
 func find_spawn() -> Vector3i:
 	if mca != null:

@@ -710,7 +710,8 @@ func _build_picker_pages() -> void:
 	# Lights held a ladder, a bookshelf, a chest and a bed. Special is gone
 	# too — four blocks do not need a page, and the ones that survived are
 	# tools, so they live with the tools.
-	for spec in [["Tools", "tools"], ["Build", "building"], ["Kits", "kits"]]:
+	for spec in [["Tools", "tools"], ["Build", "building"], ["Office", "office"],
+			["Kits", "kits"]]:
 		var picker := BlockPicker.new(spec[1])
 		picker.name = spec[0]
 		picker.picked.connect(_on_picked)

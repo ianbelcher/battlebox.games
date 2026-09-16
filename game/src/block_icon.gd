@@ -323,6 +323,62 @@ func _draw_block(w: float, h: float, mid: Vector2) -> void:
 					Color(1, 1, 1, 0.5), false, w * 0.03)
 				draw_line(Vector2(w * 0.38, h * 0.7), Vector2(w * 0.56, h * 0.24),
 					Color(1, 1, 1, 0.6), w * 0.04)
+			"desk", "table":
+				var legs := c.darkened(0.3)
+				var top_y := h * (0.42 if icon_shape == "desk" else 0.4)
+				if icon_shape == "desk":
+					draw_rect(Rect2(w * 0.16, top_y, w * 0.1, h * 0.42), legs)
+					draw_rect(Rect2(w * 0.74, top_y, w * 0.1, h * 0.42), legs)
+				else:
+					draw_rect(Rect2(w * 0.42, top_y, w * 0.16, h * 0.4), legs)
+					draw_rect(Rect2(w * 0.3, h * 0.82, w * 0.4, h * 0.08), legs)
+				draw_rect(Rect2(w * 0.08, top_y - h * 0.12, w * 0.84, h * 0.13),
+					c.lightened(0.12))
+			"chair":
+				draw_rect(Rect2(w * 0.28, h * 0.16, w * 0.44, h * 0.34),
+					c.lightened(0.16))
+				draw_rect(Rect2(w * 0.22, h * 0.48, w * 0.56, h * 0.12), c)
+				draw_rect(Rect2(w * 0.46, h * 0.6, w * 0.08, h * 0.2), c.darkened(0.2))
+				draw_rect(Rect2(w * 0.3, h * 0.8, w * 0.4, h * 0.07), c.darkened(0.3))
+			"screen":
+				draw_rect(Rect2(w * 0.12, h * 0.2, w * 0.76, h * 0.42), c.darkened(0.3))
+				draw_rect(Rect2(w * 0.17, h * 0.25, w * 0.66, h * 0.32),
+					Color(0.45, 0.62, 0.78))
+				draw_rect(Rect2(w * 0.46, h * 0.62, w * 0.08, h * 0.16), c)
+				draw_rect(Rect2(w * 0.32, h * 0.78, w * 0.36, h * 0.07), c)
+			"cabinet":
+				draw_rect(Rect2(w * 0.18, h * 0.24, w * 0.64, h * 0.62), c)
+				for dy in [0.32, 0.5, 0.68]:
+					draw_rect(Rect2(w * 0.22, h * dy, w * 0.56, h * 0.13),
+						c.lightened(0.12))
+					draw_rect(Rect2(w * 0.44, h * (dy + 0.05), w * 0.12, h * 0.03),
+						c.darkened(0.35))
+			"sofa":
+				draw_rect(Rect2(w * 0.1, h * 0.3, w * 0.8, h * 0.26),
+					c.lightened(0.14))
+				draw_rect(Rect2(w * 0.1, h * 0.54, w * 0.8, h * 0.22), c)
+				draw_rect(Rect2(w * 0.1, h * 0.76, w * 0.1, h * 0.1), c.darkened(0.3))
+				draw_rect(Rect2(w * 0.8, h * 0.76, w * 0.1, h * 0.1), c.darkened(0.3))
+			"board":
+				draw_rect(Rect2(w * 0.1, h * 0.18, w * 0.8, h * 0.56), c)
+				draw_rect(Rect2(w * 0.1, h * 0.18, w * 0.8, h * 0.56),
+					Color(0.35, 0.38, 0.42), false, w * 0.035)
+				draw_line(Vector2(w * 0.22, h * 0.36), Vector2(w * 0.6, h * 0.34),
+					Color(0.2, 0.42, 0.7), w * 0.035)
+				draw_line(Vector2(w * 0.22, h * 0.5), Vector2(w * 0.72, h * 0.52),
+					Color(0.75, 0.3, 0.3), w * 0.035)
+				draw_rect(Rect2(w * 0.3, h * 0.74, w * 0.4, h * 0.06),
+					c.darkened(0.35))
+			"planter":
+				draw_circle(Vector2(w * 0.5, h * 0.34), w * 0.22,
+					Color(0.31, 0.52, 0.27))
+				draw_circle(Vector2(w * 0.36, h * 0.42), w * 0.15,
+					Color(0.26, 0.45, 0.24))
+				draw_circle(Vector2(w * 0.65, h * 0.42), w * 0.14,
+					Color(0.35, 0.57, 0.3))
+				draw_colored_polygon(PackedVector2Array([
+					Vector2(w * 0.3, h * 0.56), Vector2(w * 0.7, h * 0.56),
+					Vector2(w * 0.64, h * 0.86), Vector2(w * 0.36, h * 0.86)]), c)
 		return
 	if icon_shape == "stairs":
 		var c := _dim(Blocks.color_of(block_id))

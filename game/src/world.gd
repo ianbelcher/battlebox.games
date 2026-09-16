@@ -152,12 +152,6 @@ var day_length := 60.0 if fast_mode() else IDLE_DAY_SECONDS
 ## starts feel the same: every battle used to be hard-set to a few minutes
 ## to seven in the evening, which read as "this game is always night".
 ## WORLD_CLOCK pins it (0 midnight, 0.25 dawn, 0.5 noon, 0.75 dusk).
-static func _random_clock() -> float:
-	var forced := OS.get_environment("WORLD_CLOCK")
-	if forced.is_valid_float():
-		return fposmod(forced.to_float(), 1.0)
-	return randf()
-
 static func growth_msec() -> int:
 	return 8_000 if fast_mode() else 100_000
 
@@ -322,7 +316,7 @@ func _server_setup() -> void:
 	source = store.source
 	spawn_pos = store.find_spawn()
 	_build_overview()
-	clock = _random_clock()
+	clock = SkyRule.opening_clock(store.theme)
 	print("World spawn at %s, clock %.2f" % [spawn_pos, clock])
 	_load_battle_setup()
 	RoomSetup.apply(self)
@@ -356,12 +350,17 @@ func _server_setup() -> void:
 	growth_timer.start()
 	Game.roster_changed.connect(_server_on_roster_changed)
 
-## THE CAVERNS WORLD IS ALWAYS NIGHT: moonlit plain, halls lit by what glows.
+## The map this is, from either end: the server has the store, a client
+## only has the name that came down the wire. SkyRule turns it into what
+## the sky is doing — and holds the two maps whose clock does not move.
+func sky_theme() -> String:
+	return store.theme if multiplayer.is_server() else client_world
+
 func always_night() -> bool:
-	return (store.theme if multiplayer.is_server() else client_world) == "caverns"
+	return SkyRule.always_night(sky_theme())
 
 func _process(delta: float) -> void:
-	if not always_night():
+	if not SkyRule.holds_still(sky_theme()):
 		clock = fposmod(clock + delta / maxf(day_length, MIN_DAY_SECONDS), 1.0)
 	if not multiplayer.is_server() and match_phase != "IDLE":
 		# The server only sends match_seconds at phase transitions — tick
@@ -615,7 +614,7 @@ func _far_spawn() -> Vector3:
 		if not store.inside_world(wx, wz, 6):
 			continue
 		var y := store.stand_y(wx, wz)
-		if y < 0 or (y <= WorldGen.SEA_LEVEL and store.theme != "caverns") \
+		if y < 0 or (y <= WorldGen.SEA_LEVEL and not store.is_interior()) \
 				or y >= WorldGen.CHUNK_H - 8:
 			continue
 		var nearest := 1e9
@@ -1263,7 +1262,7 @@ func _do_world_reset(map_name := "", new_size := 0) -> void:
 	cl_overview.rpc(overview)
 	# A new world is a new day, at a new time — and new ground for every
 	# team, since the hill they had fortified no longer exists.
-	clock = _random_clock()
+	clock = SkyRule.opening_clock(store.theme)
 	battle.team_site.clear()
 	# ...and with the site goes the level its mound was built at. Keeping
 	# that across a regenerate would raise the next mound at the old

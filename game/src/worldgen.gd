@@ -13,7 +13,7 @@ extends RefCounted
 ## _known_map() silently refused it — clicking Space did nothing at all.
 ## Anything that needs to know the maps asks here.
 const THEMES := ["classic", "desert", "isles", "castles", "city", "sky", "space", "caverns",
-	"mountain"]
+	"mountain", "office"]
 
 const CHUNK_SIZE := 16
 const CHUNK_H := 80
@@ -28,7 +28,7 @@ const SEA_LEVEL := 24
 const ISLAND_RADIUS := 220.0
 
 var seed_value: int
-var theme := "classic"   # classic / desert / isles / castles / city / sky / space
+var theme := "classic"   # see THEMES
 ## The world is a SQUARE slab: `world_size` blocks on a side, centred on
 ## the origin, so a size of 50 means x and z both run -25..+25. Outside it
 ## nothing is generated at all — the world simply ends, and players are
@@ -165,6 +165,9 @@ func height_at(wx: int, wz: int) -> int:
 	# Ocean floor ~14, beaches just above sea, hills up to ~+30 over sea.
 	if theme == "city":
 		return clampi(SEA_LEVEL + 4 + int(detail * 1.2), 2, CHUNK_H - 12)
+	if theme == "office":
+		# The floor slab. Flat by construction: this is a building.
+		return OFFICE_FLOOR_Y
 	if theme == "caverns":
 		# Dead flat. All of this world is underneath.
 		return CAVERN_TOP
@@ -257,10 +260,22 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 			# world's plain the wall has to clear the local ground by a real
 			# margin or it stops being a wall and starts being a step.
 			if on_border(wx, wz):
+				# The office's boundary is its own outside wall, and you
+				# are meant to see through it — see _office_edge.
+				if theme == "office":
+					_office_edge(data, lx, lz, wx, wz)
+					continue
 				var wall_top := mini(CHUNK_H - 1,
 					maxi(SEA_LEVEL + 10, height_at(wx, wz) + 14))
 				for y in range(wall_top + 1):
 					data.encode_u16(bidx(lx, y, lz), Blocks.BEDROCK)
+				continue
+			# AN INTERIOR SKIPS THE LOT: no height, no caves, no sky
+			# islands, no landmarks, no scatter. None of them mean
+			# anything inside a building, and every one of them would
+			# put a tree through the ceiling.
+			if theme == "office":
+				_office_column(data, lx, lz, wx, wz)
 				continue
 			var h := height_at(wx, wz)
 			h -= lake_depth_at(wx, wz, h)
@@ -286,7 +301,7 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 			_landmark_column(data, lx, lz, wx, wz, h)
 	# The city plants its own street trees, verges and parks; the wild
 	# scatter used to sprinkle forest over the pavements on top of it.
-	if theme != "city":
+	if theme != "city" and theme != "office":
 		_scatter_features(data, cx, cz)
 	return data
 
@@ -1292,6 +1307,401 @@ func _skylands_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int)
 ## compiles perfectly against a two-byte array — it just silently reads
 ## half of the wrong block. Renaming it turned every one of the two
 ## hundred-odd call sites into a compile error that had to be looked at.
+## ======================================================================
+## THE OFFICE: one storey of a tower, sliced through.
+##
+## Every other map in this file is a landscape — a height per column and
+## whatever grows on it. This one is an INTERIOR, and that changes three
+## things at once: there is a ceiling over your head, the "surface" is a
+## floor slab in the middle of the world rather than the top of it (see
+## ChunkStore.surface_y), and the edge of the map is a glazed wall you
+## look out of rather than a cliff you stop at.
+##
+## THE SECTION, bottom to top. Everything is decided against these:
+##
+##     y 10   ┌───────────────┐  the slab of the storey above
+##     y  9   │               │
+##     y  8   ├───────────────┤  suspended ceiling, light panel or tile
+##     y 4-7  │   the room    │  four blocks clear — walls, glass, people
+##     y  3   ├───────────────┤  the floor you stand on
+##     y 1-2  │               │  structure and services
+##     y  0   └───────────────┘  bedrock
+##
+## ONE COLUMN AT A TIME. The generator never sees more than (wx, wz), the
+## same constraint the city works under, so the whole plan is arithmetic
+## on a grid and a hash — no state carried between calls, and any column
+## can be regenerated on its own and come out identical.
+const OFFICE_FLOOR_Y := 3
+const OFFICE_CEIL_Y := 8
+const OFFICE_SLAB_TOP := 10
+## The planning module: a three-wide corridor, then a twelve-deep room off
+## it. Fifteen is small enough that a floor has real circulation in it and
+## big enough that a meeting room holds a table and the chairs round it.
+const OFFICE_BAY := 15
+const OFFICE_CORRIDOR := 3
+const OFFICE_LOT := OFFICE_BAY - OFFICE_CORRIDOR
+## Reception, in the middle, where everybody arrives. Fourteen each way
+## because that is where the LOT GRID falls: the four lots around the
+## origin end exactly here, so reception eats whole lots and no room is
+## left as a one-column sliver of wall against it.
+const OFFICE_CORE_HALF := 14
+## The walkway inside the glass. Kept clear the whole way round, because
+## the view is the reason to be on a high floor at all.
+const OFFICE_PERIMETER := 3
+
+## Which grid lines carry a MAIN corridor. Every third one is five wide
+## rather than three, so a floor has a spine and some side streets rather
+## than one undifferentiated grid of identical cells. It is the same idea
+## as the city's main avenues above, and it is doing the same job: a plan
+## with no hierarchy in it reads as a maze however good the rooms are.
+static func _office_corridor_w(band: int) -> int:
+	return 5 if posmod(band, 3) == 0 else 3
+
+## Where a column falls in its bay, on one axis:
+##   [band, corridor width, offset into the lot]
+## The offset is NEGATIVE while the column is still in the corridor, so
+## `off < 0` is the whole test for "this is circulation".
+static func _office_bay(w: int) -> Array:
+	var band := floori(float(w) / float(OFFICE_BAY))
+	var cw := _office_corridor_w(band)
+	return [band, cw, posmod(w, OFFICE_BAY) - cw]
+
+func _office_fill(data: PackedByteArray, lx: int, lz: int, y0: int, y1: int,
+		block: int) -> void:
+	for y in range(maxi(y0, 0), mini(y1, CHUNK_H - 1) + 1):
+		data.encode_u16(bidx(lx, y, lz), block)
+
+## THE EDGE OF THE WORLD IS THE OUTSIDE WALL OF THE BUILDING. The bedrock
+## cliff every other map ends in would be a wall across the window, so the
+## office spends its border ring on the curtain wall instead: an aluminium
+## post every four blocks and glass between them. CURTAIN_EDGE is
+## unbreakable for the same reason the bedrock ring is — it is the
+## boundary, and a boundary you can dig through is a hole out of the world.
+func _office_edge(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
+	data.encode_u16(bidx(lx, 0, lz), Blocks.BEDROCK)
+	_office_fill(data, lx, lz, 1, OFFICE_FLOOR_Y, Blocks.CONCRETE_CORE)
+	_office_fill(data, lx, lz, OFFICE_CEIL_Y, OFFICE_SLAB_TOP, Blocks.CONCRETE_CORE)
+	if posmod(wx + wz, 4) == 0:
+		_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
+			Blocks.MULLION)
+	else:
+		_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
+			Blocks.CURTAIN_EDGE)
+
+## The suspended ceiling: a light panel on a five-block grid, tile
+## everywhere else. Light panels EMIT and spawn NO real lamp — twenty of
+## them in one room would take the whole of ChunkView.light_cap and then
+## flicker as people walked about. See Blocks.CEILING_LIGHT.
+func _office_ceiling(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
+	var lit: bool = posmod(wx, 5) == 2 and posmod(wz, 5) == 2
+	data.encode_u16(bidx(lx, OFFICE_CEIL_Y, lz),
+		Blocks.CEILING_LIGHT if lit else Blocks.CEILING_TILE)
+
+func _office_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
+	data.encode_u16(bidx(lx, 0, lz), Blocks.BEDROCK)
+	_office_fill(data, lx, lz, 1, OFFICE_FLOOR_Y - 1, Blocks.CONCRETE_CORE)
+	_office_fill(data, lx, lz, OFFICE_CEIL_Y + 1, OFFICE_SLAB_TOP, Blocks.CONCRETE_CORE)
+	_office_ceiling(data, lx, lz, wx, wz)
+
+	var half := world_size / 2
+	var edge := mini(half - absi(wx), half - absi(wz))
+	if edge <= OFFICE_PERIMETER:
+		# The walkway inside the glass, kept clear the whole way round:
+		# the view is the reason to be on a high floor at all.
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET)
+		if edge == 2 and posmod(wx, 11) == 4 and posmod(wz, 11) == 4:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.PLANTER)
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.BAMBOO)
+		return
+
+	if maxi(absi(wx), absi(wz)) <= OFFICE_CORE_HALF:
+		_office_reception(data, lx, lz, wx, wz)
+		return
+
+	var ax := _office_bay(wx)
+	var az := _office_bay(wz)
+	var ox: int = ax[2]
+	var oz: int = az[2]
+	if ox < 0 or oz < 0:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET)
+		# THE STRUCTURE, standing in the circulation where it belongs: one
+		# concrete column at each bay intersection. It is the cheapest
+		# thing in this whole generator and it does more than any of the
+		# furniture to make the floor read as the inside of a building
+		# rather than as a plan drawn on paper.
+		if posmod(wx, OFFICE_BAY) == 0 and posmod(wz, OFFICE_BAY) == 0:
+			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
+				Blocks.CONCRETE_CORE)
+		return
+
+	_office_room(data, lx, lz, wx, wz, int(ax[0]), int(az[0]), ox, oz,
+		OFFICE_BAY - int(ax[1]), OFFICE_BAY - int(az[1]))
+
+## RECEPTION, and the lift core standing in it. This is where everybody
+## lands — the spawn is the middle of this floor (see find_spawn) — so it
+## is the one part of the plan that is not rolled. A room you arrive in
+## should be the same room every time.
+func _office_reception(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
+	var arrival: bool = absi(wx) <= 7 and wz <= 3
+	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz),
+		Blocks.OFFICE_OAK if arrival else Blocks.OFFICE_CARPET)
+
+	# THE LIFT CORE: the one thing on the floor you cannot see past, which
+	# is what gives an open plan a middle. Two pairs of doors in its south
+	# face, which is the face you arrive out of.
+	if wz <= -7 and absi(wx) <= 7:
+		var door: bool = wz == -7 and (absi(wx) == 2 or absi(wx) == 3
+			or absi(wx) == 5 or absi(wx) == 6)
+		if door:
+			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_FLOOR_Y + 3,
+				Blocks.DOOR_IRON)
+			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 4, OFFICE_CEIL_Y - 1,
+				Blocks.CONCRETE_CORE)
+		else:
+			_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 1, OFFICE_CEIL_Y - 1,
+				Blocks.CONCRETE_CORE)
+		return
+
+	# A run of units against the core with screens over it: the wall you
+	# face as the doors open, and what tells you whose building this is.
+	if wz == -6 and absi(wx) <= 7:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.CABINET)
+		if absi(wx) <= 4:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
+				Blocks.with_facing(Blocks.MONITOR, 2))
+		return
+
+	# The desk, and somebody behind it. It sits across the way in rather
+	# than against a wall, so you meet it rather than have to find it.
+	if wz == -3 and absi(wx) <= 5:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.DESK)
+		return
+	if wz == -4 and absi(wx) <= 2:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz),
+			Blocks.with_facing(Blocks.OFFICE_CHAIR, 2))
+		return
+
+	# Waiting: two pairs of sofas over a low table, either side of the way
+	# through, so the walk from the lifts onto the floor stays clear.
+	if absi(absi(wx) - 10) <= 2 and wz >= 1 and wz <= 7:
+		if wz == 2:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz),
+				Blocks.with_facing(Blocks.SOFA, 2))
+		elif wz == 6:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz),
+				Blocks.with_facing(Blocks.SOFA, 0))
+		elif wz == 4 and absi(absi(wx) - 10) <= 1:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.MEETING_TABLE)
+		return
+
+	# Big plants in the corners of the room.
+	if absi(absi(wx) - 12) <= 1 and absi(absi(wz) - 12) <= 1:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.PLANTER)
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.LEAVES_LIGHT)
+
+## A LOT, and what was rolled for it. `sx` and `sz` are how deep the lot
+## is on each axis — not a constant, because a lot beside a main corridor
+## is two blocks shallower than one beside a side street.
+func _office_room(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
+		gx: int, gz: int, ox: int, oz: int, sx: int, sz: int) -> void:
+	var roll := hash01(gx, gz, 4100)
+	# CELLULAR IN THE MIDDLE, OPEN AT THE GLASS — which is how a real
+	# floor is planned, and for a real reason: the daylight is at the
+	# edge, so the desks go there and the rooms that do not need a window
+	# go round the core. Rolling every lot off the same table gave a floor
+	# with meeting rooms hard against the windows and desks in the dark
+	# middle, and it read as a spreadsheet rather than as a place.
+	var half_bays := maxf(float(world_size / 2) / float(OFFICE_BAY) - 1.0, 1.0)
+	var outness := clampf(float(maxi(absi(gx), absi(gz))) / half_bays, 0.0, 1.0)
+	var open_share := lerpf(0.20, 0.72, outness)
+	if roll < open_share:
+		_office_open_plan(data, lx, lz, gx, gz, ox, oz, sx, sz)
+		return
+	var rest := (roll - open_share) / maxf(1.0 - open_share, 0.001)
+	if rest < 0.50:
+		_office_meeting(data, lx, lz, gx, gz, ox, oz, sx, sz)
+	elif rest < 0.72:
+		_office_breakout(data, lx, lz, ox, oz, sx, sz)
+	elif rest < 0.88:
+		_office_booths(data, lx, lz, ox, oz, sx, sz)
+	else:
+		_office_kitchen(data, lx, lz, ox, oz, sx, sz)
+
+## OPEN PLAN: banks of desks, back to back, a monitor on each and a chair
+## pulled up to it. No walls at all — the corridor simply opens into it,
+## which is what open plan means and what keeps the floor feeling bigger
+## than the sum of its rooms.
+func _office_open_plan(data: PackedByteArray, lx: int, lz: int, gx: int, gz: int,
+		ox: int, oz: int, sx: int, sz: int) -> void:
+	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET_BLUE)
+	# A SIXTH OF THE FLOOR IS LEFT EMPTY, and it has to be. A plan where
+	# every lot is furnished has nowhere to stand and nowhere to put
+	# anything, and a hundred people cannot cross it.
+	if hash01(gx, gz, 4104) < 0.16:
+		return
+	# Banks run along whichever axis this lot's own hash picks, so the
+	# floor is not one endless direction of desks.
+	var along_x: bool = hash01(gx, gz, 4101) < 0.5
+	var across: int = oz if along_x else ox
+	var down: int = ox if along_x else oz
+	var run: int = sx if along_x else sz
+	if down < 1 or down > run - 2:
+		return
+	# Six deep per bank: chair, desk, desk, chair, then two of gangway —
+	# which is the bit you walk down to get to a seat.
+	var seat_y := OFFICE_FLOOR_Y + 1
+	match posmod(across, 6):
+		1:
+			data.encode_u16(bidx(lx, seat_y, lz),
+				Blocks.with_facing(Blocks.OFFICE_CHAIR, 2 if along_x else 1))
+		2:
+			data.encode_u16(bidx(lx, seat_y, lz), Blocks.DESK)
+			if posmod(down, 3) == 1:
+				data.encode_u16(bidx(lx, seat_y + 1, lz),
+					Blocks.with_facing(Blocks.MONITOR, 2 if along_x else 1))
+		3:
+			data.encode_u16(bidx(lx, seat_y, lz), Blocks.DESK)
+			if posmod(down, 3) == 1:
+				data.encode_u16(bidx(lx, seat_y + 1, lz),
+					Blocks.with_facing(Blocks.MONITOR, 0 if along_x else 3))
+		4:
+			data.encode_u16(bidx(lx, seat_y, lz),
+				Blocks.with_facing(Blocks.OFFICE_CHAIR, 0 if along_x else 3))
+		0:
+			# The end of a bank is a cabinet or a plant, not more desk.
+			if down == 1 or down == run - 2:
+				data.encode_u16(bidx(lx, seat_y, lz), Blocks.CABINET)
+
+## A MEETING ROOM, and the reason the office map wanted glass in the
+## palette at all: four walls you can see through, so a floor full of them
+## still reads as one space and you can tell at a glance which rooms are
+## busy.
+func _office_meeting(data: PackedByteArray, lx: int, lz: int, gx: int, gz: int,
+		ox: int, oz: int, sx: int, sz: int) -> void:
+	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET)
+	# NOT EVERY ROOM IS THE SIZE OF ITS LOT. A floor where every meeting
+	# room is identical is the grid showing through; a room that can be
+	# eight, ten or the whole lot, centred with circulation round it, and
+	# the grid stops being the first thing you see. Eight is a huddle;
+	# twelve seats a dozen.
+	var want: int = [8, 10, 14][int(hash01(gx, gz, 4103) * 3.0) % 3]
+	var rw := mini(want, sx)
+	var rd := mini(want, sz)
+	var rx := ox - (sx - rw) / 2
+	var rz := oz - (sz - rd) / 2
+	if rx < 0 or rz < 0 or rx >= rw or rz >= rd:
+		return
+	if rx == 0 or rx == rw - 1 or rz == 0 or rz == rd - 1:
+		# The way in: a gap in the middle of the north side, which is the
+		# one nearest the corridor the room is entered from.
+		if rz == 0 and absi(rx * 2 - (rw - 1)) <= 2:
+			return
+		# Frosted at sitting height, clear above and below it. A whole
+		# wall of clear glass is a fishbowl and a whole wall of frosted is
+		# a cupboard; the band is what real offices land on.
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.PARTITION_GLASS)
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.PARTITION_FROST)
+		_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 3, OFFICE_CEIL_Y - 1,
+			Blocks.PARTITION_GLASS)
+		return
+	var mid := rd / 2
+	# The table down the middle, chairs either side of it.
+	if rx >= 2 and rx <= rw - 3:
+		if rz == mid or rz == mid - 1:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.MEETING_TABLE)
+			return
+		if rz == mid - 2:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz),
+				Blocks.with_facing(Blocks.OFFICE_CHAIR, 2))
+			return
+		if rz == mid + 1:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz),
+				Blocks.with_facing(Blocks.OFFICE_CHAIR, 0))
+			return
+	# The far end: a board to write on and a screen beside it.
+	var cx := rw / 2
+	if rz == rd - 2:
+		if absi(rx - cx) <= 1:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
+				Blocks.with_facing(Blocks.WHITEBOARD, 2))
+		elif absi(rx - cx) == 3:
+			data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
+				Blocks.with_facing(Blocks.MONITOR, 2))
+	elif rz == 1 and rx == 1 and hash01(gx, gz, 4102) < 0.5:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.PLANTER)
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz), Blocks.FERN)
+
+## BREAKOUT: sofas round low tables on a warmer carpet, and no walls. The
+## part of a floor people actually end up talking in.
+func _office_breakout(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
+		sx: int, sz: int) -> void:
+	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET_RUST)
+	if ox < 1 or oz < 1 or ox > sx - 2 or oz > sz - 2:
+		return
+	var seat_y := OFFICE_FLOOR_Y + 1
+	var cx := posmod(ox, 6)
+	var cz := posmod(oz, 6)
+	if cx >= 2 and cx <= 3 and cz >= 2 and cz <= 3:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.MEETING_TABLE)
+	elif cx >= 2 and cx <= 3 and cz == 1:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.with_facing(Blocks.SOFA, 2))
+	elif cx >= 2 and cx <= 3 and cz == 4:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.with_facing(Blocks.SOFA, 0))
+	elif cx == 0 and cz == 0:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.PLANTER)
+		data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.LEAVES_LIGHT)
+
+## PHONE BOOTHS: little frosted rooms with a shelf and a stool. What an
+## open-plan floor grows when it has nowhere quiet left.
+func _office_booths(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
+		sx: int, sz: int) -> void:
+	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_CARPET_SAGE)
+	if ox < 1 or oz < 1 or ox > sx - 2 or oz > sz - 2:
+		return
+	# Five across on a six grid, so there is a lane between them.
+	var bx := posmod(ox - 1, 6)
+	var bz := posmod(oz - 1, 6)
+	if bx == 5 or bz == 5:
+		return
+	if bx == 0 or bx == 4 or bz == 0 or bz == 4:
+		if bz == 0 and bx == 2:
+			return          # the doorway
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.OFFICE_WALL)
+		_office_fill(data, lx, lz, OFFICE_FLOOR_Y + 2, OFFICE_CEIL_Y - 1,
+			Blocks.PARTITION_FROST)
+		return
+	if bx == 2 and bz == 3:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz), Blocks.DESK)
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 2, lz),
+			Blocks.with_facing(Blocks.MONITOR, 2))
+	elif bx == 2 and bz == 2:
+		data.encode_u16(bidx(lx, OFFICE_FLOOR_Y + 1, lz),
+			Blocks.with_facing(Blocks.OFFICE_CHAIR, 2))
+
+## THE TEA POINT: vinyl underfoot, a run of units along the back, and a
+## couple of tall tables to stand a mug on.
+func _office_kitchen(data: PackedByteArray, lx: int, lz: int, ox: int, oz: int,
+		sx: int, sz: int) -> void:
+	data.encode_u16(bidx(lx, OFFICE_FLOOR_Y, lz), Blocks.OFFICE_VINYL)
+	if ox < 1 or oz < 1 or ox > sx - 2 or oz > sz - 2:
+		return
+	var seat_y := OFFICE_FLOOR_Y + 1
+	if oz == sz - 2:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.CABINET)
+		if posmod(ox, 4) == 1:
+			data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.CHEST)
+		return
+	if oz == sz - 3 and posmod(ox, 5) == 2:
+		data.encode_u16(bidx(lx, seat_y, lz), Blocks.PLANTER)
+		data.encode_u16(bidx(lx, seat_y + 1, lz), Blocks.FERN)
+		return
+	if oz >= 3 and oz <= 5 and posmod(ox, 6) >= 2 and posmod(ox, 6) <= 3:
+		if oz == 4:
+			data.encode_u16(bidx(lx, seat_y, lz), Blocks.MEETING_TABLE)
+		else:
+			data.encode_u16(bidx(lx, seat_y, lz),
+				Blocks.with_facing(Blocks.OFFICE_CHAIR, 2 if oz == 3 else 0))
+
 static func bidx(lx: int, y: int, lz: int) -> int:
 	return ((y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx) << 1
 
@@ -1539,6 +1949,10 @@ func _plant_tree(data: PackedByteArray, lx: int, base_y: int, lz: int, size_roll
 ## A decent spawn: walk outward from the middle until we find grass above sea
 ## level. Returns the block position of the ground (players stand on top).
 func find_spawn() -> Vector3i:
+	if theme == "office":
+		# THE ROOM EVERYBODY ARRIVES IN. Reception, in front of the lifts,
+		# and the same spot every time — see _office_reception.
+		return Vector3i(0, OFFICE_FLOOR_Y, 0)
 	if theme == "sky":
 		# The (0,0) island always exists; land on top of it.
 		return Vector3i(0, 36 + int(hash01(0, 0, 952) * 22.0), 0)

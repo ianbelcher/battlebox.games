@@ -30,6 +30,7 @@ const KNOWN := {
 	"WORLD_MCA_CENTER": "the Minecraft x,z that becomes our origin, chunk-aligned",
 	"WORLD_CLIMB_TEST": "walk into a wall this many blocks high and see if you get over",
 	"WORLD_CLOCK": "pin the day fraction, 0..1, so a given hour can be looked at",
+	"WORLD_MAP_Y": "tests/city_map.gd: slice a map at this level instead of looking down on the roof",
 	"WORLD_FAST": "1 shrinks the day to 90s and sapling growth to 8s",
 
 	# --- What a room was ASKED to be -------------------------------------
