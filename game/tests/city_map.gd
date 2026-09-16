@@ -29,7 +29,7 @@ func _initialize() -> void:
 					var top := 0
 					var block := 0
 					for y in range(WorldGen.CHUNK_H - 1, -1, -1):
-						var b := data[WorldGen.idx(lx, y, lz)]
+						var b := data.decode_u16(WorldGen.bidx(lx, y, lz))
 						if b != Blocks.AIR:
 							top = y
 							block = b

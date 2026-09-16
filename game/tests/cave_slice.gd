@@ -42,7 +42,7 @@ func _initialize() -> void:
 		for lx in WorldGen.CHUNK_SIZE:
 			var px := (cx + span) * WorldGen.CHUNK_SIZE + lx
 			for y in WorldGen.CHUNK_H:
-				var block := data[WorldGen.idx(lx, y, lz)]
+				var block := data.decode_u16(WorldGen.bidx(lx, y, lz))
 				var c := Color(0.02, 0.02, 0.03)
 				if block == Blocks.AIR:
 					c = Color(0.02, 0.02, 0.03) if y < h_here else Color(0.10, 0.12, 0.18)

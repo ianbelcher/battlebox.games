@@ -17,6 +17,12 @@ const THEMES := ["classic", "desert", "isles", "castles", "city", "sky", "space"
 
 const CHUNK_SIZE := 16
 const CHUNK_H := 80
+## Blocks in a chunk, and the bytes they take: TWO EACH, little-endian.
+## See bidx(). A block id no longer fits in a byte — the palette ran out
+## at 255 with the trap block, and the office fittings needed a few dozen
+## more — so the wire and the cache carry u16 pairs.
+const CHUNK_BLOCKS := CHUNK_SIZE * CHUNK_SIZE * CHUNK_H
+const CHUNK_BYTES := CHUNK_BLOCKS * 2
 const SEA_LEVEL := 24
 ## Playable radius in blocks; beyond it the terrain sinks into open ocean.
 const ISLAND_RADIUS := 220.0
@@ -225,10 +231,10 @@ func lake_depth_at(wx: int, wz: int, h: int) -> int:
 		return 0
 	return int((n - 0.45) * 26.0)
 
-## Fill a chunk's blocks. Returns a PackedByteArray of CHUNK_SIZE^2 * CHUNK_H.
+## Fill a chunk's blocks. Returns a PackedByteArray of CHUNK_BYTES.
 func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 	var data := PackedByteArray()
-	data.resize(CHUNK_SIZE * CHUNK_SIZE * CHUNK_H)
+	data.resize(CHUNK_BYTES)
 	for lz in CHUNK_SIZE:
 		for lx in CHUNK_SIZE:
 			var wx := cx * CHUNK_SIZE + lx
@@ -254,7 +260,7 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 				var wall_top := mini(CHUNK_H - 1,
 					maxi(SEA_LEVEL + 10, height_at(wx, wz) + 14))
 				for y in range(wall_top + 1):
-					data[idx(lx, y, lz)] = Blocks.BEDROCK
+					data.encode_u16(bidx(lx, y, lz), Blocks.BEDROCK)
 				continue
 			var h := height_at(wx, wz)
 			h -= lake_depth_at(wx, wz, h)
@@ -262,17 +268,17 @@ func generate_chunk(cx: int, cz: int) -> PackedByteArray:
 			_fill_column(data, lx, lz, wx, wz, h, moist)
 			if theme == "desert":
 				for y in range(1, h + 1):
-					var b := data[idx(lx, y, lz)]
+					var b := data.decode_u16(bidx(lx, y, lz))
 					if b == Blocks.GRASS or b == Blocks.DIRT:
-						data[idx(lx, y, lz)] = Blocks.SAND if y == h else Blocks.SANDSTONE
+						data.encode_u16(bidx(lx, y, lz), Blocks.SAND if y == h else Blocks.SANDSTONE)
 				if h > SEA_LEVEL + 2 and h + 1 < CHUNK_H and hash01(wx, wz, 61) < 0.015:
-					data[idx(lx, h + 1, lz)] = Blocks.DEAD_BUSH
+					data.encode_u16(bidx(lx, h + 1, lz), Blocks.DEAD_BUSH)
 			elif h == SEA_LEVEL + 1 and h + 1 < CHUNK_H and hash01(wx, wz, 62) < 0.1:
-				data[idx(lx, h + 1, lz)] = Blocks.CATTAIL
+				data.encode_u16(bidx(lx, h + 1, lz), Blocks.CATTAIL)
 			_carve_caves(data, lx, lz, wx, wz, h)
 			# Bedrock floor across the whole slab: you can dig down, but
 			# never through the bottom of the world.
-			data[idx(lx, 0, lz)] = Blocks.BEDROCK
+			data.encode_u16(bidx(lx, 0, lz), Blocks.BEDROCK)
 			# No floating islands over the city (they make no sense above a
 			# street grid) and none in space, which has its own ships.
 			if theme != "city" and theme != "space" and theme != "caverns":
@@ -317,16 +323,16 @@ func _carve_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 			# table and filled down to the bed.
 			if land_y >= 0:
 				if y > land_y:
-					data[idx(lx, y, lz)] = Blocks.AIR
+					data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 			elif y > POOL_TOP:
-				data[idx(lx, y, lz)] = Blocks.AIR
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 			elif y > bed_y:
-				data[idx(lx, y, lz)] = Blocks.WATER
+				data.encode_u16(bidx(lx, y, lz), Blocks.WATER)
 		elif y > POOL_TOP:
-			data[idx(lx, y, lz)] = Blocks.AIR
+			data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 		elif y >= POOL_TOP - 1 or (y >= POOL_DEEP
 				and _lakes.get_noise_2d(wx * 2.0, wz * 2.0) > 0.42):
-			data[idx(lx, y, lz)] = Blocks.WATER
+			data.encode_u16(bidx(lx, y, lz), Blocks.WATER)
 		# ...and anything else under the table stays rock: the bed.
 	if deep:
 		_cavern_shaft(data, lx, lz, wx, wz, h)
@@ -339,7 +345,7 @@ func _carve_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 			var dist := Vector2(wx - ax, wz - az).length()
 			if dist < 9.0:
 				for y in range(maxi(4, h - 9 + int(dist)), h + 1):
-					data[idx(lx, y, lz)] = Blocks.AIR
+					data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 	_dress_caves(data, lx, lz, wx, wz, h, deep)
 
 ## Whether the caves are open at this block — the one test both the
@@ -403,12 +409,12 @@ func _cavern_bridge(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -
 		var deck := POOL_TOP + 2 + roundi(rise * 4.0 * t * (1.0 - t))
 		if deck + 1 >= CHUNK_H:
 			continue
-		var here := data[idx(lx, deck, lz)]
+		var here := data.decode_u16(bidx(lx, deck, lz))
 		if here != Blocks.AIR and here != Blocks.WATER:
 			continue
-		data[idx(lx, deck, lz)] = Blocks.COBBLE
-		if absi(off) == BRIDGE_HALF_WIDTH and data[idx(lx, deck + 1, lz)] == Blocks.AIR:
-			data[idx(lx, deck + 1, lz)] = Blocks.WALL
+		data.encode_u16(bidx(lx, deck, lz), Blocks.COBBLE)
+		if absi(off) == BRIDGE_HALF_WIDTH and data.decode_u16(bidx(lx, deck + 1, lz)) == Blocks.AIR:
+			data.encode_u16(bidx(lx, deck + 1, lz), Blocks.WALL)
 
 ## The nearest land along a bridge line from `along`, walking `dir`, or
 ## -99999 when there is none within reach or the line leaves the world.
@@ -439,13 +445,13 @@ func _cavern_shaft(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h:
 	# The mouth: a cone three blocks wider than the shaft, four deep.
 	var top_depth := 4 if dist < CAVERN_SHAFT_RADIUS else int(4.0 - (dist - CAVERN_SHAFT_RADIUS))
 	for y in range(maxi(4, h - top_depth + 1), h + 1):
-		data[idx(lx, y, lz)] = Blocks.AIR
+		data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 	if dist >= CAVERN_SHAFT_RADIUS:
 		return
 	# The shaft itself, through the crust and a way into whatever is
 	# underneath — far enough that it always opens into a hall.
 	for y in range(maxi(4, h - CAVERN_CRUST - 10), h + 1):
-		data[idx(lx, y, lz)] = Blocks.AIR
+		data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 
 ## Stalagmites, stalactites, crystals, glowstone, mushrooms. The caverns
 ## world gets a few more of the things that glow, because light is the
@@ -456,13 +462,13 @@ func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		deep: bool) -> void:
 	var lamp := 0.03 if deep else 0.03
 	for y in range(5, h - 3):
-		var here := data[idx(lx, y, lz)]
+		var here := data.decode_u16(bidx(lx, y, lz))
 		var roll := hash01(wx, y, wz * 7)
-		var below := data[idx(lx, y - 1, lz)]
+		var below := data.decode_u16(bidx(lx, y - 1, lz))
 		# Sea lanterns set into the beds of the pools, so the water glows.
 		if here == Blocks.WATER:
 			if below == Blocks.STONE and roll < 0.02:
-				data[idx(lx, y - 1, lz)] = 147
+				data.encode_u16(bidx(lx, y - 1, lz), 147)
 			continue
 		if here != Blocks.AIR:
 			continue
@@ -471,21 +477,21 @@ func _dress_caves(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 			# made a hall of forty blocks a jewellery shop.
 			if roll < 0.006:
 				var crystals := [Blocks.CRYSTAL_PINK, Blocks.CRYSTAL_BLUE, Blocks.CRYSTAL_GREEN]
-				data[idx(lx, y, lz)] = crystals[int(roll * 500.0) % 3]
+				data.encode_u16(bidx(lx, y, lz), crystals[int(roll * 500.0) % 3])
 			elif roll < lamp:
-				data[idx(lx, y - 1, lz)] = Blocks.GLOWSTONE
+				data.encode_u16(bidx(lx, y - 1, lz), Blocks.GLOWSTONE)
 			elif roll < lamp + 0.03:
-				data[idx(lx, y, lz)] = Blocks.MUSHROOM
+				data.encode_u16(bidx(lx, y, lz), Blocks.MUSHROOM)
 				if deep:
-					data[idx(lx, y - 1, lz)] = Blocks.MYCELIUM
+					data.encode_u16(bidx(lx, y - 1, lz), Blocks.MYCELIUM)
 			elif roll < lamp + 0.08:
-				data[idx(lx, y, lz)] = Blocks.COBBLE  # stalagmite
-		elif y + 1 < CHUNK_H and data[idx(lx, y + 1, lz)] == Blocks.STONE:
+				data.encode_u16(bidx(lx, y, lz), Blocks.COBBLE)  # stalagmite
+		elif y + 1 < CHUNK_H and data.decode_u16(bidx(lx, y + 1, lz)) == Blocks.STONE:
 			if roll > 0.94:
-				data[idx(lx, y, lz)] = Blocks.COBBLE  # stalactite
+				data.encode_u16(bidx(lx, y, lz), Blocks.COBBLE)  # stalactite
 			elif deep and roll > 0.975:
 				# Shroomlight in the ceiling: the hall's own lamps.
-				data[idx(lx, y + 1, lz)] = 148
+				data.encode_u16(bidx(lx, y + 1, lz), 148)
 
 ## Theme landmarks are laid out on a 96-block anchor grid; each column asks
 ## the pure landmark function what it contributes, so structures far bigger
@@ -540,11 +546,11 @@ func _landmark_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 			if k <= 2 and dz == -(size - k) and absi(dx) <= 1:
 				shell = false
 			if shell:
-				data[idx(lx, y, lz)] = Blocks.SANDSTONE
+				data.encode_u16(bidx(lx, y, lz), Blocks.SANDSTONE)
 			else:
-				data[idx(lx, y, lz)] = Blocks.AIR
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 				if k % 5 == 1 and hash01(wx, wz, 902 + k) < 0.02:
-					data[idx(lx, y, lz)] = Blocks.GLOWSTONE
+					data.encode_u16(bidx(lx, y, lz), Blocks.GLOWSTONE)
 	elif false:
 		var m := maxi(absi(dx), absi(dz))
 		var wall_r := 13
@@ -557,9 +563,9 @@ func _landmark_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 				if h + k < CHUNK_H:
 					var crenel: bool = k == height and not tower and posmod(wx + wz, 2) == 1
 					if not crenel:
-						data[idx(lx, h + k, lz)] = Blocks.COBBLE
+						data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE)
 			if tower and h + 9 < CHUNK_H:
-				data[idx(lx, h + 9, lz)] = Blocks.LANTERN
+				data.encode_u16(bidx(lx, h + 9, lz), Blocks.LANTERN)
 	elif theme == "isles" and roll < 0.6 and h < SEA_LEVEL - 3:
 		# A wooden ship at anchor.
 		if absi(dx) > 7 or absi(dz) > 3:
@@ -570,18 +576,18 @@ func _landmark_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 		var deck := SEA_LEVEL + 1
 		for y in range(SEA_LEVEL - 1, deck):
 			if absi(dz) == hull_w or absi(dx) == 7:
-				data[idx(lx, y, lz)] = Blocks.DARK_PLANKS
+				data.encode_u16(bidx(lx, y, lz), Blocks.DARK_PLANKS)
 			else:
-				data[idx(lx, y, lz)] = Blocks.AIR
-		data[idx(lx, deck, lz)] = Blocks.PLANKS
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
+		data.encode_u16(bidx(lx, deck, lz), Blocks.PLANKS)
 		if dx == 0 and dz == 0:
 			for k in range(1, 9):
-				data[idx(lx, deck + k, lz)] = Blocks.LOG
+				data.encode_u16(bidx(lx, deck + k, lz), Blocks.LOG)
 		elif dz == 0 and absi(dx) <= 3 and dx != 0:
 			for k in range(3, 8):
-				data[idx(lx, deck + k, lz)] = Blocks.WOOL_WHITE
+				data.encode_u16(bidx(lx, deck + k, lz), Blocks.WOOL_WHITE)
 		elif absi(dx) == 7 and dz == 0:
-			data[idx(lx, deck + 1, lz)] = Blocks.LANTERN
+			data.encode_u16(bidx(lx, deck + 1, lz), Blocks.LANTERN)
 
 ## CITY: a real street plan rather than a uniform grid of boxes.
 ##
@@ -621,18 +627,18 @@ func _city_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 	var on_kerb: bool = dx <= kerb_x or dz <= kerb_z
 
 	if on_road:
-		data[idx(lx, h, lz)] = Blocks.SLATE
+		data.encode_u16(bidx(lx, h, lz), Blocks.SLATE)
 		_city_clear(data, lx, lz, h, 10)
 		# Dashed white centre line down the middle of the main avenues,
 		# broken at the crossroads so junctions stay clear.
 		var main_x: bool = dx == 0 and posmod(cx, 80) == 0 and dz > tar_z
 		var main_z: bool = dz == 0 and posmod(cz, 80) == 0 and dx > tar_x
 		if (main_x and posmod(wz, 8) < 4) or (main_z and posmod(wx, 8) < 4):
-			data[idx(lx, h, lz)] = Blocks.WOOL_WHITE
+			data.encode_u16(bidx(lx, h, lz), Blocks.WOOL_WHITE)
 		return
 
 	if on_kerb:
-		data[idx(lx, h, lz)] = Blocks.SANDSTONE
+		data.encode_u16(bidx(lx, h, lz), Blocks.SANDSTONE)
 		_city_clear(data, lx, lz, h, 10)
 		# Street lights stand on the kerb of the main avenues, spaced out
 		# along the road and never in the middle of a junction.
@@ -642,27 +648,28 @@ func _city_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 			and posmod(wx, 16) == 0
 		if (post_x or post_z) and h + 6 < CHUNK_H:
 			for k in range(1, 5):
-				data[idx(lx, h + k, lz)] = Blocks.STEEL
-			data[idx(lx, h + 5, lz)] = Blocks.LANTERN
+				data.encode_u16(bidx(lx, h + k, lz), Blocks.STEEL)
+			data.encode_u16(bidx(lx, h + 5, lz), Blocks.LANTERN)
 		return
 
 	# Grass verge along the front of every lot.
 	var verge_x: int = dx - kerb_x
 	var verge_z: int = dz - kerb_z
 	if verge_x <= CITY_VERGE or verge_z <= CITY_VERGE:
-		data[idx(lx, h, lz)] = Blocks.GRASS
+		data.encode_u16(bidx(lx, h, lz), Blocks.GRASS)
 		_city_clear(data, lx, lz, h, 10)
 		var vroll := hash01(wx, wz, 815)
 		if h + 2 < CHUNK_H:
 			if vroll < 0.05:
-				data[idx(lx, h + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, h + 1, lz), Blocks.TALL_GRASS)
 			elif vroll < 0.075:
-				data[idx(lx, h + 1, lz)] = [Blocks.FLOWER_RED, Blocks.FLOWER_YELLOW,
-					Blocks.FLOWER_PINK, Blocks.DAISY][int(vroll * 400.0) % 4]
+				data.encode_u16(bidx(lx, h + 1, lz),
+					[Blocks.FLOWER_RED, Blocks.FLOWER_YELLOW,
+					Blocks.FLOWER_PINK, Blocks.DAISY][int(vroll * 400.0) % 4])
 			elif vroll < 0.085 and verge_x == CITY_VERGE and verge_z > CITY_VERGE:
 				# Street trees, in line, only along the length of a lot.
-				data[idx(lx, h + 1, lz)] = Blocks.LOG
-				data[idx(lx, h + 2, lz)] = Blocks.LEAVES
+				data.encode_u16(bidx(lx, h + 1, lz), Blocks.LOG)
+				data.encode_u16(bidx(lx, h + 2, lz), Blocks.LEAVES)
 		return
 
 	# The LOT index, not the nearest road: rounding here quartered every
@@ -682,26 +689,26 @@ func _city_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 ## left poking through a road or a lawn.
 func _city_clear(data: PackedByteArray, lx: int, lz: int, h: int, up: int) -> void:
 	for y in range(h + 1, mini(h + up, CHUNK_H)):
-		data[idx(lx, y, lz)] = Blocks.AIR
+		data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 
 ## Parks: lawn, winding path, scattered trees, flower beds and a pond.
 func _city_park(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int,
 		kx: int, kz: int) -> void:
-	data[idx(lx, h, lz)] = Blocks.GRASS
+	data.encode_u16(bidx(lx, h, lz), Blocks.GRASS)
 	_city_clear(data, lx, lz, h, 12)
 	# A path crosses the park so it reads as somewhere you walk through.
 	var path_wave := int(sin(float(wx) * 0.22 + float(kz)) * 2.5)
 	if absi(posmod(wz - kz * CITY_LOT, CITY_LOT) - 16 - path_wave) <= 1:
-		data[idx(lx, h, lz)] = Blocks.PATH
+		data.encode_u16(bidx(lx, h, lz), Blocks.PATH)
 		return
 	var pond := hash01(kx, kz, 816)
 	if pond < 0.45:
 		var px := float(wx - kx * CITY_LOT) - 20.0
 		var pz := float(wz - kz * CITY_LOT) - 12.0
 		if Vector2(px, pz).length() < 4.5:
-			data[idx(lx, h, lz)] = Blocks.WATER
+			data.encode_u16(bidx(lx, h, lz), Blocks.WATER)
 			if h + 1 < CHUNK_H and hash01(wx, wz, 817) < 0.25:
-				data[idx(lx, h + 1, lz)] = Blocks.LILY_PAD
+				data.encode_u16(bidx(lx, h + 1, lz), Blocks.LILY_PAD)
 			return
 	var proll := hash01(wx, wz, 806)
 	if h + 6 >= CHUNK_H:
@@ -710,26 +717,27 @@ func _city_park(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: in
 		# Proper little trees, not two-block shrubs.
 		var trunk := 3 + int(hash01(wx, wz, 818) * 3.0)
 		for k in range(1, trunk + 1):
-			data[idx(lx, h + k, lz)] = Blocks.LOG
-		data[idx(lx, h + trunk + 1, lz)] = Blocks.LEAVES
+			data.encode_u16(bidx(lx, h + k, lz), Blocks.LOG)
+		data.encode_u16(bidx(lx, h + trunk + 1, lz), Blocks.LEAVES)
 	elif proll < 0.045:
-		data[idx(lx, h + 1, lz)] = Blocks.LEAVES  # bush
+		data.encode_u16(bidx(lx, h + 1, lz), Blocks.LEAVES)  # bush
 	elif proll < 0.10:
-		data[idx(lx, h + 1, lz)] = Blocks.TALL_GRASS
+		data.encode_u16(bidx(lx, h + 1, lz), Blocks.TALL_GRASS)
 	elif hash01(floori(float(wx) / 5.0), floori(float(wz) / 5.0), 821) < 0.18 \
 			and proll < 0.55:
 		# Flower BEDS: a few 5x5 patches, not confetti over the whole lawn.
-		data[idx(lx, h + 1, lz)] = [Blocks.FLOWER_RED, Blocks.FLOWER_YELLOW,
+		data.encode_u16(bidx(lx, h + 1, lz),
+			[Blocks.FLOWER_RED, Blocks.FLOWER_YELLOW,
 			Blocks.FLOWER_PINK, Blocks.BLUEBELL, Blocks.DAISY][
-			int(hash01(floori(float(wx) / 5.0), floori(float(wz) / 5.0), 822) * 5.0)]
+			int(hash01(floori(float(wx) / 5.0), floori(float(wz) / 5.0), 822) * 5.0)])
 
 ## Car park: painted bays and chunky parked cars.
 func _city_car_park(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 		h: int, verge_x: int, verge_z: int) -> void:
-	data[idx(lx, h, lz)] = Blocks.PATH
+	data.encode_u16(bidx(lx, h, lz), Blocks.PATH)
 	_city_clear(data, lx, lz, h, 8)
 	if posmod(wz, 4) == 0:
-		data[idx(lx, h, lz)] = Blocks.SANDSTONE  # bay marking
+		data.encode_u16(bidx(lx, h, lz), Blocks.SANDSTONE)  # bay marking
 	if verge_x < CITY_VERGE + 2 or verge_z < CITY_VERGE + 2 or h + 3 >= CHUNK_H:
 		return
 	var car_x := posmod(wx, 5)
@@ -741,9 +749,9 @@ func _city_car_park(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 	var paint: int = [Blocks.WOOL_RED, Blocks.WOOL_BLUE, Blocks.WOOL_YELLOW,
 		Blocks.WOOL_GREEN, Blocks.WOOL_WHITE][int(hash01(floori(float(wx) / 5.0),
 		floori(float(wz) / 4.0), 813) * 5.0)]
-	data[idx(lx, h + 1, lz)] = paint
+	data.encode_u16(bidx(lx, h + 1, lz), paint)
 	if car_z == 1:
-		data[idx(lx, h + 2, lz)] = Blocks.GLASS
+		data.encode_u16(bidx(lx, h + 2, lz), Blocks.GLASS)
 
 ## One building. Footprint (how far it is set back from its verge) and
 ## height are rolled per lot, so the skyline stops looking stamped out.
@@ -760,14 +768,14 @@ func _city_building(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 	var setback_z := int(hash01(kx, kz, 819) * 6.0)
 	if verge_x <= CITY_VERGE + setback_x or verge_z <= CITY_VERGE + setback_z:
 		# Front garden: the green asked for at the sides of buildings.
-		data[idx(lx, h, lz)] = Blocks.GRASS
+		data.encode_u16(bidx(lx, h, lz), Blocks.GRASS)
 		_city_clear(data, lx, lz, h, 12)
 		var groll := hash01(wx, wz, 820)
 		if h + 2 < CHUNK_H:
 			if groll < 0.04:
-				data[idx(lx, h + 1, lz)] = Blocks.LEAVES
+				data.encode_u16(bidx(lx, h + 1, lz), Blocks.LEAVES)
 			elif groll < 0.09:
-				data[idx(lx, h + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, h + 1, lz), Blocks.TALL_GRASS)
 		return
 	var floors := 2 + int(hash01(kx, kz, 801) * 9.0)
 	var storey := 5
@@ -790,7 +798,7 @@ func _city_building(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 	var on_stairs: bool = stair_lane and stair_step >= 0 and stair_step < storey
 	var stair_void: bool = stair_lane and stair_step >= 0 and stair_step <= storey
 
-	data[idx(lx, h, lz)] = Blocks.PLANKS
+	data.encode_u16(bidx(lx, h, lz), Blocks.PLANKS)
 	for k in range(1, height + 2):
 		var y := h + k
 		if y >= CHUNK_H - 2:
@@ -804,24 +812,24 @@ func _city_building(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 				and k < height + 1
 			if k <= 3 and verge_z == CITY_VERGE + setback_z + 1 \
 					and ux >= mid - 1 and ux <= mid + 1:
-				data[idx(lx, y, lz)] = Blocks.AIR  # doorway
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)  # doorway
 			elif not window and hash01(wx, wz + k, 805) < 0.06:
-				data[idx(lx, y, lz)] = Blocks.LEAVES
+				data.encode_u16(bidx(lx, y, lz), Blocks.LEAVES)
 			else:
-				data[idx(lx, y, lz)] = Blocks.GLASS if window else material
+				data.encode_u16(bidx(lx, y, lz), Blocks.GLASS if window else material)
 		elif k == height + 1:
-			data[idx(lx, y, lz)] = Blocks.AIR if stair_void else material
+			data.encode_u16(bidx(lx, y, lz), Blocks.AIR if stair_void else material)
 		elif on_stairs and level == stair_step:
-			data[idx(lx, y, lz)] = Blocks.PLANKS  # one step per block along
+			data.encode_u16(bidx(lx, y, lz), Blocks.PLANKS)  # one step per block along
 		elif level == 0:
-			data[idx(lx, y, lz)] = Blocks.AIR if stair_void else Blocks.PLANKS
+			data.encode_u16(bidx(lx, y, lz), Blocks.AIR if stair_void else Blocks.PLANKS)
 		elif level == 1 and hash01(wx, wz, 810) < 0.03:
-			data[idx(lx, y, lz)] = Blocks.GLOWSTONE
+			data.encode_u16(bidx(lx, y, lz), Blocks.GLOWSTONE)
 		else:
-			data[idx(lx, y, lz)] = Blocks.AIR
+			data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 	# Rooftop lantern on a corner now and then.
 	if wall and hash01(wx, wz, 803) < 0.03 and h + height + 2 < CHUNK_H:
-		data[idx(lx, h + height + 2, lz)] = Blocks.LANTERN
+		data.encode_u16(bidx(lx, h + height + 2, lz), Blocks.LANTERN)
 
 ## CASTLES: one enormous central castle — curtain walls, corner towers,
 ## and a tall keep with floors you can fight through.
@@ -837,7 +845,7 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 				if h + k < CHUNK_H:
 					var crenel: bool = k == 10 and posmod(wx + wz, 2) == 1
 					if not crenel:
-						data[idx(lx, h + k, lz)] = Blocks.COBBLE
+						data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE)
 		return
 	# Corner towers.
 	if absi(absi(wx) - 57) <= 4 and absi(absi(wz) - 57) <= 4:
@@ -847,11 +855,11 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 				if h + k >= CHUNK_H:
 					break
 				if tower_r >= 3 or k >= 14:
-					data[idx(lx, h + k, lz)] = Blocks.COBBLE
+					data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE)
 				else:
-					data[idx(lx, h + k, lz)] = Blocks.AIR
+					data.encode_u16(bidx(lx, h + k, lz), Blocks.AIR)
 			if tower_r == 0 and h + 16 < CHUNK_H:
-				data[idx(lx, h + 16, lz)] = Blocks.LANTERN
+				data.encode_u16(bidx(lx, h + 16, lz), Blocks.LANTERN)
 		return
 	# The keep: 24x24 at the center — a real great hall, not bumpy terrain.
 	# Everything sits on a FLAT court at a fixed height: marble floor, red
@@ -862,7 +870,7 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 		if h > base + 20:
 			return
 		for fy in range(mini(h, base), base):
-			data[idx(lx, fy, lz)] = Blocks.STONE  # foundation up to the court
+			data.encode_u16(bidx(lx, fy, lz), Blocks.STONE)  # foundation up to the court
 		for k in range(0, 27):
 			var y := base + k
 			if y >= CHUNK_H - 1:
@@ -878,26 +886,26 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 			var carpet: bool = absi(wx) <= 1 and wz >= -10 and wz <= 6
 			var throne: bool = absi(wx) <= 1 and wz >= 8 and wz <= 9
 			if door:
-				data[idx(lx, y, lz)] = Blocks.AIR
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 			elif shell:
-				data[idx(lx, y, lz)] = Blocks.GLASS if window else Blocks.STONE
+				data.encode_u16(bidx(lx, y, lz), Blocks.GLASS if window else Blocks.STONE)
 			elif k == 0:
-				data[idx(lx, y, lz)] = Blocks.WOOL_RED if carpet else Blocks.MARBLE
+				data.encode_u16(bidx(lx, y, lz), Blocks.WOOL_RED if carpet else Blocks.MARBLE)
 			elif throne and (k <= 2 or (k == 3 and wz == 9)):
-				data[idx(lx, y, lz)] = Blocks.GOLD
+				data.encode_u16(bidx(lx, y, lz), Blocks.GOLD)
 			elif stair_step > 0 and k % 6 == stair_step % 6 and not floor_slab:
-				data[idx(lx, y, lz)] = Blocks.PLANKS
+				data.encode_u16(bidx(lx, y, lz), Blocks.PLANKS)
 			elif floor_slab:
-				data[idx(lx, y, lz)] = Blocks.AIR if stair_hole else Blocks.PLANKS
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR if stair_hole else Blocks.PLANKS)
 			elif k % 6 == 5 and absi(wx) <= 1 and absi(wz) <= 1:
-				data[idx(lx, y, lz)] = Blocks.GLOWSTONE  # chandeliers
+				data.encode_u16(bidx(lx, y, lz), Blocks.GLOWSTONE)  # chandeliers
 			elif m == 10 and k % 6 >= 2 and k % 6 <= 4 and posmod(wx + 3 * wz, 9) == 0:
-				data[idx(lx, y, lz)] = Blocks.WOOL_RED  # hall banners
+				data.encode_u16(bidx(lx, y, lz), Blocks.WOOL_RED)  # hall banners
 			else:
-				data[idx(lx, y, lz)] = Blocks.AIR
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 		# Clear terrain or trees poking through above the roof.
 		for cy in range(base + 27, mini(h + 8, CHUNK_H)):
-			data[idx(lx, cy, lz)] = Blocks.AIR
+			data.encode_u16(bidx(lx, cy, lz), Blocks.AIR)
 		return
 
 ## SPACE: barren grey rolling ground, biosphere domes you can walk into,
@@ -917,15 +925,15 @@ func _space_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 			block = Blocks.COBBLE if hash01(wx, wz, 72) < 0.4 else Blocks.STONE
 		elif y < 6 and hash01(wx, wz + y, 73) < 0.04:
 			block = Blocks.MAGMA          # a hot core, glowing in the dark
-		data[idx(lx, y, lz)] = block
+		data.encode_u16(bidx(lx, y, lz), block)
 	# Scattered crystal outcrops so the ground isn't uniformly grey.
 	if h + 2 < CHUNK_H and hash01(wx, wz, 74) < 0.0018:
 		var crystals := [Blocks.CRYSTAL_PINK, Blocks.CRYSTAL_BLUE,
 			Blocks.CRYSTAL_GREEN]
 		var gem: int = crystals[int(hash01(wx, wz, 75) * 3.0)]
-		data[idx(lx, h + 1, lz)] = gem
+		data.encode_u16(bidx(lx, h + 1, lz), gem)
 		if hash01(wx, wz, 76) < 0.4:
-			data[idx(lx, h + 2, lz)] = gem
+			data.encode_u16(bidx(lx, h + 2, lz), gem)
 
 ## The lowest ground anywhere under a circular footprint. Sampled on a
 ## coarse ring rather than every column — this is called per column while
@@ -965,14 +973,15 @@ func _space_landmark(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 		if flat <= radius:
 			# Fill any hollow beneath, then level and carpet.
 			for y in range(mini(h + 1, CHUNK_H), mini(base, CHUNK_H)):
-				data[idx(lx, y, lz)] = Blocks.STONE
+				data.encode_u16(bidx(lx, y, lz), Blocks.STONE)
 			for y in range(base, mini(h + 1, CHUNK_H)):
-				data[idx(lx, y, lz)] = Blocks.AIR
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 			if base < CHUNK_H:
-				data[idx(lx, base, lz)] = Blocks.GRASS
+				data.encode_u16(bidx(lx, base, lz), Blocks.GRASS)
 			if base + 1 < CHUNK_H and hash01(wx, wz, 77) < 0.06:
-				data[idx(lx, base + 1, lz)] = [Blocks.TALL_GRASS,
-					Blocks.FLOWER_RED, Blocks.SAPLING][int(hash01(wx, wz, 78) * 3.0)]
+				data.encode_u16(bidx(lx, base + 1, lz),
+					[Blocks.TALL_GRASS, Blocks.FLOWER_RED,
+					Blocks.SAPLING][int(hash01(wx, wz, 78) * 3.0)])
 		# The shell. Testing one column against the sphere left holes
 		# wherever its surface ran steeply — you could walk straight
 		# through the dome. Fill every y whose distance from the centre
@@ -988,12 +997,12 @@ func _space_landmark(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 			# A doorway on the north face, tall enough to walk through.
 			if absi(dx) <= 2 and dz < 0 and y < base + 4:
 				continue
-			data[idx(lx, y, lz)] = Blocks.GLASS
+			data.encode_u16(bidx(lx, y, lz), Blocks.GLASS)
 		# A steel ring where it meets the ground.
 		if absf(flat - radius) < 1.2 and base < CHUNK_H:
-			data[idx(lx, base, lz)] = Blocks.STEEL
+			data.encode_u16(bidx(lx, base, lz), Blocks.STEEL)
 			if base + 1 < CHUNK_H and posmod(dx + dz, 7) == 0:
-				data[idx(lx, base + 1, lz)] = Blocks.GLOWSTONE
+				data.encode_u16(bidx(lx, base + 1, lz), Blocks.GLOWSTONE)
 		return
 	if roll < 0.72:
 		# UNDERGROUND COMMAND CENTRE. Not one big square hall — that read
@@ -1037,18 +1046,18 @@ func _space_landmark(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 			step_y -= posmod(step_y, 1)
 			if absi(dx) <= 3:
 				for y in range(mini(step_y, CHUNK_H), mini(step_y + 6, CHUNK_H)):
-					data[idx(lx, y, lz)] = Blocks.AIR
+					data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 				if step_y - 1 > 0:
-					data[idx(lx, step_y - 1, lz)] = Blocks.STEEL
+					data.encode_u16(bidx(lx, step_y - 1, lz), Blocks.STEEL)
 				if posmod(dz, 5) == 0:
 					var arc := step_y + 5 + (3 - absi(dx))
 					if arc < CHUNK_H:
-						data[idx(lx, arc, lz)] = Blocks.STEEL
+						data.encode_u16(bidx(lx, arc, lz), Blocks.STEEL)
 					if absi(dx) == 3 and step_y + 2 < CHUNK_H:
-						data[idx(lx, step_y + 2, lz)] = Blocks.GLOWSTONE
+						data.encode_u16(bidx(lx, step_y + 2, lz), Blocks.GLOWSTONE)
 			elif posmod(dz, 5) == 0:
 				for y in range(mini(step_y, CHUNK_H), mini(step_y + 7, CHUNK_H)):
-					data[idx(lx, y, lz)] = Blocks.STEEL
+					data.encode_u16(bidx(lx, y, lz), Blocks.STEEL)
 			return
 		# Position inside this 10-block cell.
 		var ix := posmod(dx + half, 10)
@@ -1062,22 +1071,22 @@ func _space_landmark(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 		var head := 3 + int(hash01(cx + gx, cz + gz, 612) * 2.0)   # 3 or 4 high
 		if in_room or in_hall_x or in_hall_z:
 			for y in range(floor_y, mini(floor_y + head + 1, CHUNK_H)):
-				data[idx(lx, y, lz)] = Blocks.AIR
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 			if floor_y - 1 > 0:
-				data[idx(lx, floor_y - 1, lz)] = Blocks.STEEL
+				data.encode_u16(bidx(lx, floor_y - 1, lz), Blocks.STEEL)
 			if floor_y + head + 1 < CHUNK_H:
-				data[idx(lx, floor_y + head + 1, lz)] = Blocks.STONE
+				data.encode_u16(bidx(lx, floor_y + head + 1, lz), Blocks.STONE)
 			# Lights down the middle of the corridors and in room corners.
 			if in_room and (ix == 2 or ix == 7) and (iz == 2 or iz == 6) \
 					and floor_y + head < CHUNK_H:
-				data[idx(lx, floor_y + head, lz)] = Blocks.GLOWSTONE
+				data.encode_u16(bidx(lx, floor_y + head, lz), Blocks.GLOWSTONE)
 			elif not in_room and posmod(dx + dz, 6) == 0 and floor_y + head < CHUNK_H:
-				data[idx(lx, floor_y + head, lz)] = Blocks.GLOWSTONE
+				data.encode_u16(bidx(lx, floor_y + head, lz), Blocks.GLOWSTONE)
 			# Consoles: a bank of screens against one wall of some rooms.
 			if in_room and iz == 2 and ix >= 3 and ix <= 6 \
 					and cell_roll > 0.72 and floor_y + 1 < CHUNK_H:
-				data[idx(lx, floor_y, lz)] = Blocks.STEEL
-				data[idx(lx, floor_y + 1, lz)] = Blocks.CRYSTAL_BLUE
+				data.encode_u16(bidx(lx, floor_y, lz), Blocks.STEEL)
+				data.encode_u16(bidx(lx, floor_y + 1, lz), Blocks.CRYSTAL_BLUE)
 			return
 		# STEPPED SHAFTS between the levels, in the wall between cells:
 		# one step down every two blocks, so it is a staircase and not a
@@ -1085,10 +1094,10 @@ func _space_landmark(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 		if (ix == 0 or ix == 9) and (iz == 0 or iz == 9):
 			var step_floor := top_deck - 2 * deck_gap
 			for y in range(step_floor, mini(top_deck + 5, CHUNK_H)):
-				data[idx(lx, y, lz)] = Blocks.AIR
+				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 			var tread := step_floor + int(float(posmod(dx + dz, 2 * deck_gap * 2)) * 0.5)
 			if tread < CHUNK_H:
-				data[idx(lx, tread, lz)] = Blocks.STEEL
+				data.encode_u16(bidx(lx, tread, lz), Blocks.STEEL)
 			return
 		return
 
@@ -1123,35 +1132,35 @@ func _space_landmark(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 				and posmod(dx, 2) == 0:
 			var fin_y: int = ship_y + 2 + (absi(dz) - half_beam) / 2
 			if fin_y < CHUNK_H:
-				data[idx(lx, fin_y, lz)] = Blocks.STEEL
+				data.encode_u16(bidx(lx, fin_y, lz), Blocks.STEEL)
 		return
 
 	var deck := ship_y + 1
 	var roof := ship_y + 3
 	# Belly, deck and hull sides.
-	data[idx(lx, ship_y, lz)] = Blocks.STEEL
+	data.encode_u16(bidx(lx, ship_y, lz), Blocks.STEEL)
 	for y in range(deck, roof):
-		data[idx(lx, y, lz)] = Blocks.STEEL if absi(dz) == half_beam else Blocks.AIR
-	data[idx(lx, roof, lz)] = Blocks.STEEL
+		data.encode_u16(bidx(lx, y, lz), Blocks.STEEL if absi(dz) == half_beam else Blocks.AIR)
+	data.encode_u16(bidx(lx, roof, lz), Blocks.STEEL)
 	# Windows down the flanks.
 	if absi(dz) == half_beam and posmod(dx, 3) == 0 and t > -0.7:
-		data[idx(lx, deck, lz)] = Blocks.GLASS
+		data.encode_u16(bidx(lx, deck, lz), Blocks.GLASS)
 	# Cockpit: a glass blister up front, standing proud of the roof.
 	if t > 0.35 and absi(dz) <= maxi(half_beam - 1, 1):
 		var dome_r := float(maxi(half_beam - 1, 1))
 		var cd := Vector2(float(dx) - float(length) * 0.55, float(dz)).length()
 		if cd <= dome_r:
-			data[idx(lx, roof, lz)] = Blocks.AIR
+			data.encode_u16(bidx(lx, roof, lz), Blocks.AIR)
 			if roof + 1 < CHUNK_H:
-				data[idx(lx, roof + 1, lz)] = Blocks.GLASS
+				data.encode_u16(bidx(lx, roof + 1, lz), Blocks.GLASS)
 	# Engines: lit blocks at the stern.
 	if dx < -length + 3 and absi(dz) <= half_beam - 1:
-		data[idx(lx, deck, lz)] = Blocks.CRYSTAL_BLUE
+		data.encode_u16(bidx(lx, deck, lz), Blocks.CRYSTAL_BLUE)
 		if dx < -length + 2:
-			data[idx(lx, ship_y, lz)] = Blocks.GLOWSTONE
+			data.encode_u16(bidx(lx, ship_y, lz), Blocks.GLOWSTONE)
 	# Landing lights along the keel, so it reads from the ground at night.
 	if posmod(dx, 5) == 0 and dz == 0 and ship_y - 1 > 0:
-		data[idx(lx, ship_y - 1, lz)] = Blocks.GLOWSTONE
+		data.encode_u16(bidx(lx, ship_y - 1, lz), Blocks.GLOWSTONE)
 
 ## Cheap deterministic "is this cell lit" test for bunker ceilings.
 func y_lit(wx: int, wz: int) -> bool:
@@ -1168,17 +1177,17 @@ func _sky_island(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> v
 		return
 	var body := (n - 0.8) * 40.0   # 0..~4 thickness
 	var top := 66
-	data[idx(lx, top, lz)] = Blocks.GRASS
+	data.encode_u16(bidx(lx, top, lz), Blocks.GRASS)
 	for dy in range(1, int(body) + 1):
-		data[idx(lx, top - dy, lz)] = Blocks.DIRT if dy == 1 else Blocks.STONE
+		data.encode_u16(bidx(lx, top - dy, lz), Blocks.DIRT if dy == 1 else Blocks.STONE)
 	if body > 2.5 and hash01(wx, wz, 44) < 0.1:
 		var crystals := [Blocks.CRYSTAL_PINK, Blocks.CRYSTAL_BLUE, Blocks.CRYSTAL_GREEN]
-		data[idx(lx, top - 2, lz)] = crystals[int(hash01(wx, wz, 45) * 3.0)]
+		data.encode_u16(bidx(lx, top - 2, lz), crystals[int(hash01(wx, wz, 45) * 3.0)])
 	var roll := hash01(wx, wz, 46)
 	if roll < 0.05:
-		data[idx(lx, top + 1, lz)] = Blocks.FLOWER_PINK
+		data.encode_u16(bidx(lx, top + 1, lz), Blocks.FLOWER_PINK)
 	elif roll < 0.09:
-		data[idx(lx, top + 1, lz)] = Blocks.TALL_GRASS
+		data.encode_u16(bidx(lx, top + 1, lz), Blocks.TALL_GRASS)
 
 ## SKYLANDS: floating islands with jittered positions, a mix of small and
 ## MEGA islands, satellites stacked above the big ones (with waterfalls
@@ -1201,16 +1210,17 @@ func _stamp_island(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 	if dist >= r or top >= CHUNK_H - 2:
 		return
 	var depth := int((r - dist) * 0.7) + 1
-	data[idx(lx, top, lz)] = Blocks.GRASS
+	data.encode_u16(bidx(lx, top, lz), Blocks.GRASS)
 	for dy in range(1, depth + 1):
 		if top - dy > SEA_LEVEL + 4:
-			data[idx(lx, top - dy, lz)] = Blocks.DIRT if dy == 1 else Blocks.STONE
+			data.encode_u16(bidx(lx, top - dy, lz), Blocks.DIRT if dy == 1 else Blocks.STONE)
 	var roll := hash01(wx, wz, 46)
 	if roll < 0.04:
-		data[idx(lx, top + 1, lz)] = [Blocks.FLOWER_PINK,
-			Blocks.FLOWER_RED, Blocks.BLUEBELL][int(roll * 100.0) % 3]
+		data.encode_u16(bidx(lx, top + 1, lz),
+			[Blocks.FLOWER_PINK, Blocks.FLOWER_RED,
+			Blocks.BLUEBELL][int(roll * 100.0) % 3])
 	elif roll < 0.1:
-		data[idx(lx, top + 1, lz)] = Blocks.TALL_GRASS
+		data.encode_u16(bidx(lx, top + 1, lz), Blocks.TALL_GRASS)
 
 func _skylands_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -> void:
 	var gx := roundi(float(wx) / 48.0)
@@ -1230,8 +1240,8 @@ func _skylands_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int)
 				# A waterfall pours off the satellite onto the big island.
 				if wx == sat_x + 2 and wz == sat_z:
 					for y in range(p.top + 1, mini(sat_top, CHUNK_H - 1)):
-						if data[idx(lx, y, lz)] == Blocks.AIR:
-							data[idx(lx, y, lz)] = Blocks.WATER
+						if data.decode_u16(bidx(lx, y, lz)) == Blocks.AIR:
+							data.encode_u16(bidx(lx, y, lz), Blocks.WATER)
 			# Waterfall off one rim point of most islands — and it tops out
 			# in a small POND sunk into the island, so swimming up the
 			# fall lands you somewhere you can actually climb out of.
@@ -1241,14 +1251,14 @@ func _skylands_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int)
 				var fz: int = p.az + int(sin(fall_a) * (p.r - 1.5))
 				if wx == fx and wz == fz:
 					for y in range(SEA_LEVEL - 1, p.top + 1):
-						if data[idx(lx, y, lz)] == Blocks.AIR:
-							data[idx(lx, y, lz)] = Blocks.WATER
+						if data.decode_u16(bidx(lx, y, lz)) == Blocks.AIR:
+							data.encode_u16(bidx(lx, y, lz), Blocks.WATER)
 				var pond_d := Vector2(wx - fx, wz - fz).length()
 				var isl_d := Vector2(wx - p.ax, wz - p.az).length()
 				if pond_d < 2.4 and isl_d < p.r - 0.5 and int(p.top) < CHUNK_H - 1:
-					data[idx(lx, p.top, lz)] = Blocks.WATER
+					data.encode_u16(bidx(lx, p.top, lz), Blocks.WATER)
 					if int(p.top) - 1 > SEA_LEVEL:
-						data[idx(lx, p.top - 1, lz)] = Blocks.STONE
+						data.encode_u16(bidx(lx, p.top - 1, lz), Blocks.STONE)
 			# Bridges to the +x and +z neighbor islands.
 			for step_axis in 2:
 				var np := _sky_params(dgx + (1 if step_axis == 0 else 0),
@@ -1269,11 +1279,21 @@ func _skylands_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int)
 					var ramp := smoothstep(0.18, 0.82, t)
 					var by := int(lerpf(float(p.top), float(np.top), ramp) - 2.0 * sin(PI * t))
 					if by > SEA_LEVEL and by < CHUNK_H - 4 \
-							and data[idx(lx, by, lz)] == Blocks.AIR:
-						data[idx(lx, by, lz)] = Blocks.PLANKS
+							and data.decode_u16(bidx(lx, by, lz)) == Blocks.AIR:
+						data.encode_u16(bidx(lx, by, lz), Blocks.PLANKS)
 
-static func idx(lx: int, y: int, lz: int) -> int:
-	return (y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx
+## A BLOCK ID IS TWO BYTES. A chunk is a PackedByteArray of CHUNK_BYTES
+## holding CHUNK_BLOCKS little-endian pairs, so this is a BYTE offset and
+## the only way to touch a block is `data.decode_u16(bidx(...))` /
+## `data.encode_u16(bidx(...), block)`.
+##
+## It is called `bidx` and not `idx` on purpose: the old `idx` returned a
+## BLOCK index into a one-byte-per-block array, and `data[idx(...)]` still
+## compiles perfectly against a two-byte array — it just silently reads
+## half of the wrong block. Renaming it turned every one of the two
+## hundred-odd call sites into a compile error that had to be looked at.
+static func bidx(lx: int, y: int, lz: int) -> int:
+	return ((y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx) << 1
 
 func _fill_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: int, moist: float) -> void:
 	if theme == "space":
@@ -1300,11 +1320,11 @@ func _fill_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 				block = Blocks.GRASS
 		elif y > h - 4:
 			block = Blocks.DIRT if h < snow_line - 6 else Blocks.STONE
-		data[idx(lx, y, lz)] = block
+		data.encode_u16(bidx(lx, y, lz), block)
 	# Water fills anything below sea level.
 	for y in range(h + 1, SEA_LEVEL + 1):
 		if y < CHUNK_H:
-			data[idx(lx, y, lz)] = Blocks.WATER
+			data.encode_u16(bidx(lx, y, lz), Blocks.WATER)
 
 ## Surface decoration: trees, flowers, grass tufts, shells, mushrooms,
 ## pumpkins, berry bushes. All placement is hash-driven per world column.
@@ -1316,7 +1336,7 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 			var ground := _surface_of(data, lx, lz)
 			if ground <= 0 or ground + 1 >= CHUNK_H:
 				continue
-			var surface := data[idx(lx, ground, lz)]
+			var surface := data.decode_u16(bidx(lx, ground, lz))
 			# NOTHING GROWS ON A BLOCK THAT WILL SLOPE. The mesher draws a
 			# block of ground that is open on one side of an axis and
 			# solid on the other as a ramp (Mesher._heights), and a plant
@@ -1336,9 +1356,9 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 				if _water_near(data, lx, lz, ground) \
 						and _detail.get_noise_2d(wx * 2.2, wz * 2.2) > 0.22 \
 						and hash01(wx, wz, 16) < 0.6:
-					data[idx(lx, ground + 1, lz)] = Blocks.CATTAIL
+					data.encode_u16(bidx(lx, ground + 1, lz), Blocks.CATTAIL)
 				elif hash01(wx, wz, 15) < 0.008:
-					data[idx(lx, ground + 1, lz)] = Blocks.SHELL
+					data.encode_u16(bidx(lx, ground + 1, lz), Blocks.SHELL)
 
 ## Will the mesher slope this block? The same rule as Mesher._heights,
 ## read from this chunk's own data: one side open and the other solid on
@@ -1354,7 +1374,7 @@ func _slopes(data: PackedByteArray, lx: int, lz: int, y: int) -> bool:
 func _ground_at(data: PackedByteArray, lx: int, lz: int, y: int) -> bool:
 	if lx < 0 or lx >= CHUNK_SIZE or lz < 0 or lz >= CHUNK_SIZE:
 		return true
-	var b := data[idx(lx, y, lz)]
+	var b := data.decode_u16(bidx(lx, y, lz))
 	return b != Blocks.AIR and not Blocks.is_liquid(b) and Blocks.LK_CROSS[b] != 1
 
 ## Is there water within two blocks of this column at its own height?
@@ -1367,7 +1387,7 @@ func _water_near(data: PackedByteArray, lx: int, lz: int, ground: int) -> bool:
 			var nz := lz + dz
 			if nx < 0 or nx >= CHUNK_SIZE or nz < 0 or nz >= CHUNK_SIZE:
 				continue
-			if data[idx(nx, ground, nz)] == Blocks.WATER:
+			if data.decode_u16(bidx(nx, ground, nz)) == Blocks.WATER:
 				return true
 	return false
 
@@ -1388,43 +1408,43 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 	match biome:
 		Biome.SWAMP:
 			if hash01(wx, wz, 20) < 0.14:
-				data[idx(lx, ground, lz)] = Blocks.WATER
+				data.encode_u16(bidx(lx, ground, lz), Blocks.WATER)
 				return
 			if hash01(wx, wz, 12) < 0.03:
-				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.MUSHROOM)
 			elif _grass_here(wx, wz, 0.3):
-				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif interior and tree_roll < 0.012:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
 		Biome.JUNGLE:
 			if lx >= 4 and lx < 12 and lz >= 4 and lz < 12 and tree_roll < 0.09:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 1)
 			elif _grass_here(wx, wz, 0.38):
-				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 12) < 0.012:
-				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.MUSHROOM)
 			elif hash01(wx, wz, 10) < 0.02:
-				data[idx(lx, ground + 1, lz)] = Blocks.FLOWER_PINK
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.FLOWER_PINK)
 			elif hash01(wx, wz, 14) < 0.03:
-				data[idx(lx, ground + 1, lz)] = Blocks.DAISY
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.DAISY)
 			elif hash01(wx, wz, 15) < 0.02:
-				data[idx(lx, ground + 1, lz)] = Blocks.BLUEBELL
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.BLUEBELL)
 		Biome.FOREST:
 			if interior and tree_roll < 0.03:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
 			elif _grass_here(wx, wz, 0.28):
-				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 12) < 0.007:
-				data[idx(lx, ground + 1, lz)] = Blocks.MUSHROOM
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.MUSHROOM)
 			elif hash01(wx, wz, 14) < 0.08:
-				data[idx(lx, ground + 1, lz)] = Blocks.FERN
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.FERN)
 		Biome.PINE:
 			if lx >= 2 and lx < 14 and lz >= 2 and lz < 14 and tree_roll < 0.05:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 2)
 			elif _grass_here(wx, wz, 0.14):
-				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 14) < 0.08:
-				data[idx(lx, ground + 1, lz)] = Blocks.FERN
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.FERN)
 		Biome.FLOWERS:
 			if hash01(wx, wz, 10) < 0.15:
 				var pick := hash01(wx, wz, 11)
@@ -1433,15 +1453,15 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 					flower = Blocks.FLOWER_PINK
 				elif pick > 0.33:
 					flower = Blocks.FLOWER_YELLOW
-				data[idx(lx, ground + 1, lz)] = flower
+				data.encode_u16(bidx(lx, ground + 1, lz), flower)
 			elif _grass_here(wx, wz, 0.26):
-				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 13) < 0.01:
-				data[idx(lx, ground + 1, lz)] = Blocks.BERRY_BUSH
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.BERRY_BUSH)
 			elif hash01(wx, wz, 16) < 0.06:
-				data[idx(lx, ground + 1, lz)] = Blocks.WHEAT_PLANT
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.WHEAT_PLANT)
 			elif hash01(wx, wz, 17) < 0.03:
-				data[idx(lx, ground + 1, lz)] = Blocks.BLUEBELL
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.BLUEBELL)
 			elif interior and tree_roll < 0.004:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
 		_:
@@ -1450,13 +1470,13 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				var h := 2 + int(hash01(wx, wz, 51) * 3.0)
 				for dy in h:
 					if hash01(wx, dy, wz) < 0.8:
-						data[idx(lx, ground + 1 + dy, lz)] = Blocks.COBBLE
+						data.encode_u16(bidx(lx, ground + 1 + dy, lz), Blocks.COBBLE)
 				if lx < 13:
-					data[idx(lx + 1, ground + 1, lz)] = Blocks.COBBLE
+					data.encode_u16(bidx(lx + 1, ground + 1, lz), Blocks.COBBLE)
 				return
 			if interior and hash01(wx, wz, 52) < 0.0012:
 				for dy in 3 + int(hash01(wx, wz, 53) * 4.0):
-					data[idx(lx, ground + 1 + dy, lz)] = Blocks.STONE
+					data.encode_u16(bidx(lx, ground + 1 + dy, lz), Blocks.STONE)
 				return
 			# GRASS EVERYWHERE. A plain was a green plane with a tuft every
 			# twenty blocks; a meadow is grass with the ground showing
@@ -1464,19 +1484,19 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 			if interior and tree_roll < 0.006:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
 			elif _grass_here(wx, wz, 0.34):
-				data[idx(lx, ground + 1, lz)] = Blocks.TALL_GRASS
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 10) < 0.02:
 				var pick := hash01(wx, wz, 11)
-				data[idx(lx, ground + 1, lz)] = Blocks.FLOWER_YELLOW if pick > 0.5 else Blocks.FLOWER_RED
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.FLOWER_YELLOW if pick > 0.5 else Blocks.FLOWER_RED)
 			elif hash01(wx, wz, 13) < 0.004:
-				data[idx(lx, ground + 1, lz)] = Blocks.BERRY_BUSH
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.BERRY_BUSH)
 			elif hash01(wx, wz, 14) < 0.0016:
-				data[idx(lx, ground + 1, lz)] = Blocks.PUMPKIN
+				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.PUMPKIN)
 
 ## Highest non-air, non-water block of a local column (during generation).
 func _surface_of(data: PackedByteArray, lx: int, lz: int) -> int:
 	for y in range(CHUNK_H - 1, -1, -1):
-		var b := data[idx(lx, y, lz)]
+		var b := data.decode_u16(bidx(lx, y, lz))
 		if b != Blocks.AIR and b != Blocks.WATER:
 			return y
 	return -1
@@ -1497,7 +1517,7 @@ func _plant_tree(data: PackedByteArray, lx: int, base_y: int, lz: int, size_roll
 	if base_y + trunk + 3 >= CHUNK_H:
 		return
 	for i in trunk:
-		data[idx(lx, base_y + i, lz)] = Blocks.LOG
+		data.encode_u16(bidx(lx, base_y + i, lz), Blocks.LOG)
 	var top := base_y + trunk
 	var reach := int(ceil(radius))
 	for dy in range(-2, 3):
@@ -1513,8 +1533,8 @@ func _plant_tree(data: PackedByteArray, lx: int, base_y: int, lz: int, size_roll
 					continue
 				if py <= 0 or py >= CHUNK_H:
 					continue
-				if data[idx(px, py, pz)] == Blocks.AIR:
-					data[idx(px, py, pz)] = Blocks.LEAVES
+				if data.decode_u16(bidx(px, py, pz)) == Blocks.AIR:
+					data.encode_u16(bidx(px, py, pz), Blocks.LEAVES)
 
 ## A decent spawn: walk outward from the middle until we find grass above sea
 ## level. Returns the block position of the ground (players stand on top).

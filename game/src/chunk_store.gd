@@ -26,7 +26,9 @@ extends RefCounted
 ## somebody's fort. `trim_cache()` only ever drops chunks that are still
 ## exactly as generated.
 
-const RAW_CHUNK_BYTES := WorldGen.CHUNK_SIZE * WorldGen.CHUNK_SIZE * WorldGen.CHUNK_H
+## Two bytes a block — see WorldGen.bidx. This is what a chunk
+## decompresses to, so it is also the size chunk_view.gd checks against.
+const RAW_CHUNK_BYTES := WorldGen.CHUNK_BYTES
 ## Chunks farther than this (in chunks) from the origin are ocean border.
 const WORLD_RADIUS_CHUNKS := 24
 ## The world every fresh server makes, unless WORLD_SEED says otherwise.
@@ -359,7 +361,7 @@ func get_block(pos: Vector3i) -> int:
 	var data := get_chunk(cpos)
 	var lx := posmod(pos.x, 16)
 	var lz := posmod(pos.z, 16)
-	return data[WorldGen.idx(lx, pos.y, lz)]
+	return data.decode_u16(WorldGen.bidx(lx, pos.y, lz))
 
 func set_block(pos: Vector3i, block: int) -> void:
 	if pos.y <= 0 or pos.y >= WorldGen.CHUNK_H:
@@ -370,7 +372,7 @@ func set_block(pos: Vector3i, block: int) -> void:
 	var data := get_chunk(cpos)
 	var lx := posmod(pos.x, 16)
 	var lz := posmod(pos.z, 16)
-	data[WorldGen.idx(lx, pos.y, lz)] = block
+	data.encode_u16(WorldGen.bidx(lx, pos.y, lz), block)
 	_cache[cpos] = data
 	# From here on this chunk IS the world — regenerating it would undo
 	# whatever was just built — so it is pinned against eviction.
@@ -394,7 +396,7 @@ func surface_y(wx: int, wz: int) -> int:
 		if floor_y >= 0:
 			return floor_y
 	for y in range(WorldGen.CHUNK_H - 1, -1, -1):
-		var b := data[WorldGen.idx(lx, y, lz)]
+		var b := data.decode_u16(WorldGen.bidx(lx, y, lz))
 		if b != Blocks.AIR and not Blocks.is_cross(b):
 			return y
 	return 0
@@ -410,7 +412,7 @@ func surface_y(wx: int, wz: int) -> int:
 func _hall_floor(data: PackedByteArray, lx: int, lz: int) -> int:
 	var open_above := 0
 	for y in range(WorldGen.CAVERN_TOP - WorldGen.CAVERN_CRUST - 1, 0, -1):
-		var b := data[WorldGen.idx(lx, y, lz)]
+		var b := data.decode_u16(WorldGen.bidx(lx, y, lz))
 		if b == Blocks.AIR or Blocks.is_cross(b):
 			open_above += 1
 		elif open_above >= 3:
@@ -431,13 +433,13 @@ func walkable_y(wx: int, wz: int, from_y: float) -> int:
 	var lz := wz & 15
 	var top := mini(int(from_y) + 2, WorldGen.CHUNK_H - 3)
 	for y in range(top, 0, -1):
-		var here := data[WorldGen.idx(lx, y, lz)]
+		var here := data.decode_u16(WorldGen.bidx(lx, y, lz))
 		if here == Blocks.AIR or Blocks.is_liquid(here):
 			continue
 		# Two blocks of headroom, or it is not somewhere a body fits.
-		if data[WorldGen.idx(lx, y + 1, lz)] != Blocks.AIR:
+		if data.decode_u16(WorldGen.bidx(lx, y + 1, lz)) != Blocks.AIR:
 			return -1
-		if data[WorldGen.idx(lx, y + 2, lz)] != Blocks.AIR:
+		if data.decode_u16(WorldGen.bidx(lx, y + 2, lz)) != Blocks.AIR:
 			return -1
 		return y
 	return -1
@@ -585,9 +587,9 @@ func _border_chunk() -> PackedByteArray:
 	data.resize(RAW_CHUNK_BYTES)
 	for lz in 16:
 		for lx in 16:
-			data[WorldGen.idx(lx, 0, lz)] = Blocks.BEDROCK
+			data.encode_u16(WorldGen.bidx(lx, 0, lz), Blocks.BEDROCK)
 			for y in range(1, 12):
-				data[WorldGen.idx(lx, y, lz)] = Blocks.STONE
+				data.encode_u16(WorldGen.bidx(lx, y, lz), Blocks.STONE)
 			for y in range(12, WorldGen.SEA_LEVEL + 1):
-				data[WorldGen.idx(lx, y, lz)] = Blocks.WATER
+				data.encode_u16(WorldGen.bidx(lx, y, lz), Blocks.WATER)
 	return data

@@ -110,7 +110,7 @@ func _block_at(x: int, y: int, z: int) -> int:
 	if y < 0 or y >= H:
 		return Blocks.AIR
 	if x >= 0 and x < SIZE and z >= 0 and z < SIZE:
-		return _data[(y * SIZE + z) * SIZE + x]
+		return _data.decode_u16(((y * SIZE + z) * SIZE + x) << 1)
 	var off := Vector2i(0, 0)
 	if x < 0:
 		off.x = -1
@@ -127,7 +127,7 @@ func _block_at(x: int, y: int, z: int) -> int:
 	var neighbor: PackedByteArray = _neighbors.get(off, PackedByteArray())
 	if neighbor.is_empty():
 		return Blocks.AIR
-	return neighbor[(y * SIZE + z) * SIZE + x]
+	return neighbor.decode_u16(((y * SIZE + z) * SIZE + x) << 1)
 
 func _occludes(x: int, y: int, z: int) -> bool:
 	return _lk_opaque[_block_at(x, y, z)] == 1
@@ -148,19 +148,22 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int) -> Di
 	_neighbors = neighbors
 	_surface_cache.clear()
 	_axes_cache.clear()
+	# The minimap's block per column, two bytes each like everything else
+	# that holds a block id.
 	var topmap := PackedByteArray()
-	topmap.resize(SIZE * SIZE)
+	topmap.resize(SIZE * SIZE * 2)
 	for y in H:
 		# Whole-slab air check runs in C++ — skips most of the sky instantly.
-		var slab_off := y * SIZE * SIZE
-		if _data.slice(slab_off, slab_off + SIZE * SIZE).count(0) == SIZE * SIZE:
+		var slab_off := y * SIZE * SIZE * 2
+		var slab_bytes := SIZE * SIZE * 2
+		if _data.slice(slab_off, slab_off + slab_bytes).count(0) == slab_bytes:
 			continue
 		for z in SIZE:
 			for x in SIZE:
-				var block := int(_data[(y * SIZE + z) * SIZE + x])
+				var block := _data.decode_u16(((y * SIZE + z) * SIZE + x) << 1)
 				if block == Blocks.AIR:
 					continue
-				topmap[z * SIZE + x] = block
+				topmap.encode_u16((z * SIZE + x) << 1, block)
 				if Blocks.LK_CROSS[block] == 1:
 					if not MODEL_PLANTS.has(block):
 						_add_cross(block, x, y, z, cx, cz)

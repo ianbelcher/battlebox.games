@@ -315,9 +315,9 @@ func apply_edit(pos: Vector3i, block: int) -> int:
 	var lx := posmod(pos.x, 16)
 	var lz := posmod(pos.z, 16)
 	var data: PackedByteArray = _data[cpos]
-	var index := WorldGen.idx(lx, pos.y, lz)
-	var old := int(data[index])
-	data[index] = block
+	var index := WorldGen.bidx(lx, pos.y, lz)
+	var old := data.decode_u16(index)
+	data.encode_u16(index, block)
 	_data[cpos] = data
 	_queue_mesh(cpos, true)
 	# Border edits change neighbor face culling, AO and the ground's
@@ -341,7 +341,7 @@ func get_block(pos: Vector3i) -> int:
 	var data: PackedByteArray = _data.get(cpos, PackedByteArray())
 	if data.is_empty():
 		return Blocks.STONE   # unloaded chunks are solid so nobody falls out
-	return data[WorldGen.idx(posmod(pos.x, 16), pos.y, posmod(pos.z, 16))]
+	return data.decode_u16(WorldGen.bidx(posmod(pos.x, 16), pos.y, posmod(pos.z, 16)))
 
 ## Ground height (top of the highest standable block) at a world column.
 func ground_height(wx: int, wz: int) -> int:
@@ -610,7 +610,7 @@ func top_block(wx: int, wz: int) -> int:
 	var topmap: PackedByteArray = _topmaps.get(cpos, PackedByteArray())
 	if topmap.is_empty():
 		return -1
-	return topmap[posmod(wz, 16) * 16 + posmod(wx, 16)]
+	return topmap.decode_u16((posmod(wz, 16) * 16 + posmod(wx, 16)) << 1)
 
 func _drop_chunk(cpos: Vector2i) -> void:
 	_topmaps.erase(cpos)

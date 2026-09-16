@@ -1924,7 +1924,7 @@ func clear_shot(from: Vector3, to: Vector3) -> bool:
 		if cpos != last_cpos:
 			data = store.get_chunk(cpos)
 			last_cpos = cpos
-		var block := data[WorldGen.idx(cx & 15, cy, cz & 15)]
+		var block := data.decode_u16(WorldGen.bidx(cx & 15, cy, cz & 15))
 		if block != Blocks.AIR and not Blocks.is_liquid(block) \
 				and not Blocks.is_cross(block):
 			return false

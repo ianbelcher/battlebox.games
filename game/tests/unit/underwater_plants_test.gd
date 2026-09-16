@@ -14,21 +14,22 @@ extends TestCase
 
 const SIZE := 16
 
+## A BYTE offset: block ids are u16 pairs. See WorldGen.bidx.
 func _at(x: int, y: int, z: int) -> int:
-	return (y * SIZE + z) * SIZE + x
+	return ((y * SIZE + z) * SIZE + x) << 1
 
 ## A chunk of solid water from the floor to `depth`, with one block
 ## optionally swapped for something else in the middle of it.
 func _sea(depth: int, middle := -1) -> PackedByteArray:
 	var data := PackedByteArray()
-	data.resize(SIZE * SIZE * WorldGen.CHUNK_H)
+	data.resize(SIZE * SIZE * WorldGen.CHUNK_H * 2)
 	data.fill(Blocks.AIR)
 	for y in depth:
 		for z in SIZE:
 			for x in SIZE:
-				data[_at(x, y, z)] = Blocks.WATER
+				data.encode_u16(_at(x, y, z), Blocks.WATER)
 	if middle >= 0:
-		data[_at(8, depth / 2, 8)] = middle
+		data.encode_u16(_at(8, depth / 2, 8), middle)
 	return data
 
 ## How many water vertices the mesher produced. `build` returns a surface

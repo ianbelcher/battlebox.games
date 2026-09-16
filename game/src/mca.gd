@@ -75,13 +75,13 @@ func read_chunk(cx: int, cz: int) -> PackedByteArray:
 	if sections.is_empty():
 		return PackedByteArray()
 	var data := PackedByteArray()
-	data.resize(WorldGen.CHUNK_SIZE * WorldGen.CHUNK_SIZE * WorldGen.CHUNK_H)
+	data.resize(WorldGen.CHUNK_BYTES)
 	for section: Dictionary in sections:
 		_apply_section(data, section)
 	# A safety floor so nobody falls out of the world.
 	for lz in 16:
 		for lx in 16:
-			data[WorldGen.idx(lx, 0, lz)] = Blocks.BEDROCK
+			data.encode_u16(WorldGen.bidx(lx, 0, lz), Blocks.BEDROCK)
 	return data
 
 func _apply_section(data: PackedByteArray, section: Dictionary) -> void:
@@ -109,7 +109,7 @@ func _apply_section(data: PackedByteArray, section: Dictionary) -> void:
 		for y in range(maxi(base_y, 1), mini(base_y + 16, WorldGen.CHUNK_H)):
 			for lz in 16:
 				for lx in 16:
-					data[WorldGen.idx(lx, y, lz)] = block
+					data.encode_u16(WorldGen.bidx(lx, y, lz), block)
 		return
 	var bits := maxi(4, _bit_length(palette.size() - 1))
 	var per_long := 64 / bits
@@ -125,7 +125,7 @@ func _apply_section(data: PackedByteArray, section: Dictionary) -> void:
 				if value < mapped.size():
 					var block := mapped[value]
 					if block != Blocks.AIR:
-						data[WorldGen.idx(lx, y, lz)] = block
+						data.encode_u16(WorldGen.bidx(lx, y, lz), block)
 
 static func _bit_length(value: int) -> int:
 	var bits := 0
@@ -146,7 +146,7 @@ func find_spawn() -> Vector3i:
 			var lx := posmod(wx, 16)
 			var lz := posmod(wz, 16)
 			for y in range(WorldGen.CHUNK_H - 8, 1, -1):
-				var b := chunk[WorldGen.idx(lx, y, lz)]
+				var b := chunk.decode_u16(WorldGen.bidx(lx, y, lz))
 				if b == Blocks.WATER:
 					break
 				if Blocks.is_solid(b):

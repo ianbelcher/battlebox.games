@@ -20,21 +20,21 @@ func _init() -> void:
 		quit(1)
 		return
 	var grass_y := 64 - mca.y0 + 1
-	failures += _expect(chunk[WorldGen.idx(0, grass_y, 0)] == Blocks.GRASS,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(0, grass_y, 0)) == Blocks.GRASS,
 		"grass at y=%d" % grass_y)
-	failures += _expect(chunk[WorldGen.idx(0, grass_y - 1, 0)] == Blocks.STONE,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(0, grass_y - 1, 0)) == Blocks.STONE,
 		"stone under the grass")
-	failures += _expect(chunk[WorldGen.idx(0, grass_y - 4, 0)] == Blocks.STONE,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(0, grass_y - 4, 0)) == Blocks.STONE,
 		"stone at the bottom of the slab")
-	failures += _expect(chunk[WorldGen.idx(0, 5, 0)] == Blocks.STONE,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(0, 5, 0)) == Blocks.STONE,
 		"solid stone underside")
-	failures += _expect(chunk[WorldGen.idx(3, grass_y + 1, 5)] == Blocks.LOG,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(3, grass_y + 1, 5)) == Blocks.LOG,
 		"oak log maps to LOG")
-	failures += _expect(chunk[WorldGen.idx(5, grass_y + 1, 7)] == Blocks.FLOWER_RED,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(5, grass_y + 1, 7)) == Blocks.FLOWER_RED,
 		"poppy maps to FLOWER_RED")
-	failures += _expect(chunk[WorldGen.idx(8, grass_y + 1, 8)] == Blocks.AIR,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(8, grass_y + 1, 8)) == Blocks.AIR,
 		"air where nothing was placed")
-	failures += _expect(chunk[WorldGen.idx(4, 0, 4)] == Blocks.BEDROCK,
+	failures += _expect(chunk.decode_u16(WorldGen.bidx(4, 0, 4)) == Blocks.BEDROCK,
 		"safety bedrock floor")
 	failures += _expect(mca.read_chunk(2, 3).size() > 0, "chunk (2,3) reads")
 	failures += _expect(mca.read_chunk(9, 9).is_empty(), "missing chunk is empty")

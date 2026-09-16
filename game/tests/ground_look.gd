@@ -30,12 +30,13 @@ func _height(x: int, z: int) -> int:
 
 func _initialize() -> void:
 	var data := PackedByteArray()
-	data.resize(SIZE * SIZE * WorldGen.CHUNK_H)
+	data.resize(SIZE * SIZE * WorldGen.CHUNK_H * 2)
 	data.fill(Blocks.AIR)
 	for z in SIZE:
 		for x in SIZE:
 			for y in _height(x, z):
-				data[(y * SIZE + z) * SIZE + x] = Blocks.GRASS if y == _height(x, z) - 1 else Blocks.DIRT
+				data.encode_u16(((y * SIZE + z) * SIZE + x) << 1,
+					Blocks.GRASS if y == _height(x, z) - 1 else Blocks.DIRT)
 	var built: Dictionary = Mesher.new().build(data, {}, 0, 0)
 	var root := Node3D.new()
 	get_root().add_child(root)

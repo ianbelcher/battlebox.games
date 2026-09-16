@@ -169,16 +169,19 @@ const MYCELIUM := 246
 ## because it is the thing everybody navigates by — you should be able to
 ## pick your own base out of the landscape from across the map.
 ##
-## NOTE FOR WHOEVER ADDS BLOCKS NEXT: a block id is ONE BYTE. Chunks are
-## `PackedByteArray`, so 255 is the ceiling and 255 is now the only id
-## left. The next family needs the chunk format widened first; do not
-## quietly renumber these, they are the wire format.
+## NOTE FOR WHOEVER ADDS BLOCKS NEXT: do not quietly renumber these.
+## They are the wire format, and 1..255 is also every id a saved
+## Minecraft import and every existing hotbar index was written against.
+## New blocks go at 256 and up (see OFFICE_* below); the palette ran out
+## of single bytes here, which is why chunks carry a u16 a block now —
+## `WorldGen.bidx`.
 const BEACON_TEAM := 247  # ..254: red blue green yellow purple orange teal pink
 ## THE TRAP BLOCK. Looks like whatever is beside it and is not there.
 ##
-## It takes the LAST free id: chunks are a PackedByteArray, so 255 is the
-## ceiling and this is the end of the road. Anything after this needs the
-## chunk format widened first.
+## It took the last single-byte id, and for a while that really was the
+## end of the road. Widening a chunk to two bytes a block moved the wall
+## rather than removing it — see ID_COUNT — so the rule is unchanged:
+## 255 stays 255 forever, and everything new lands above it.
 const TRAP := 255
 
 static func shape_of(id: int) -> String:
@@ -408,6 +411,15 @@ static func _static_init() -> void:
 		"top": Color("7a6d80"), "solid": true, "opaque": true, "hard": 0}
 	_build_lookups()
 
+## HOW MANY IDS THERE CAN BE. A block id used to be one byte and the
+## palette filled it exactly — 255 was the trap block and there was
+## nowhere left to put a desk. Chunks now carry a u16 a block (see
+## WorldGen.bidx), so the ceiling is this number instead, and it is only
+## the size of the lookup tables below rather than anything on the wire.
+## A thousand is far more than the game has any use for and costs about
+## fifty kilobytes of tables once, at startup.
+const ID_COUNT := 1024
+
 ## Flat per-id lookup tables for the mesher's hot loop — dictionary
 ## lookups per voxel were the whole cost of chunk meshing (measured
 ## ~245 ms/chunk before, dominated by info() dict traffic).
@@ -435,20 +447,20 @@ static var LK_PATTERN_SIDE := PackedByteArray()
 static var LK_PATTERN_TOP := PackedByteArray()
 
 static func _build_lookups() -> void:
-	LK_OPAQUE.resize(256)
-	LK_SOLID.resize(256)
-	LK_CROSS.resize(256)
-	LK_TRANS.resize(256)
-	LK_LIQUID.resize(256)
-	LK_SHAPE.resize(256)
-	LK_COLOR.resize(256)
-	LK_TOP.resize(256)
-	LK_SWAY.resize(256)
-	LK_EMIT.resize(256)
-	LK_LIGHT.resize(256)
-	LK_ROUGH.resize(256)
-	LK_PATTERN_SIDE.resize(256)
-	LK_PATTERN_TOP.resize(256)
+	LK_OPAQUE.resize(ID_COUNT)
+	LK_SOLID.resize(ID_COUNT)
+	LK_CROSS.resize(ID_COUNT)
+	LK_TRANS.resize(ID_COUNT)
+	LK_LIQUID.resize(ID_COUNT)
+	LK_SHAPE.resize(ID_COUNT)
+	LK_COLOR.resize(ID_COUNT)
+	LK_TOP.resize(ID_COUNT)
+	LK_SWAY.resize(ID_COUNT)
+	LK_EMIT.resize(ID_COUNT)
+	LK_LIGHT.resize(ID_COUNT)
+	LK_ROUGH.resize(ID_COUNT)
+	LK_PATTERN_SIDE.resize(ID_COUNT)
+	LK_PATTERN_TOP.resize(ID_COUNT)
 	var side_patterns := {132: 1, CRAFTING_TABLE: 2, CHEST: 3, FURNACE: 4,
 		BOOM: 5, 137: 6, PUMPKIN: 7, 138: 8,
 		PLANKS: 9, BIRCH_PLANKS: 9, DARK_PLANKS: 9, CHERRY_PLANKS: 9,
@@ -464,7 +476,7 @@ static func _build_lookups() -> void:
 		LK_PATTERN_SIDE[pid] = side_patterns[pid]
 	for pid: int in top_patterns.keys():
 		LK_PATTERN_TOP[pid] = top_patterns[pid]
-	for id in 256:
+	for id in ID_COUNT:
 		var spec := info(id)
 		LK_OPAQUE[id] = 1 if bool(spec.get("opaque", false)) else 0
 		LK_SOLID[id] = 1 if bool(spec.get("solid", false)) else 0

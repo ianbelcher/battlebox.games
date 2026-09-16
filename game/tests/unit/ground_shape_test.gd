@@ -8,19 +8,20 @@ extends TestCase
 
 const SIZE := 16
 
+## A BYTE offset: block ids are u16 pairs. See WorldGen.bidx.
 func _at(x: int, y: int, z: int) -> int:
-	return (y * SIZE + z) * SIZE + x
+	return ((y * SIZE + z) * SIZE + x) << 1
 
 ## Ground whose height at each column is `height(x, z)`, out of grass.
 func _ground(height: Callable) -> PackedByteArray:
 	var data := PackedByteArray()
-	data.resize(SIZE * SIZE * WorldGen.CHUNK_H)
+	data.resize(SIZE * SIZE * WorldGen.CHUNK_H * 2)
 	data.fill(Blocks.AIR)
 	for z in SIZE:
 		for x in SIZE:
 			var top: int = height.call(x, z)
 			for y in top:
-				data[_at(x, y, z)] = Blocks.GRASS
+				data.encode_u16(_at(x, y, z), Blocks.GRASS)
 	return data
 
 func _shaped(data: PackedByteArray) -> Mesher:
