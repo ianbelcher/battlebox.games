@@ -117,3 +117,38 @@ func test_a_bigger_body_is_a_bigger_target() -> void:
 	var out := Vector3(2.0, 3.0, 0)
 	check(not BodySize.hits_body(Vector3.ZERO, 1.0, out), "a person is missed")
 	check(BodySize.hits_body(Vector3.ZERO, 4.0, out), "a giant is not")
+
+# ---- what a BLAST catches ----------------------------------------------
+
+## A BLAST IS MEASURED TO THE BODY, NOT TO THE FEET, and this is the test
+## for the bug that made Giants unplayable: a Medium Shooter round into a
+## giant's head is fourteen blocks from the position on the wire, so a
+## five-block blast radius compared against that distance threw away every
+## hit above the ankles. Ten to the head and the row of stars did not move.
+func test_a_hit_anywhere_on_a_giant_is_a_hit_on_the_giant() -> void:
+	var feet := Vector3.ZERO
+	var head := Vector3(0, BodySize.height(8.0) * 0.95, 0)
+	near(BodySize.distance_to_body(feet, 8.0, head), 0.0, 0.001,
+		"a round in an 8x giant's head is ON the giant")
+	check(feet.distance_to(head) > 13.0,
+		"...while being thirteen blocks from the spot it is standing on")
+	for up: float in [0.05, 0.25, 0.5, 0.75, 1.0]:
+		var at := Vector3(0, BodySize.height(8.0) * up, 0)
+		check(BodySize.distance_to_body(feet, 8.0, at) < 5.0,
+			"a five-block blast at %.0f%% up the body catches it" % (up * 100.0))
+
+## And it still measures a real distance for anything that genuinely is
+## somewhere else, or a blast would catch the whole map.
+func test_a_blast_across_the_field_still_misses() -> void:
+	near(BodySize.distance_to_body(Vector3.ZERO, 1.0, Vector3(9.0, 0, 0)),
+		9.0 - BodySize.half_width(1.0), 0.001, "nine blocks away is nine blocks away")
+	check(BodySize.distance_to_body(Vector3.ZERO, 8.0, Vector3(0, 40.0, 0)) > 20.0,
+		"and forty blocks over a giant's head is still over its head")
+
+## Zero inside, so a hit that lands in the middle of a chest is not
+## "slightly missed" by a radius test written with >= or >.
+func test_inside_the_body_is_no_distance_at_all() -> void:
+	for size: float in [1.0, 2.0, 8.0]:
+		var middle := Vector3(0, BodySize.height(size) * 0.5, 0)
+		near(BodySize.distance_to_body(Vector3.ZERO, size, middle), 0.0, 0.0001,
+			"dead centre of a %.0fx body is zero away from it" % size)

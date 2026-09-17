@@ -924,6 +924,35 @@ func hurt(id: String, amount: int, from_pos: Vector3, attacker := "") -> void:
 	if state.hp <= 0:
 		eliminate(id, attacker)
 
+## A BLAST, AND EVERYBODY IT CAUGHT — measured to each body, not to the
+## patch of ground each body is standing on.
+##
+## THE THREE WEAPONS THAT DO THIS HAD THREE COPIES OF IT in world.gd, and
+## every copy asked how far the explosion was from `player_state[pid].pos`.
+## What goes on the wire is the FEET. A person is 1.8 blocks tall, so the
+## feet and the chest are the same answer to within a rounding error and
+## the bug could not exist. A giant is 14.4 blocks tall: a shot into its
+## chest is nine blocks above its feet and one into its head is fourteen,
+## so with a five-block radius the Medium Shooter — the weapon everybody
+## has most of the time — could not hurt a giant anywhere above its shins.
+## Ten shots to the head and the row of stars did not move, because not
+## one of them counted.
+##
+## One place, so the next weapon with a blast radius cannot bring it back,
+## and here rather than in world.gd because taking hearts off people is
+## this file's job and world.gd is the wire.
+func splash(attacker: String, cell: Vector3i, radius: float,
+		amount: int) -> void:
+	var at := Vector3(cell)
+	for pid: String in world.match_alive.keys():
+		if pid == attacker or not world.teams_differ(attacker, pid) \
+				or not world.player_state.has(pid):
+			continue
+		if BodySize.distance_to_body(Vector3(world.player_state[pid].pos),
+				world.bodies.size_of(pid), at) >= radius:
+			continue
+		hurt(pid, amount, at, attacker)
+
 ## Every downed team-mate within reach of `id` — the ones they were in
 ## the middle of picking up — goes back to zero.
 func _interrupt_revives_by(id: String, at: Vector3) -> void:

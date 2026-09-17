@@ -95,6 +95,16 @@ func _refresh_sides() -> void:
 		_team_of[id] = int(entry.get("team", -1))
 		_is_bot[id] = bool(entry.get("bot", false))
 
+## THE BIGGEST BODY ON THE FIELD, so a broad-phase radius can be widened
+## by it. Cheap: the sizes dictionary only has an entry for anybody a mode
+## has actually resized, so in every game but Giants and Tag it is empty
+## and this is BodySize.PERSON without a loop.
+func _tallest_body() -> float:
+	var big := BodySize.PERSON
+	for id: String in world.bodies.sizes:
+		big = maxf(big, float(world.bodies.sizes[id]))
+	return big
+
 ## Everybody standing within `reach` blocks of a point, on any side —
 ## read from the grid, so it is the few in the surrounding squares.
 func standing_near(at: Vector3, reach: float) -> Array:
@@ -2968,6 +2978,11 @@ func tick_orbs(delta: float) -> void:
 	# ...and now looked up not at all: the world took that picture at the
 	# top of the frame (refresh_picture), split by side, so each orb reads
 	# only the people it could hurt.
+	#
+	# The tallest body is read once here for the same reason: it widens
+	# every orb's broad-phase reach, and asking it per orb would be a walk
+	# of the whole roster per orb per frame.
+	var tallest := BodySize.height(_tallest_body())
 	for i in range(orbs.size() - 1, -1, -1):
 		var orb: Dictionary = orbs[i]
 		orb.age = float(orb.age) + delta
@@ -2996,7 +3011,13 @@ func tick_orbs(delta: float) -> void:
 		#
 		# Almost nobody is ever near an orb's path, so the list is nearly
 		# always empty and the inner loop below costs nothing.
-		var reach := travel + 2.0
+		# WIDE ENOUGH TO CATCH A GIANT. The grid this asks is indexed by
+		# where each body's FEET are, so a body 14 blocks tall whose head
+		# an orb is passing through is 14 blocks from the point being
+		# asked about. Two blocks of slack found a person and missed
+		# everything above a giant's shins — the same bug the blast
+		# weapons had, in the one place the computer players shoot from.
+		var reach := travel + 2.0 + tallest
 		var near: Array = []
 		var shooter_side := side_of(orb.shooter)
 		for entry: Array in standing_near(from, reach):
@@ -3024,7 +3045,16 @@ func tick_orbs(delta: float) -> void:
 				break
 			for entry: Array in near:
 				var target: Vector3 = entry[1]
-				if target.distance_to(at - Vector3(0, 0.8, 0)) < 1.1:
+				# THE BODY, WHATEVER SIZE IT IS — not the 1.1-block ball
+				# around a point 0.8 above the feet that this used to be.
+				# That ball fits a person because a person is nearly as
+				# wide as its slack; on a giant it is a marble at the
+				# ankles, so a bot could empty a magazine into one and
+				# never touch it. BodySize.hits_body reaches exactly as
+				# far as the old ball at size 1.0, so nothing changes for
+				# a game without giants in it.
+				if BodySize.hits_body(target,
+						world.bodies.size_of(str(entry[0])), at):
 					if OS.get_environment("WORLD_ORB_DEBUG") == "1":
 						print("BOTORB hit %s after %.2fs in flight" % [entry[0], orb.age])
 					world.match_hurt(str(entry[0]), 1, at, orb.shooter)

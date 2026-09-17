@@ -1022,6 +1022,25 @@ func tick_giants(delta: float) -> void:
 			for _extra in 4:
 				world.rules.on_crate_taken(world, attacker, Loadout.GROWTH)
 			_giants_say("after four more", attacker)
+		3:
+			# CAN THE GIANT BE SHOT? The whole mode rests on yes, and the
+			# answer was no for every hit above its shins: a blast asked
+			# how far it was from the target's POSITION, and a position is
+			# the FEET. Fired at the head of a body fourteen blocks tall,
+			# every shot measured fourteen blocks from a five-block blast
+			# and was thrown away — "I hit it in the head ten times and
+			# its stars did not move".
+			#
+			# So: one Medium Shooter round into the head, one into the
+			# chest, one into the feet, and the hearts are read out after
+			# each. Any of the three coming back unchanged is the bug.
+			# `attacker` is the one who has been growing all the way
+			# through this probe, so it is the giant here and `victim` is
+			# the person shooting at it — the other way round from every
+			# step above, which is the point of the step.
+			_giants_shot(victim, attacker, "the head", 0.95)
+			_giants_shot(victim, attacker, "the chest", 0.5)
+			_giants_shot(victim, attacker, "the feet", 0.05)
 		_:
 			# WHAT BEING A GIANT COSTS, five seconds at a time. A giant is
 			# a very much bigger target and the computer players can see
@@ -1029,6 +1048,28 @@ func tick_giants(delta: float) -> void:
 			# can actually be watched happening.
 			_giants_say("still standing", attacker)
 	_giants_step += 1
+
+## ONE BLAST AT A GIANT, at a given height up its body, through the real
+## weapon path — MatchDirector.splash, the same call sv_shot makes for a
+## Medium Shooter round. Prints the hearts either side of it, because a
+## blast that misses does not error, log or differ in any way from one
+## that lands: the number simply does not change.
+func _giants_shot(shooter: String, giant: String, where: String,
+		up: float) -> void:
+	var size: float = world.bodies.size_of(giant)
+	var feet: Vector3 = Vector3(world.player_state.get(giant, {}).get("pos",
+		Vector3.ZERO))
+	var at := feet + Vector3(0, BodySize.height(size) * up, 0)
+	var before := int(world.player_state.get(giant, {}).get("hp", 0))
+	# The mercy window is real and is measured in hundreds of
+	# milliseconds; three rounds in one frame would be one hit and two
+	# no-ops, and two of the three answers would be the bug's.
+	world.battle._last_hit_ms.erase(giant)
+	world.battle.splash(shooter, Vector3i(at.round()), 5.0, 2)
+	var after := int(world.player_state.get(giant, {}).get("hp", 0))
+	print("GIANTSTEST a round into %s of %s (size %.1f, %.1f blocks up): hearts %d -> %d %s"
+		% [where, giant, size, at.y - feet.y, before, after,
+			"HIT" if after < before else "MISSED"])
 
 ## One line saying everything that has to move together. A size that grew
 ## while the hearts did not is the bug this exists to catch.

@@ -208,10 +208,14 @@ WORLD_ICON_CATEGORY=building WORLD_ICON_OUT=/tmp/chips.png \
   --rendering-method gl_compatibility res://tests/block_icons.tscn
 
 # Every weapon in somebody else's hand, in a given pose
-# (WORLD_HELD_RAW=1 shows it without the hand tilt, which is the bug it fixes)
+# (WORLD_HELD_RAW=1 shows it uncorrected, which is the bug it fixes)
 WORLD_HELD_CLIP=walk WORLD_ICON_OUT=/tmp/held.png \
   xvfb-run -a godot --path game --resolution 1400x560 \
   --rendering-method gl_compatibility res://tests/held_items.tscn
+
+# ...and the same thing as numbers, because a weapon photographed at an
+# angle can look roughly right while being a long way out of true
+godot --headless --path game res://tests/aim_probe.tscn
 ```
 
 The first runs the real client under a virtual X server and saves a PNG
@@ -224,9 +228,12 @@ never raise. A block whose shape `BlockIcon` has no arm for draws a blank
 square in the picker beside a perfectly good name; a map generator that
 puts a wall through a doorway is a bug you can only see; and a weapon
 inherits the arm it hangs from, so every gun in the game pointed at the
-floor for as long as anybody was walking — while the model loaded, the
-node parented, the clip played and the console stayed clean. Each is one
-command and a picture.
+floor, the sky or straight backwards depending on where in a stride its
+owner was — while the model loaded, the node parented, the clip played
+and the console stayed clean. Each is one command and a picture, and the
+last of them is one command and a column of dot products, because the
+first correction written for that bug looked fine in the photographs and
+was ninety degrees out.
 
 The last two matter more than they look. Booting the project proves the
 scripts compile; it does not prove the game works, because an RPC sent to a

@@ -35,36 +35,39 @@ const ATTRS: Array[String] = ["who", "fit"]
 const LOOPING_ANIMS: Array[String] = ["idle", "walk", "sprint",
 	"holding-right", "sit"]
 
-## THE CLIPS THAT RAISE THE RIGHT ARM, and what they decide.
+## WHICH WAY A THING IN THE RIGHT HAND HAS TO BE TURNED, given whatever
+## the clip is doing to the body at this instant.
 ##
 ## A held item is parented to `arm-right` and inherits its transform;
-## nothing else decides which way a weapon points. The pack raises that
-## arm to the horizontal in `holding-right` — a single key at -90° about
-## X — and leaves it hanging straight down in `walk`, `idle` and
-## `sprint`. A weapon is modelled to fire down -Z, so in a raised arm it
-## points where the character is looking and in a hanging arm the same
-## weapon is a quarter turn out: muzzle at the floor, and with the arm's
-## swing behind it, often at the floor BEHIND its owner. A sword comes
-## out backwards the same way.
+## nothing else decides which way a weapon points. Everything between the
+## item and the body is ANIMATED: the pack swings the arm about X through
+## the whole of `walk`, `idle` and `sprint`, pins it at -90° in
+## `holding-right`, and leans the TORSO and the root on top of that. A
+## weapon is modelled to fire down -Z, so the direction one comes out
+## pointing is all of that multiplied together — which means a weapon
+## points somewhere different on every frame of a stride, and forwards
+## only by accident.
 ##
-## Nobody stands still in a round, so that was the state a weapon was in
-## almost all of the time. See tests/held_items.tscn for the picture, and
-## `hand_tilt_degrees` for what is done about it.
+## A FIXED CORRECTION PER CLIP CANNOT FIX THAT, and that was the previous
+## attempt: a quarter turn about X for the clips that hang the arm,
+## nothing for the ones that raise it. Measured (tests/aim_probe.tscn
+## prints it), that put a walking player's muzzle straight UP at the
+## middle of a stride and a standing player's straight BACKWARDS.
+##
+## So the whole chain is cancelled and the BODY'S own facing put in its
+## place: ask the arm where it has ended up, ask the body which way it is
+## looking, and hand back the local rotation that turns the first into the
+## second. Whatever the clip does — arm swing, torso lean, the pack's own
+## 180° about Y, a pose nobody has written yet — the weapon comes out
+## pointing exactly where its owner is. Dot product 1.000, every frame of
+## every clip, which is what aim_probe checks.
 ##
 ## Here and not on Player because this is knowledge about the PACK, like
 ## everything else in this file — and because Player names the Game
 ## autoload, so nothing on it can be reached by a --script test.
-const ARM_RAISED_CLIPS: Array[String] = ["holding-right", "holding-both",
-	"holding-right-shoot", "holding-both-shoot", "attack-melee-right",
-	"attack-kick-right", "sit", "drive", "pick-up", "interact-right"]
-
-## Which way a thing in the right hand should be turned, given the clip
-## the arm is playing. A hanging arm gets the quarter turn put back; a
-## raised one does not need it, and a SWING must not have it — the sword
-## has to follow the arm through `attack-melee-right`, or the swing is a
-## sword standing still while somebody waves at it.
-static func hand_tilt_degrees(clip: String) -> Vector3:
-	return Vector3.ZERO if clip in ARM_RAISED_CLIPS else Vector3(90, 0, 0)
+static func hand_rotation(arm: Basis, body: Basis) -> Quaternion:
+	return arm.get_rotation_quaternion().inverse() \
+		* body.get_rotation_quaternion()
 
 ## who -> {part name -> Mesh}. Built on first use by instantiating the
 ## character once and lifting its six meshes out; every avatar after that

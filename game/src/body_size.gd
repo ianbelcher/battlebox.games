@@ -167,6 +167,30 @@ static func hits_body(feet: Vector3, size: float, point: Vector3) -> bool:
 	return point.y >= feet.y - AIM_MARGIN_DOWN \
 		and point.y <= feet.y + height(size) + AIM_MARGIN_UP
 
+## HOW FAR A POINT IS FROM THIS BODY, measured to the body itself rather
+## than to the spot on the ground it is standing on.
+##
+## THIS IS THE ONE THAT GETS MISSED, exactly as the note at the top of
+## this file says it always is. A blast asks "is anybody within five
+## blocks of where this went off" and answers it with the distance to
+## each player's POSITION — and a position on the wire is the FEET. On a
+## person that is the same question, because a person is under two blocks
+## tall. On an eight-times giant it is a different question with a
+## different answer: the body is 14.4 blocks tall, so a rocket dead-centre
+## in its chest is nine blocks from its feet and a headshot is fourteen,
+## and every one of them was thrown away as a miss. "I emptied the medium
+## shooter into a giant's head and its hearts did not move" is this line
+## and nothing else.
+##
+## Zero when the point is inside the body. Same box hits_body uses, minus
+## the aim help: this is the real body, not the generosity around it.
+static func distance_to_body(feet: Vector3, size: float, point: Vector3) -> float:
+	var reach := half_width(size)
+	var dx := maxf(absf(point.x - feet.x) - reach, 0.0)
+	var dz := maxf(absf(point.z - feet.z) - reach, 0.0)
+	var dy := maxf(maxf(feet.y - point.y, point.y - (feet.y + height(size))), 0.0)
+	return sqrt(dx * dx + dy * dy + dz * dz)
+
 ## The server's sanity bound on a hit a client reports: how far from the
 ## body the claimed impact may be before the server calls it nonsense.
 ## Grows with the body for the same reason edit_reach does — the position

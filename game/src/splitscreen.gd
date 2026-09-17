@@ -16,6 +16,13 @@ const CAM_HEIGHT := 37.0
 const DEFAULT_PITCH := 0.718  # atan(37 / 42.4)
 ## From nearly-on-your-shoulder to a big map-like overview.
 const ZOOM_SIZES: Array[float] = [5.0, 7.0, 10.0, 15.0, 22.0, 32.0, 48.0, 70.0, 100.0]
+## HOW MUCH FRAME A BODY IS GUARANTEED, as a multiple of its own height.
+## The orbit camera never widens for a body that already fits; this is the
+## point at which it has to. At 2.2 a person needs four blocks of view and
+## gets fifteen, so nothing changes for any ordinary game — it only bites
+## on a giant past about four times the size, and then it opens the view
+## by as little as will hold the body.
+const BODY_IN_FRAME := 2.2
 const FP_FOVS: Array[float] = [78.0, 45.0, 20.0, 8.0]
 const DEFAULT_ZOOM := 3
 
@@ -404,7 +411,17 @@ func _process(delta: float) -> void:
 				if not player.on_floor:
 					run = 0.0
 				cell.bob_amp = lerpf(float(cell.get("bob_amp", 0.0)), clampf(run / 7.0, 0.0, 1.0), minf(1.0, delta * 6.0))
-				cell.bob_phase = float(cell.get("bob_phase", 0.0)) + delta * (4.0 + run * 0.9)
+				# A GIANT'S GUN SWINGS SLOWLY, in proportion to how big it
+				# is — the same one-over-the-size the avatar's legs use
+				# (Player._animate_kenney). A giant crosses the ground at
+				# a person's pace on purpose, so `run` is unchanged by
+				# growing, and a bob keyed straight off it had somebody
+				# the size of a house jogging with a gun twitching eight
+				# times a second. Its stride is eight times longer, so its
+				# step is eight times slower, and the weapon goes with it.
+				var stride: float = maxf(player.body_size, 0.25)
+				cell.bob_phase = float(cell.get("bob_phase", 0.0)) \
+					+ delta * (4.0 + run * 0.9) / stride
 				var amp: float = 0.055 * float(cell.bob_amp)
 				vm.position = Vector3(cell.get("vm_base", Vector3(0.3, -0.42, -0.72))) \
 					+ Vector3(cos(float(cell.bob_phase)) * amp, -absf(sin(float(cell.bob_phase))) * amp * 1.3, 0)
@@ -458,19 +475,27 @@ func _process(delta: float) -> void:
 				cell.zoom_index = clampi(int(cell.zoom_index) - zoom, 0, ZOOM_SIZES.size() - 1)
 			cell.prev_zoom = zoom
 		cell.size = lerpf(cell.size, ZOOM_SIZES[cell.zoom_index], minf(1.0, delta * 5.0))
-		# THE VIEW GROWS WITH THE BODY. This camera is ORTHOGONAL, so
-		# what decides how big your own character looks on screen is
-		# `size`, not how far back the camera sits — pulling it away
-		# would have changed nothing at all.
+		# THE WORLD STAYS THE SIZE IT IS, AND THE GIANT GETS BIGGER.
 		#
-		# Without it an eight-times giant is a wall of its own torso
-		# filling the window, with the game happening somewhere behind
-		# it. Straight proportion, so a giant takes up as much of the
-		# screen as a person does and sees as much further as it can
-		# stride. Never below 1.0: shrinking must not zoom a small
-		# player in until they cannot see what is about to eat them.
-		var view: float = maxf(player.body_size, 1.0)
-		cam.size = cell.size * view
+		# This camera is ORTHOGONAL, so what decides how big anything
+		# looks is `size` and not how far back the camera sits. It used to
+		# be `cell.size * body_size` — straight proportion — and that is a
+		# camera that zooms out by exactly as much as you have grown: your
+		# character stays the same number of pixels tall and the whole
+		# world shrinks around it. Growing looked like everything else
+		# getting smaller, which is precisely backwards, and it is not
+		# what being a giant is.
+		#
+		# So the zoom the player chose is the zoom they get, at every
+		# size, and a giant genuinely fills more of the screen. The only
+		# thing still allowed to widen it is not fitting: a body 14 blocks
+		# tall in a 15-block frame is a wall of torso with the game
+		# happening behind it, so the view opens just far enough to keep
+		# the whole body and some room around it in shot, and no further.
+		# Below that — every size up to about 4x at the default zoom —
+		# nothing moves at all.
+		var grown: float = maxf(player.body_size, 1.0)
+		cam.size = maxf(cell.size, BodySize.height(grown) * BODY_IN_FRAME)
 		player.camera_yaw = cell.yaw
 		player.camera_pitch = float(cell.get("pitch", DEFAULT_PITCH))
 		# Smooth-follow the player from the current orbit direction.
@@ -498,14 +523,15 @@ func _process(delta: float) -> void:
 		# Only where it AIMS follows the body: the middle of it, rather
 		# than a fixed metre off the ground, which on a giant is its ankle.
 		cam.look_at_from_position(rig.position + offset,
-			rig.position + Vector3(0, 1.0 * view, 0), Vector3.UP)
+			rig.position + Vector3(0, 1.0 * grown, 0), Vector3.UP)
 	# Stream more chunks when someone is zoomed way out.
 	if world != null and world.chunks != null:
 		# HOW FAR THE WIDEST VIEW ON THIS SCREEN ACTUALLY REACHES. It had
 		# been measured and then thrown away — the radius was the video
 		# setting alone — which was harmless while every view was the same
-		# size. A giant's is not: its camera is pulled out in proportion
-		# to its body, so it looks out over ground nobody has streamed.
+		# size. It is not once anything widens one: a player zoomed all
+		# the way out, or a giant whose view has opened to hold its own
+		# body, looks over ground nobody has streamed.
 		var max_size := 0.0
 		for cell: Dictionary in _cells:
 			if cell.cam != null and not cell.get("fp", false):

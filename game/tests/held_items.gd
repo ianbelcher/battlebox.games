@@ -95,13 +95,16 @@ func _dress(holder: Node3D, weapon_id: int, clip: String) -> void:
 	var rig := maxf(arm.get_parent_node_3d().global_basis.get_scale().y, 0.01)
 	item.scale = Vector3.ONE / rig
 	item.position = Player.HAND_OFFSET
-	# WORLD_HELD_RAW=1 shows what it looked like before the arm's pose was
-	# taken into account at all — which is the picture that says whether
-	# the correction is doing anything.
-	item.rotation_degrees = Vector3.ZERO \
-		if OS.get_environment("WORLD_HELD_RAW") == "1" \
-		else Player.hand_tilt_degrees(clip)
+	# THE SAME CORRECTION THE GAME APPLIES, off the arm's pose at this
+	# instant rather than off the clip's name: the arm swings through a
+	# stride, so which way it is pointing is a different answer on every
+	# frame and no per-clip constant can be right for more than one of
+	# them. WORLD_HELD_RAW=1 leaves it out, which is the picture of the
+	# bug — ten characters with their weapons pointing backwards.
 	arm.add_child(item)
+	if OS.get_environment("WORLD_HELD_RAW") != "1":
+		item.quaternion = AvatarFactory.hand_rotation(arm.global_basis,
+			body.global_basis)
 
 func _process(_delta: float) -> void:
 	_frames += 1

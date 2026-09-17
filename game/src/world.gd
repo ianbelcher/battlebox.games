@@ -831,11 +831,7 @@ func sv_shot(slot: int, cell: Vector3i, kind: int) -> void:
 			# thing on the field, not a terraforming tool.
 			terrain.blast(cell, 4.0, [], cell)
 			if match_phase == "BATTLE":
-				for pid: String in match_alive.keys():
-					if pid != id and teams_differ(id, pid) \
-							and player_state.has(pid) \
-							and Vector3(cell).distance_to(player_state[pid].pos) < 8.0:
-						battle.hurt(pid, 3, Vector3(cell), Game.player_id(multiplayer.get_remote_sender_id(), slot))
+				battle.splash(id, cell, 8.0, 3)
 			return
 		1:  # Medium Shooter. 2.6, not 3.4: at the old radius a couple of
 			# shots flattened whatever ground a player was standing on,
@@ -844,11 +840,7 @@ func sv_shot(slot: int, cell: Vector3i, kind: int) -> void:
 			# this has now been halved twice: 3.4 -> 2.6 -> 2.1.
 			terrain.blast(cell, 2.1, [], cell)
 			if match_phase == "BATTLE":
-				for pid: String in match_alive.keys():
-					if pid != id and teams_differ(id, pid) \
-							and player_state.has(pid) \
-							and Vector3(cell).distance_to(player_state[pid].pos) < 5.0:
-						battle.hurt(pid, 2, Vector3(cell), Game.player_id(multiplayer.get_remote_sender_id(), slot))
+				battle.splash(id, cell, 5.0, 2)
 			for monster_id: int in monsters_by_id.keys().duplicate():
 				if Vector3(cell).distance_to(monsters_by_id[monster_id].pos) < 4.5:
 					monsters_by_id[monster_id].hp = int(monsters_by_id[monster_id].hp) - 2
@@ -925,11 +917,7 @@ func sv_shot(slot: int, cell: Vector3i, kind: int) -> void:
 			# blast itself hurts (2 hearts close in).
 			cl_boom_fx.rpc(cell)
 			if match_phase == "BATTLE":
-				for pid: String in match_alive.keys():
-					if pid != id and teams_differ(id, pid) \
-							and player_state.has(pid) \
-							and Vector3(cell).distance_to(player_state[pid].pos) < 5.0:
-						battle.hurt(pid, 2, Vector3(cell), Game.player_id(multiplayer.get_remote_sender_id(), slot))
+				battle.splash(id, cell, 5.0, 2)
 			var splashed: Array = []
 			for dz in range(-2, 3):
 				for dx in range(-2, 3):

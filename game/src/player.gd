@@ -436,6 +436,7 @@ func setup(p_id: String, entry: Dictionary, p_local: bool, p_input: InputSlot, p
 		_avatar = AvatarFactory.build_character({})
 	_avatar.scale = Vector3.ONE * AVATAR_SCALE * body_size
 	add_child(_avatar)
+	_watch_mixer()
 	_name = str(entry.name)
 	_human = not bool(entry.get("bot", false))
 	_tag = Label3D.new()
@@ -665,11 +666,23 @@ func refresh_from_roster(entry: Dictionary) -> void:
 		_avatar.scale = Vector3.ONE * AVATAR_SCALE * body_size
 		_avatar.rotation = old.rotation
 		add_child(_avatar)
+		_watch_mixer()
 		old.queue_free()
 		_apply_render_layer()
 		# The held item died with the old avatar's arm — force a rebuild.
 		_hand_sig = ""
 		_refresh_hand()
+
+## Ask this avatar's mixer to tell us the moment it has written a pose,
+## so what is in the hand can be turned back to face forward before the
+## frame is drawn. Re-asked whenever the avatar is rebuilt, because the
+## mixer went with the old one.
+func _watch_mixer() -> void:
+	if _avatar == null or not _avatar.has_meta("ap"):
+		return
+	var ap := _avatar.get_meta("ap") as AnimationPlayer
+	if is_instance_valid(ap) and not ap.mixer_applied.is_connected(_steady_hand):
+		ap.mixer_applied.connect(_steady_hand)
 
 ## Local players' visuals live on a per-slot render layer so their own
 ## first-person camera can cull them (everyone else still sees them).
@@ -745,19 +758,44 @@ func remote_update(pos: Vector3, yaw: float, p_anim: int) -> void:
 
 var _hand_item: Node3D = null
 var _hand_sig := ""
-## The clip the arm was in last time the item was posed — so a change of
-## animation re-poses what is in the hand. See hand_tilt_degrees.
+## The clip the arm is in, kept only so a SWING can be told from
+## everything else — see _steady_hand.
 var _arm_clip := ""
+## The arm the held thing hangs from, found once when it is attached.
+var _hand_arm: Node3D = null
 
 ## Where in the right arm a held thing sits: down the limb and a little
 ## forward of it, which is the hand.
 const HAND_OFFSET := Vector3(0, -1.1, 0.2)
 
-## Which way a held thing points is a fact about the character pack's
-## clips, so AvatarFactory owns it — see the note there, and
-## tests/held_items.tscn for the picture of what it is for.
-static func hand_tilt_degrees(clip: String) -> Vector3:
-	return AvatarFactory.hand_tilt_degrees(clip)
+## WHAT IS IN THE HAND POINTS WHERE ITS OWNER DOES, on every frame of
+## every clip.
+##
+## The item hangs off `arm-right` and inherits it, and the arm, the torso
+## and the root are all swung about through a stride — so the only way a
+## weapon points anywhere reliable is to take all of that back out again
+## and use the body's own facing instead. The arithmetic is a fact about
+## the pack, so AvatarFactory owns it.
+##
+## CALLED FROM `mixer_applied`, which is the signal the AnimationPlayer
+## emits directly after it has written the pose into the scene. That
+## timing is the whole trick: read the arm from _process or
+## _physics_process and it is a frame behind, so the correction is a frame
+## behind, and the gun shivers in the hand instead of sitting still in it.
+##
+## A SWING IS THE EXCEPTION. The sword has to travel with the arm through
+## `attack-melee-right` or the swing is a blade hanging in the air while
+## somebody waves past it.
+func _steady_hand() -> void:
+	if _hand_item == null or not is_instance_valid(_hand_item) \
+			or _hand_arm == null or not is_instance_valid(_hand_arm) \
+			or _avatar == null:
+		return
+	if _arm_clip == "attack-melee-right":
+		_hand_item.quaternion = Quaternion.IDENTITY
+		return
+	_hand_item.quaternion = AvatarFactory.hand_rotation(
+		_hand_arm.global_basis, _avatar.global_basis)
 
 ## Show what's in hand on the right arm — yours and everyone else's.
 func _held_code() -> int:
@@ -789,6 +827,7 @@ func _refresh_hand() -> void:
 		_hand_item.queue_free()
 		_hand_item = null
 	var arm: Node3D = _avatar.find_child("arm-right", true, false)
+	_hand_arm = arm
 	if arm == null:
 		return
 	if item.kind == "empty":
@@ -802,8 +841,11 @@ func _refresh_hand() -> void:
 		/ maxf(scale.y, 0.01)
 	_hand_item.scale = Vector3.ONE * (body_size / maxf(rig_scale, 0.01))
 	_hand_item.position = HAND_OFFSET
-	_hand_item.rotation_degrees = hand_tilt_degrees(_arm_clip)
 	arm.add_child(_hand_item)
+	# Aimed before it is ever drawn, rather than waiting for the mixer's
+	# next pass — a weapon that is briefly a quarter turn out on the frame
+	# it is picked up is a weapon that flickers as you swap to it.
+	_steady_hand()
 	for node in _hand_item.find_children("*", "VisualInstance3D", true, false):
 		(node as VisualInstance3D).layers = render_layer_bit()
 
@@ -1659,11 +1701,9 @@ func _animate_kenney(_delta: float) -> void:
 		want = "holding-right"
 	if ap.current_animation != want:
 		ap.play(want, 0.18)
-	# The arm has changed what it is doing, so what is in it is re-posed.
-	if want != _arm_clip:
-		_arm_clip = want
-		if _hand_item != null and is_instance_valid(_hand_item):
-			_hand_item.rotation_degrees = hand_tilt_degrees(want)
+	# Only a swing is treated differently, and _steady_hand reads this to
+	# know when one is on. Everything else is corrected the same way.
+	_arm_clip = want
 	# A GIANT'S LEGS GO ROUND SLOWER, in proportion to how big it is.
 	#
 	# Size and speed are separate on purpose (GiantsMode.SPEED), so a
