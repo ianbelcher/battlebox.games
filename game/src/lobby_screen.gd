@@ -54,6 +54,26 @@ const HERO_WIDTH := 620
 const LIST_WIDTH := 560
 ## The setup screen's panel.
 const SETUP_WIDTH := 1040
+## HOW MANY MODE TILES TO A ROW. Three, because three across SETUP_WIDTH
+## is 340 design pixels a tile, which is the width the longest mode name
+## ("Capture the flag") and the longest line under one ("It is twice the
+## size and twice as fast. Do not get touched") both need. Eight modes
+## therefore come out three, three and two, with a gap at the end of the
+## last row — a ninth fills it, and a tenth starts a fourth row without
+## anything on the sheet having to change.
+const MODE_COLUMNS := 3
+## The SHORTEST a mode tile may be, in design pixels. Only a floor: the
+## tiles measure their own words and grow past this together, so a mode
+## whose line wraps gets the room for it. See _fit_mode_tiles — that is
+## where the height they actually end up at is decided.
+const MODE_TILE_FLOOR := 96
+## The air inside a mode tile: beside the words, above the name, and
+## under the line below it. Named because _tile_height_for_words has to
+## add back the same numbers _tile laid out with, and two copies of a
+## number drift apart.
+const MODE_TILE_PAD_SIDE := 14
+const MODE_TILE_PAD_TOP := 14
+const MODE_TILE_PAD_BOTTOM := 12
 ## The bar pinned to the bottom of the setup screen: the button in it, and
 ## the air above and below. Its HEIGHT is these added up rather than a
 ## number of its own — it was 96, which is not 60 plus 18 twice, so the
@@ -744,26 +764,104 @@ func _build_action_bar() -> Control:
 ## The mode: bigger than the rest, because it decides which of the rest
 ## are even asked.
 func _build_mode_field(parent: Control) -> void:
-	# Its own layout: an eyebrow over a row of tiles. The labelled-row
+	# Its own layout: an eyebrow over a GRID of tiles. The labelled-row
 	# helper the dropdowns use would put the tiles beside the caption in
-	# the space a dropdown takes, and four tiles in that space is four
+	# the space a dropdown takes, and eight tiles in that space is eight
 	# vertical slivers with one letter per line.
 	var group := VBoxContainer.new()
 	group.add_theme_constant_override("separation", _px(8))
 	parent.add_child(group)
 	group.add_child(_eyebrow("How are we playing?"))
 	_groups["mode"] = group
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", _px(10))
-	group.add_child(row)
+	# THREE ACROSS, NOT ALL OF THEM ACROSS. This was one HBox, so every
+	# mode added to the registry took a slice off all the others: at eight
+	# they were 120 design pixels wide, "Capture the flag" was drawn as
+	# "Capture th...", and the note underneath wrapped to four lines that
+	# ran out of the bottom of the tile and over the heading of the card
+	# below it. A grid keeps the tile a readable width whatever the
+	# registry grows to — the modes wrap onto another row instead of the
+	# words wrapping inside one.
+	var grid := GridContainer.new()
+	grid.columns = MODE_COLUMNS
+	grid.add_theme_constant_override("h_separation", _px(10))
+	grid.add_theme_constant_override("v_separation", _px(10))
+	group.add_child(grid)
 	var buttons: Dictionary = {}
 	for spec: Dictionary in GameSetup.MODES:
 		var key := str(spec["key"])
 		var tile := _tile(str(spec["label"]), str(spec["note"]))
 		tile.pressed.connect(func() -> void: _pick("mode", key))
-		row.add_child(tile)
+		grid.add_child(tile)
 		buttons[key] = tile
+		# Measure again whenever this tile changes size, which is when the
+		# grid has just decided how wide a column is — and therefore when
+		# the line under the name has just re-wrapped.
+		tile.resized.connect(func() -> void: _fit_mode_tiles(buttons))
 	_choices["mode"] = buttons
+	_fit_mode_tiles(buttons)
+
+## EVERY TILE AS TALL AS THE DEEPEST ONE'S WORDS.
+##
+## A Button is not a container: the name and the line under it are hung
+## inside one on a full-rect anchor, so they cannot push it taller. A note
+## that wraps to one line more than the tile was built for is simply drawn
+## over the bottom border and across whatever is underneath — which is
+## exactly what "It is twice the size and twice as fast. Do not get
+## touched" did, and what a hard-coded height would go back to doing the
+## next time somebody writes a mode a few words longer.
+##
+## So ask. Every tile, to one height, because a grid with one deep row
+## and two shallow ones reads as a fault rather than as a fit — and only
+## ever upwards from MODE_TILE_FLOOR, so this settles instead of pumping
+## against the scrollbar appearing and disappearing under it.
+func _fit_mode_tiles(tiles: Dictionary) -> void:
+	var want := _px(MODE_TILE_FLOOR)
+	for key: Variant in tiles:
+		want = maxi(want, _tile_height_for_words(tiles[key]))
+	for key: Variant in tiles:
+		var tile: Button = tiles[key]
+		if want > int(tile.custom_minimum_size.y):
+			tile.custom_minimum_size.y = want
+
+## How tall one tile has to be for the words in it, at the width the grid
+## has just given it.
+##
+## MEASURED OFF THE FONT, not off the labels. Asking the labels means
+## asking a Label that wraps how tall it is, and it answers for the width
+## it was last laid out at — which, the moment the column width changes,
+## is the width before this one. The font can be asked about a width that
+## has not been drawn yet, so the tile is the right height on the first
+## frame rather than the second.
+func _tile_height_for_words(tile: Button) -> int:
+	var name_label: Label = tile.get_meta("name_label")
+	var note_label: Label = tile.get_meta("note_label")
+	var inner_width := tile.size.x - float(_px(MODE_TILE_PAD_SIDE) * 2)
+	if not tile.is_inside_tree() or inner_width <= 0.0:
+		return 0
+	var name_font: Font = name_label.get_theme_font("font")
+	var name_size: int = name_label.get_theme_font_size("font_size")
+	var note_font: Font = note_label.get_theme_font("font")
+	var note_size: int = note_label.get_theme_font_size("font_size")
+	# HOW MANY LINES, then how tall a Label makes that many — and the two
+	# are asked of different things ON PURPOSE.
+	#
+	# get_multiline_string_size is the only thing that will wrap a string
+	# at a width and say what came out, so it decides the COUNT. It cannot
+	# decide the HEIGHT: it measures the glyphs it shaped, and this font
+	# declares far more room above and below them than they take, so it
+	# comes back at fourteen pixels a line where the Label draws twenty-four
+	# plus the three of line_spacing between them. Divide its answer by its
+	# own idea of one line to get the count, and ask the FONT how tall a
+	# Label makes each one.
+	var wrapped := note_font.get_multiline_string_size(note_label.text,
+		HORIZONTAL_ALIGNMENT_LEFT, inner_width, note_size).y
+	var unit := note_font.get_multiline_string_size("X",
+		HORIZONTAL_ALIGNMENT_LEFT, -1.0, note_size).y
+	var lines := maxi(1, int(round(wrapped / maxf(1.0, unit))))
+	var note_high := note_font.get_height(note_size) * float(lines) \
+		+ float(note_label.get_theme_constant("line_spacing")) * float(lines - 1)
+	return int(ceil(name_font.get_height(name_size) + float(_px(4))
+		+ note_high)) + _px(MODE_TILE_PAD_TOP) + _px(MODE_TILE_PAD_BOTTOM)
 
 func _build_map_field(parent: Control) -> void:
 	var options: Array = []
@@ -1335,20 +1433,16 @@ func _ghost_button(label: String, size: int) -> Button:
 ## because it is the decision the rest of the screen hangs off.
 func _tile(label: String, note: String) -> Button:
 	var button := Button.new()
-	# TALL ENOUGH FOR THE SECOND LINE. At 96 the note wrapped to two lines
-	# and the second one was drawn outside the tile, over the heading of
-	# the next section — which looked like the layout had given up rather
-	# than like a tile with a description on it.
-	button.custom_minimum_size = Vector2(0, _px(132))
+	button.custom_minimum_size = Vector2(0, _px(MODE_TILE_FLOOR))
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_paint_choice(button, false)
 
 	var inner := VBoxContainer.new()
 	inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	inner.offset_left = _px(14)
-	inner.offset_right = -_px(14)
-	inner.offset_top = _px(14)
-	inner.offset_bottom = -_px(12)
+	inner.offset_left = _px(MODE_TILE_PAD_SIDE)
+	inner.offset_right = -_px(MODE_TILE_PAD_SIDE)
+	inner.offset_top = _px(MODE_TILE_PAD_TOP)
+	inner.offset_bottom = -_px(MODE_TILE_PAD_BOTTOM)
 	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	inner.add_theme_constant_override("separation", _px(4))
 	var title := _row_label(label, UiTheme.T_LABEL + 3, UiTheme.INK)
@@ -1358,6 +1452,10 @@ func _tile(label: String, note: String) -> Button:
 	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	inner.add_child(sub)
 	button.add_child(inner)
+	# The two labels are hung off the tile so _fit_mode_tiles can measure
+	# them. A Button is not a container and will not ask on its own.
+	button.set_meta("name_label", title)
+	button.set_meta("note_label", sub)
 	return button
 
 ## Paints the chosen entry. Cheap to call every refresh: it only writes
