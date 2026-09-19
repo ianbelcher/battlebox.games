@@ -105,6 +105,14 @@ const FACES := [
 	[Vector3i(0, 0, -1), Vector3i(0, 1, 0), Vector3i(1, 0, 0), SHADE_Z],
 ]
 
+## Per-corner constants of a cube face, hoisted out of the per-face loop.
+const CORNER_SIGNS: Array[Vector2i] = [Vector2i(-1, -1), Vector2i(1, -1),
+	Vector2i(1, 1), Vector2i(-1, 1)]
+const CORNER_U: PackedFloat32Array = [0.0, 0.999, 0.999, 0.0]
+const CORNER_V: PackedFloat32Array = [1.0, 1.0, 0.0, 0.0]
+const QUAD_ORDER: PackedInt32Array = [0, 2, 1, 0, 3, 2]
+const QUAD_ORDER_FLIPPED: PackedInt32Array = [1, 3, 2, 1, 0, 3]
+
 var _data: PackedByteArray
 var _neighbors: Dictionary  # Vector2i (unit offsets) -> PackedByteArray
 
@@ -153,6 +161,16 @@ func _block_at(x: int, y: int, z: int) -> int:
 	if neighbor.is_empty():
 		return Blocks.AIR
 	return neighbor.decode_u16(((y * SIZE + z) * SIZE + x) << 1)
+
+## Whether all six neighbours of the block at byte offset `at` in _data are
+## opaque. Interior blocks only: every neighbour is in this chunk.
+func _buried(at: int) -> bool:
+	return _lk_opaque[_data.decode_u16(at - 2)] == 1 \
+		and _lk_opaque[_data.decode_u16(at + 2)] == 1 \
+		and _lk_opaque[_data.decode_u16(at - SIZE * 2)] == 1 \
+		and _lk_opaque[_data.decode_u16(at + SIZE * 2)] == 1 \
+		and _lk_opaque[_data.decode_u16(at - SIZE * SIZE * 2)] == 1 \
+		and _lk_opaque[_data.decode_u16(at + SIZE * SIZE * 2)] == 1
 
 func _occludes(x: int, y: int, z: int) -> bool:
 	return _lk_opaque[_block_at(x, y, z)] == 1
@@ -234,6 +252,26 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 				# floor IS grass to look at. Only the drawing id changes;
 				# `block` stays TRAP below, or a trap disguised as a warp
 				# stone would start teleporting people.
+				# BURIED: all six neighbours opaque means _add_cube would
+				# cull every face, and the block above being solid means it
+				# is not shaped ground either. Most of a chunk is buried
+				# ground, so skipping the call (its jitter hash, six face
+				# lookups, the smoothing test) is most of the build. Its
+				# lamp and warp stone still count.
+				if x > 0 and x < SIZE - 1 and z > 0 and z < SIZE - 1 \
+						and y > 0 and y < H - 1 \
+						and _buried(((y * SIZE + z) * SIZE + x) << 1):
+					if block == Blocks.TELEPORT:
+						teleporters.append(Vector3i(x, y, z))
+					var buried_light := Blocks.LK_LIGHT[block]
+					if buried_light > 0.0:
+						lights.append({
+							"pos": Vector3(x + 0.5, y + 0.6, z + 0.5),
+							"energy": buried_light,
+							"color": Blocks.LK_COLOR[block],
+							"flicker": block == Blocks.CAMPFIRE or block == Blocks.FIRE,
+						})
+					continue
 				var draw := block
 				if block == Blocks.TRAP:
 					draw = Blocks.disguise_of([
@@ -302,7 +340,17 @@ func _jitter(x: int, y: int, z: int, cx: int, cz: int, rough := 0.0) -> float:
 ## natural ground with nothing above it is shaped; anything built, and
 ## anything with something on it, is whole.
 func _smooth(block: int, x: int, y: int, z: int) -> bool:
-	return SMOOTH_CORNERS and (block in SMOOTH_BLOCKS) and _block_at(x, y + 1, z) == Blocks.AIR
+	return SMOOTH_CORNERS and _smoothable()[block] == 1 and _block_at(x, y + 1, z) == Blocks.AIR
+
+## SMOOTH_BLOCKS as a table by id: `in` on the array was a linear search,
+## run for every solid block and again for every corner test.
+static var _smooth_lk := PackedByteArray()
+static func _smoothable() -> PackedByteArray:
+	if _smooth_lk.is_empty():
+		_smooth_lk.resize(Blocks.ID_COUNT)
+		for id: int in SMOOTH_BLOCKS:
+			_smooth_lk[id] = 1
+	return _smooth_lk
 
 ## Corner heights [NW, NE, SE, SW] of a block's top, relative to its
 ## bottom: 1 is its own top, 0 its bottom.
@@ -352,7 +400,7 @@ func _open_ground_corner(vx: int, y: int, vz: int) -> bool:
 			var block := _block_at(nx, y, nz)
 			if block == Blocks.AIR:
 				continue
-			if not _firm_at(nx, y, nz) or not (block in SMOOTH_BLOCKS):
+			if not _firm_at(nx, y, nz) or _smoothable()[block] != 1:
 				return false
 	return true
 
@@ -584,11 +632,27 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 	var is_liquid := Blocks.LK_LIQUID[block] == 1
 	# Liquids drop their surface a bit below the block top, like Minecraft.
 	var top_y := 0.875 if is_liquid and _block_at(x, y + 1, z) != block else 1.0
+	# The surface's arrays once, not a dictionary lookup per append.
+	# Packed arrays are shared, so these ARE the surface's arrays.
+	var verts: PackedVector3Array = _verts[key]
+	var normals: PackedVector3Array = _normals[key]
+	var colors: PackedColorArray = _colors[key]
+	var uvs: PackedVector2Array = _uvs[key]
+	var uv2s: PackedVector2Array = _uv2s[key]
+	var indices: PackedInt32Array = _indices[key]
+	# Everything a face samples (its neighbour and the AO ring around it)
+	# is within one block of this one; away from the chunk's edges that is
+	# all in _data, read directly instead of through _block_at.
+	var interior := x > 0 and x < SIZE - 1 and z > 0 and z < SIZE - 1 \
+		and y > 0 and y < H - 1
+	var here := (y * SIZE + z) * SIZE + x
 
 	for face_index in 6:
 		var face: Array = FACES[face_index]
 		var n: Vector3i = face[0]
-		var neighbor := _block_at(x + n.x, y + n.y, z + n.z)
+		var ahead := here + (n.y * SIZE + n.z) * SIZE + n.x
+		var neighbor := _data.decode_u16(ahead << 1) if interior \
+			else _block_at(x + n.x, y + n.y, z + n.z)
 		if translucent:
 			# Translucent faces show against AIR only — never against the
 			# same material (no internal water walls), never against an
@@ -625,46 +689,52 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 
 		# Ambient occlusion per corner (0 open .. 3 boxed in).
 		var ao := PackedFloat32Array([0, 0, 0, 0])
-		var corner_signs := [Vector2i(-1, -1), Vector2i(1, -1), Vector2i(1, 1), Vector2i(-1, 1)]
-		if not translucent:
+		if not translucent and interior:
+			var du := (u.y * SIZE + u.z) * SIZE + u.x
+			var dv := (v.y * SIZE + v.z) * SIZE + v.x
 			for i in 4:
-				var cs: Vector2i = corner_signs[i]
+				var cs: Vector2i = CORNER_SIGNS[i]
+				var s1 := _lk_opaque[_data.decode_u16((ahead + du * cs.x) << 1)] == 1
+				var s2 := _lk_opaque[_data.decode_u16((ahead + dv * cs.y) << 1)] == 1
+				var c := _lk_opaque[_data.decode_u16((ahead + du * cs.x + dv * cs.y) << 1)] == 1
+				ao[i] = 3.0 if (s1 and s2) else float(int(s1) + int(s2) + int(c))
+		elif not translucent:
+			for i in 4:
+				var cs: Vector2i = CORNER_SIGNS[i]
 				var s1 := _occludes(x + n.x + u.x * cs.x, y + n.y + u.y * cs.x, z + n.z + u.z * cs.x)
 				var s2 := _occludes(x + n.x + v.x * cs.y, y + n.y + v.y * cs.y, z + n.z + v.z * cs.y)
 				var c := _occludes(x + n.x + u.x * cs.x + v.x * cs.y,
 					y + n.y + u.y * cs.x + v.y * cs.y, z + n.z + u.z * cs.x + v.z * cs.y)
 				ao[i] = 3.0 if (s1 and s2) else float(int(s1) + int(s2) + int(c))
 
-		var start: int = _verts[key].size()
-		var pattern := int(Blocks.LK_PATTERN_TOP[block] if n.y != 0
+		var start: int = verts.size()
+		var pattern := float(Blocks.LK_PATTERN_TOP[block] if n.y != 0
 			else Blocks.LK_PATTERN_SIDE[block])
-		var face_uvs := [Vector2(pattern, 1), Vector2(pattern + 0.999, 1),
-			Vector2(pattern + 0.999, 0), Vector2(pattern, 0)]
+		var normal := Vector3(n)
+		# Leaves sway everywhere; liquids wave only on their surface.
+		var vertex_sway := sway
+		if is_liquid:
+			vertex_sway = 1.0 if n.y == 1 else 0.0
+		var uv2 := Vector2(vertex_sway, emit)
 		for i in 4:
-			var cs: Vector2i = corner_signs[i]
+			var cs: Vector2i = CORNER_SIGNS[i]
 			var vert := center + half_u * float(cs.x) + half_v * float(cs.y)
 			if top_y != 1.0 and vert.y > y + top_y:
 				vert.y = y + top_y
-			_verts[key].append(vert)
-			_normals[key].append(Vector3(n))
-			_uvs[key].append(face_uvs[i])
+			verts.append(vert)
+			normals.append(normal)
+			uvs.append(Vector2(pattern + CORNER_U[i], CORNER_V[i]))
 			var brightness := shade * jitter * (1.0 - ao_step * ao[i])
-			var out := Color(color.r * brightness, color.g * brightness, color.b * brightness, color.a)
-			_colors[key].append(out)
-			# Leaves sway everywhere; liquids wave only on their surface.
-			var vertex_sway := sway
-			if is_liquid:
-				vertex_sway = 1.0 if n.y == 1 else 0.0
-			_uv2s[key].append(Vector2(vertex_sway, emit))
+			colors.append(Color(color.r * brightness, color.g * brightness,
+				color.b * brightness, color.a))
+			uv2s.append(uv2)
 		# Flip the quad diagonal to match the AO gradient (kills the classic
 		# voxel AO anisotropy artifact).
 		# Godot front faces wind clockwise.
-		if ao[0] + ao[2] <= ao[1] + ao[3]:
-			for index in [0, 2, 1, 0, 3, 2]:
-				_indices[key].append(start + index)
-		else:
-			for index in [1, 3, 2, 1, 0, 3]:
-				_indices[key].append(start + index)
+		var order: PackedInt32Array = QUAD_ORDER if ao[0] + ao[2] <= ao[1] + ao[3] \
+			else QUAD_ORDER_FLIPPED
+		for index in order:
+			indices.append(start + index)
 
 ## Shaped blocks: a list of sub-boxes per shape, every face emitted (no
 ## culling/AO — these are small and partial, overdraw is negligible).
