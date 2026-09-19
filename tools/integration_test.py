@@ -162,10 +162,18 @@ def run(argv: list[str] | None = None) -> int:
         "--mode",
         default="creative",
         choices=["creative", "battle", "ctf", "holdout", "king_hill",
-                 "giants", "tag"],
-        help="which game mode to play; everything but creative starts a round",
+                 "giants", "tag", "rounds"],
+        help="which game mode to play; everything but creative starts a "
+        "round; rounds plays two battles back to back and checks that going "
+        "out in the first costs nothing in the second",
     )
     args = parser.parse_args(argv)
+    rounds = args.mode == "rounds"
+    if rounds:
+        # Two rounds: the first cut short, then the 14s table, the lobby,
+        # the 6s setup, and some of the second battle.
+        args.seconds = max(args.seconds, 75)
+        args.mode = "battle"
 
     port = free_port()
     env = dict(os.environ, GODOT_SILENCE_ROOT_WARNING="1")
@@ -194,6 +202,12 @@ def run(argv: list[str] | None = None) -> int:
     if args.mode != "creative":
         client_env["WORLD_AUTOTEST_MODE"] = args.mode
         client_env["WORLD_AUTOTEST_MATCH"] = "1"
+    if rounds:
+        server_env["WORLD_ROUND_TEST"] = "1"
+        # The test's seats are all computer-driven, and a table with no
+        # people at it does not loop on its own, so ask for the next round
+        # again every few seconds; asking while one is running is ignored.
+        client_env["WORLD_AUTOTEST_MATCH"] = "8"
     base = [args.godot, "--headless", "--path", str(GAME)]
 
     print(
@@ -288,6 +302,20 @@ def run(argv: list[str] | None = None) -> int:
             server_report, "phase", ["LOBBY", "SETUP", "BATTLE", "END"], "server"
         )
         checks.at_least(server_report, "alive", 2, "server")
+
+    # Out in one round, fully back in the next: not still out on the
+    # server, and able to pick up a crate stood on.
+    if rounds:
+        verdicts = re.findall(r"^ROUNDTEST (PASS|FAIL).*$", server_log, re.MULTILINE)
+        if verdicts and all(v == "PASS" for v in verdicts):
+            checks.passed += 1
+            print("  ok  server people knocked out are back in the next round")
+        else:
+            lines = [l for l in server_log.splitlines() if l.startswith("ROUNDTEST")]
+            checks.failures.append(
+                "server: the round-after-a-knockout check "
+                + ("never reported" if not lines else "failed: " + " | ".join(lines))
+            )
 
     print()
     if checks.failures:

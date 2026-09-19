@@ -89,6 +89,7 @@ jobs:
           python3 tools/integration_test.py --seconds 14
           python3 tools/integration_test.py --seconds 20 --mode battle
           python3 tools/integration_test.py --seconds 20 --mode ctf
+          python3 tools/integration_test.py --mode rounds
 
       - name: Rooms, created and reaped
         env:

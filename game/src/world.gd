@@ -1304,6 +1304,7 @@ func _do_world_reset(map_name := "", new_size := 0) -> void:
 		battle._timer = 0.0
 		match_alive.clear()
 		downed_ids.clear()
+		out_ids.clear()
 		storm_radius = 0.0
 		water_level = 0.0
 		cl_match.rpc("IDLE", 0.0)
@@ -1411,6 +1412,7 @@ func sv_set_mode(mode: String) -> void:
 		match_phase = "IDLE"
 		match_alive.clear()
 		downed_ids.clear()
+		out_ids.clear()
 		cl_match.rpc("IDLE", 0.0)
 	elif mode != "creative" and (match_phase == "IDLE" or changed):
 		# PICKING A MODE STARTS THAT MODE, NOW. This used to fire only from

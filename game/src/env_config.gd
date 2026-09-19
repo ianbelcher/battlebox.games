@@ -96,6 +96,7 @@ const KNOWN := {
 	"WORLD_WIN_TEST": "hand out knockouts and end the round for this team",
 	"WORLD_KICK_TEST": "1 kicks a player and checks they are forgotten",
 	"WORLD_SMOKE_TEST": "1 fires a smoke round at the world",
+	"WORLD_ROUND_TEST": "1 knocks the people out, ends the round, and checks the next one lets them back in",
 	"WORLD_GIANTS_TEST": "seconds into the battle to grow somebody, and report size, hit box and hearts",
 	"WORLD_TAG_TEST": "1 tags somebody: did they change sides, stay put, keep every heart, and can they tag back",
 	"WORLD_TAG_SPREAD": "1 reports how spread out the runners are, every five seconds",

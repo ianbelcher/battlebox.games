@@ -1219,6 +1219,7 @@ func tick_tag_spread(delta: float) -> void:
 			chased if chased < INF else -1.0])
 
 func tick(delta: float) -> void:
+	tick_round(delta)
 	tick_giants(delta)
 	tick_tag(delta)
 	tick_tag_spread(delta)
@@ -1239,3 +1240,95 @@ func tick(delta: float) -> void:
 	tick_win(delta)
 	tick_bot_watch(delta)
 	tick_smoke(delta)
+
+## WORLD_ROUND_TEST=1: DOES GOING OUT IN ONE ROUND COST YOU THE NEXT?
+##
+## Knock every person out a few seconds into the first battle, through the
+## real `knock_out_team`, and end it. A few seconds into the NEXT battle,
+## check the server no longer has any of them in `out_ids`, and drop a
+## crate on each of them to see it actually get picked up.
+##
+## It takes two whole rounds to show, which is how it survived: the server
+## kept everybody who went out in `out_ids` for good, and crate pickup
+## skips anybody out — so the round after you were knocked out you walked
+## straight through every crate on the map.
+var _round_t := 0.0
+var _round_stage := 0
+var _round_crates: Dictionary = {}   # crate id -> player id
+## Crates that were actually put at somebody's feet on open ground at
+## least once. A computer-driven seat can spend the whole window in a
+## hole, and a crate it never had the chance to touch is no evidence.
+var _round_chance: Dictionary = {}
+
+func tick_round(delta: float) -> void:
+	if OS.get_environment("WORLD_ROUND_TEST") != "1" or world == null or _round_stage >= 3:
+		return
+	if world.match_phase != "BATTLE":
+		_round_t = 0.0
+		return
+	_round_t += delta
+	if _round_stage == 0 and _round_t > 3.0:
+		_round_stage = 1
+		var teams := {}
+		for id: String in Game.roster.keys():
+			if not world.bots.roster.has(id):
+				teams[int(Game.roster[id].get("team", -1))] = true
+		for team_i: int in teams.keys():
+			world.ctf.knock_out_team(team_i)
+		print("ROUNDTEST knocked out teams %s, ending the round" % str(teams.keys()))
+		world.battle.finish(-1)
+	elif _round_stage == 1 and _round_t > 3.0:
+		_round_stage = 2
+		var stale := 0
+		for id: String in Game.roster.keys():
+			if world.bots.roster.has(id):
+				continue
+			if world.out_ids.has(id):
+				stale += 1
+			var ps: Dictionary = world.player_state.get(id, {})
+			if ps.is_empty():
+				continue
+			var cid: int = world.survival._next_crate_id
+			world.survival._next_crate_id += 1
+			world.crates_by_id[cid] = {"weapon": 2, "pos": Vector3(ps.pos)}
+			_round_crates[cid] = id
+		world.survival.broadcast_crates()
+		print("ROUNDTEST next round: %d people still out from the last one" % stale)
+	elif _round_stage == 2 and _round_t < 13.0:
+		# Keep each crate on its person until it goes: they are walking
+		# about, and a crate left where somebody WAS tests nothing. Only
+		# while they are standing on the open top of the ground, though —
+		# crate gravity lifts a box to the top of its column, so one put
+		# at the feet of somebody under a tree lands in the canopy.
+		for cid: int in _round_crates.keys():
+			if world.crates_by_id.has(cid):
+				var ps: Dictionary = world.player_state.get(_round_crates[cid], {})
+				if ps.is_empty():
+					continue
+				var at: Vector3 = ps.pos
+				var top := float(world.store.surface_y(floori(at.x), floori(at.z))) + 1.0
+				if absf(at.y - top) < 0.6:
+					world.crates_by_id[cid].pos = at
+					_round_chance[cid] = true
+	elif _round_stage == 2:
+		_round_stage = 3
+		var missed := 0
+		for cid: int in _round_crates.keys():
+			if not world.crates_by_id.has(cid):
+				continue
+			var who: String = _round_crates[cid]
+			print("ROUNDTEST not picked up by %s at %s (crate %s, downed=%s, alive=%s)" % [
+				who, str(world.player_state.get(who, {}).get("pos", "?")),
+				str(world.crates_by_id[cid].pos), world.downed_ids.has(who),
+				world.match_alive.has(who)])
+			# Knocked down THIS round, by a computer player's shot, is the
+			# rule working, not the bug: nobody on the floor takes loot.
+			if not world.downed_ids.has(who) and _round_chance.has(cid):
+				missed += 1
+		var stale := 0
+		for id: String in _round_crates.values():
+			if world.out_ids.has(id):
+				stale += 1
+		print("ROUNDTEST %s: %d of %d crates at people's feet picked up, %d still out" % [
+			"PASS" if missed == 0 and stale == 0 and not _round_chance.is_empty() else "FAIL",
+			_round_crates.size() - missed, _round_crates.size(), stale])

@@ -113,6 +113,9 @@ func open_lobby() -> void:
 	# still on the horde's side until the drop re-dealt them.
 	_let_the_mode_deal()
 	world.monsters_by_id.clear()
+	# The round is over, so nobody is out of it any more — the clients
+	# drop theirs on this same LOBBY message. See drop_everyone().
+	world.out_ids.clear()
 	# Nobody is moved for the LOBBY. Herding every player and computer
 	# player onto the spawn point between battles put the whole table in
 	# a huddle at the origin for a few seconds, which looked like a bug.
@@ -213,6 +216,7 @@ func tick(delta: float) -> void:
 					print("%s loop: fresh lobby open" % world.rules.label)
 				else:
 					world.match_phase = "IDLE"
+					world.out_ids.clear()
 					world.cl_match.rpc("IDLE", 0.0)
 					if not people_present():
 						print("%s over and nobody here: waiting for somebody" % what_this_is())
@@ -246,6 +250,18 @@ func drop_everyone() -> void:
 	world.bodies.reset_sizes()
 	world.match_alive.clear()
 	world.downed_ids.clear()
+	# EVERYBODY IS BACK IN. Going OUT puts you in `out_ids` on the server
+	# as well as on every client, and the clients forget it at the start
+	# of each round (`cl_match`) — but that is an authority RPC, so it
+	# never runs here, and nothing else on the server ever emptied the
+	# set. Whoever went out last round started the next one still out as
+	# far as the server knew, and `tick_crates` skips anybody who is out:
+	# they walked straight through every crate on the map. Only on the
+	# rounds after being knocked out, which is why picking loot up worked
+	# in some games and not others. Also skipped by the Boom Blocks,
+	# unable to take a flag, and sent to joiners as invisible.
+	world.out_ids.clear()
+	world.ctf._bot_out_since.clear()
 	revive_progress.clear()
 	world.ctf._flag_progress.clear()
 	world.ctf._revive_pulse_t.clear()
