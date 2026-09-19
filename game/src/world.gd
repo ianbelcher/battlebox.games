@@ -80,6 +80,13 @@ func cl_size(id: String, size: float) -> void:
 func cl_speed(id: String, scale: float) -> void:
 	bodies.apply_speed(id, scale)
 
+## AND WHO CANNOT BE TOUCHED — Tag's "still getting away". Same shape as
+## the two above and for the same reason: the fact is the server's, the
+## picture of it is every client's.
+@rpc("authority", "reliable")
+func cl_safe(id: String, on: bool) -> void:
+	bodies.apply_safe(id, on)
+
 func flag_mode() -> bool:
 	return client_rules.has_flags()
 var map_list: Array = []
@@ -2513,6 +2520,9 @@ func _client_sync_players() -> void:
 		# before this node exists, so a giant would be drawn — and would
 		# collide — person-sized until it next happened to change.
 		player.set_body_size(bodies.size_of(id))
+		# ...and whether they are mid-escape, for exactly the same reason:
+		# cl_safe lands before this node exists.
+		player.set_safe_look(bodies.is_safe(id))
 		players.add_child(player)
 		if is_local and input_slot is BotSlot:
 			var brain := BotBrain.new()

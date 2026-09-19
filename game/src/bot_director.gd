@@ -1452,6 +1452,18 @@ func _bot_pick_goal(id: String, bot: Dictionary) -> Vector3:
 					best_crate = crate.pos
 			if best_crate != Vector3.INF:
 				return best_crate
+		# WHAT DOES THE MODE SAY? Above the objective and the hunt, below
+		# the storm and being shot at: a mode gets to redirect the play
+		# without having to re-implement staying alive.
+		#
+		# Everything below this line assumes that meeting an enemy is
+		# something a bot WANTS, which is true of every mode here but one.
+		# In Tag the enemy is the person chasing you, and a hundred
+		# runners taking the hunting rung at face value is the heap that
+		# mode was reported as. See GameMode.bot_goal.
+		var mine := world.rules.bot_goal(world, id, pos)
+		if mine != Vector3.INF:
+			return mine
 		# CAPTURE THE FLAG IS AN OBJECTIVE MODE, so the objective outranks
 		# picking fights. Raiders run at the nearest standing enemy flag and
 		# the keeper minds its own — and either way they still shoot at

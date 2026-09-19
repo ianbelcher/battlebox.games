@@ -108,6 +108,7 @@ func deal_teams(world: Node) -> void:
 		if picked.size() >= wanted:
 			break
 		picked[id] = true
+	_clear_safe(world)
 	for id: String in ids:
 		world.bodies.set_team(id, IT if picked.has(id) else RUNNERS)
 
@@ -160,8 +161,15 @@ func joiner_team(_world: Node, _id: String, _balanced: int) -> int:
 func on_melee(world: Node, attacker: String, target: String) -> String:
 	if not _is_it(world, attacker) or _is_it(world, target):
 		return "none"
+	# STILL GETTING AWAY, so not yet. See `_safe`.
+	if _safe.has(target):
+		return "none"
 	_become(world, attacker, RUNNERS)
 	_become(world, target, IT)
+	# The one who just tipped them cannot be tipped straight back until
+	# they have put TagRules.SAFE_DISTANCE between themselves and the
+	# person they made It.
+	_make_safe(world, attacker, target)
 	# NOT Sfx.play() — a mode that names an autoload cannot be loaded by a
 	# --script run, and the front page's tests load every mode. The
 	# fanfare carries its own sound on the clients that hear it.
@@ -175,9 +183,142 @@ func _become(world: Node, id: String, team: int) -> void:
 	world.bodies.set_team(id, team)
 	world.bodies.set_size(id, IT_SIZE if team == IT else BodySize.PERSON)
 	world.bodies.set_speed(id, IT_SPEED if team == IT else 1.0)
+	# Being It and being safe are contradictions: the one thing an It is
+	# for is being touchable back.
+	if team == IT:
+		_drop_safe(world, id)
+
+# ---- getting away ------------------------------------------------------
+
+## WHO CANNOT BE TAGGED YET, and who they have to get away from:
+## id -> the id of the It they just made.
+##
+## NO TAGGING BACK. Two players who met used to swap It on every swing
+## for as long as they stood together — nine times a second, with the
+## "X is It!" line across everybody's screen keeping up — because nothing
+## in the rules said the one who had just been tipped could not tip
+## straight back. Now they cannot, until they have got
+## TagRules.SAFE_DISTANCE clear of the person they made It.
+##
+## STATE ON THE MODE, like the storm on battle_mode.gd and the size ladder
+## on giants_mode.gd. GameModes.ALL is built once and lives for the
+## process, so it is cleared at the top of every round rather than assumed
+## empty.
+var _safe: Dictionary = {}
+
+## Is this one still getting away? Read by on_melee, and by anything that
+## wants to draw them differently.
+func is_safe(id: String) -> bool:
+	return _safe.has(id)
+
+func _make_safe(world: Node, id: String, from_it: String) -> void:
+	_safe[id] = from_it
+	world.bodies.set_safe(id, true)
+
+func _drop_safe(world: Node, id: String) -> void:
+	if not _safe.has(id):
+		return
+	_safe.erase(id)
+	world.bodies.set_safe(id, false)
+
+## EVERY TICK, HAS ANYBODY GOT CLEAR? Cheap: the dictionary holds at most
+## one entry per It in the room and is empty most of the time.
+##
+## Three ways out of it, and the last two matter as much as the first.
+## They got their ten blocks; the one they were running from is not It
+## any more (they tagged somebody else, so there is nothing left to be
+## protected from); or one of the two has left the round altogether.
+func tick(world: Node, _delta: float, _seconds_left: float) -> void:
+	if _safe.is_empty():
+		return
+	for id: String in _safe.keys():
+		var chaser := str(_safe[id])
+		if not _is_it(world, chaser) or not world.roster().has(id):
+			_drop_safe(world, id)
+			continue
+		var mine: Dictionary = world.player_state.get(id, {})
+		var theirs: Dictionary = world.player_state.get(chaser, {})
+		if mine.is_empty() or theirs.is_empty():
+			_drop_safe(world, id)
+			continue
+		if TagRules.escaped(Vector3(mine.pos), Vector3(theirs.pos)):
+			_drop_safe(world, id)
+
+## A ROUND BEGINS WITH NOBODY SAFE. Without this the last round's escapee
+## walks into the new one untouchable, which is the kind of thing that
+## survives for months because it only happens to one player in one round
+## and looks like they were lucky.
+func on_round_start(world: Node) -> void:
+	_clear_safe(world)
+
+func _clear_safe(world: Node) -> void:
+	for id: String in _safe.keys():
+		world.bodies.set_safe(id, false)
+	_safe.clear()
 
 func _name_of(world: Node, id: String) -> String:
 	return str(world.roster().get(id, {}).get("name", "Somebody"))
+
+# ---- how a computer player plays tag -----------------------------------
+
+## WHERE A COMPUTER PLAYER GOES. The platform's own ladder ends in "walk
+## at the nearest enemy", which in this mode means the runners jog
+## cheerfully towards the person trying to touch them — so this mode
+## answers for itself and never falls through.
+##
+## THE COMPLAINT WAS "THEY JUST CLUMP TOGETHER", and there were two
+## separate reasons for it stacked on top of each other, neither of them
+## in this file until now:
+##
+##   THE RUNNERS RAN AT IT. Being on the other side made It an enemy, and
+##   what the ladder does with an enemy is close on it. A field of runners
+##   converging on their own chaser is not bad tag, it is not tag.
+##
+##   AND THEY ALL SOLVED THE SAME PROBLEM THE SAME WAY. Even once they run
+##   away, "directly away from the chaser" is one answer that everybody
+##   arrives at, so a scattered field folds into one knot within about
+##   fifteen seconds and It harvests it. TagRules.CROWD_RADIUS is the
+##   fix: you are pushed off your neighbours as well as off It.
+##
+## And the Its had the pack problem too — a dozen of them all going for
+## the nearest runner, who was very often the same runner. TagRules.quarry
+## hands each runner to whoever is actually closest.
+func bot_goal(world: Node, id: String, pos: Vector3) -> Vector3:
+	if world.match_phase != "BATTLE":
+		return Vector3.INF
+	var its: Array = _where(world, IT, id)
+	if _is_it(world, id):
+		var runners: Array = _where(world, RUNNERS, id)
+		var which := TagRules.quarry(pos, runners, its)
+		if which < 0:
+			return Vector3.INF     # nobody left to chase; roam
+		# Straight at them. It is twice the speed, so there is no cleverer
+		# answer than running them down — and the hand only reaches an
+		# arm's length, so the goal is the body and not a standoff.
+		return runners[which]
+	var mates: Array = _where(world, RUNNERS, id)
+	var away := TagRules.flee_goal(pos, its, mates, world.world_half())
+	if away != Vector3.INF:
+		return away
+	# NOTHING CHASING AND NOBODY CROWDING, so wander rather than stand
+	# still — a runner rooted to the spot is a runner who will be standing
+	# there when an It comes round the corner. Small and aimless on
+	# purpose: this is the quiet part of the round.
+	return pos + Vector3(randf_range(-18.0, 18.0), 0.0, randf_range(-18.0, 18.0))
+
+## Everybody standing on a side, as plain positions, minus the one asking.
+##
+## Read off the computer players' shared picture of the field, which the
+## world rebuilds once at the top of every server frame — the alternative
+## is a walk of the whole roster per bot per decision, which at a hundred
+## seats is ten thousand dictionary lookups to answer one question.
+func _where(world: Node, team: int, skip: String) -> Array:
+	var out: Array = []
+	for entry: Array in world.bots.standing_on(team):
+		if str(entry[0]) == skip:
+			continue
+		out.append(entry[1] as Vector3)
+	return out
 
 # ---- per player --------------------------------------------------------
 

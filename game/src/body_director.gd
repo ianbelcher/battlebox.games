@@ -53,6 +53,31 @@ func set_size(id: String, size: float) -> void:
 	# come after the size itself, not before.
 	world.send_hearts(id)
 
+## WHO CANNOT BE TOUCHED, and it is a PRIMITIVE like the size beside it:
+## this node knows how to mark a body untouchable and how to tell
+## everybody, and WHY anybody is untouchable is entirely the mode's. Tag
+## uses it for the one who has just been tipped and has not got clear yet
+## (TagRules.SAFE_DISTANCE); nothing else uses it at all, and in every
+## other game this dictionary is empty for the life of the round.
+##
+## Server-owned for the same reason the sizes are: a client that could
+## mark itself safe would be a client that could not be caught.
+var safe: Dictionary = {}
+
+func is_safe(id: String) -> bool:
+	return bool(safe.get(id, false))
+
+func set_safe(id: String, on: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	if is_safe(id) == on:
+		return
+	if on:
+		safe[id] = true
+	else:
+		safe.erase(id)
+	world.cl_safe.rpc(id, on)
+
 ## A BODY THAT JUST GREW MAY BE INSIDE THE GROUND.
 ##
 ## The client eases itself out (Player.set_body_size, and _local_move's
@@ -89,6 +114,11 @@ func reset_sizes() -> void:
 	for id: String in sizes.keys():
 		world.cl_size.rpc(id, BodySize.PERSON)
 	sizes.clear()
+	# ...and nobody starts a round untouchable. TagMode clears its own
+	# record of who was getting away; this is the picture on every client.
+	for id: String in safe.keys():
+		world.cl_safe.rpc(id, false)
+	safe.clear()
 
 ## HOW FAST, as a multiple of a person's pace — and NOT derived from size.
 ## Giants keeps a person's pace at eight times the size (which is what
@@ -203,6 +233,17 @@ func apply_size(id: String, size: float) -> void:
 	for child in world.players.get_children():
 		if child is Player and child.player_id == id:
 			child.set_body_size(size)
+
+## Arrived from the server. The client keeps its own copy so a body
+## spawned later comes in wearing it, the same way sizes do.
+func apply_safe(id: String, on: bool) -> void:
+	if on:
+		safe[id] = true
+	else:
+		safe.erase(id)
+	for child in world.players.get_children():
+		if child is Player and child.player_id == id:
+			child.set_safe_look(on)
 
 func apply_speed(id: String, scale: float) -> void:
 	for child in world.players.get_children():

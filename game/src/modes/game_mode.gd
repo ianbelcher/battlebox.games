@@ -159,6 +159,25 @@ func on_melee(_world: Node, _attacker: String, _target: String) -> String:
 func on_flag_taken(_world: Node, _id: String, _team: int, _from_team: int) -> bool:
 	return true
 
+## WHERE SHOULD THIS COMPUTER PLAYER BE GOING? Vector3.INF for "no
+## opinion", which is every mode that has not got one, and then the
+## platform's own ladder decides (BotDirector._bot_pick_goal).
+##
+## THIS SEAM EXISTS BECAUSE OF TAG, and it is the same argument as
+## on_melee. The platform's ladder ends in "walk at the nearest enemy",
+## which is the right instinct for every mode where meeting an enemy is
+## something you want — and precisely the wrong one for the mode where
+## the enemy is chasing you. Tag's runners were walking towards the
+## person trying to touch them, and a hundred of them doing that at once
+## is the heap the mode was reported as. A mode that knows something the
+## ladder cannot is the thing that should say so.
+##
+## Asked above the objective and hunting rungs and below the urgent ones
+## (the storm, being shot at), so a mode can redirect the play without
+## having to re-implement staying alive.
+func bot_goal(_world: Node, _id: String, _pos: Vector3) -> Vector3:
+	return Vector3.INF
+
 ## Are the defenders leaving their posts to push? The computer players
 ## ask; a mode with no such moment says no.
 func defenders_push(_world: Node) -> bool:

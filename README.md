@@ -216,6 +216,12 @@ WORLD_HELD_CLIP=walk WORLD_ICON_OUT=/tmp/held.png \
 # ...and the same thing as numbers, because a weapon photographed at an
 # angle can look roughly right while being a long way out of true
 godot --headless --path game res://tests/aim_probe.tscn
+
+# The three states a body can be in in Tag: running, getting away
+# (untouchable, so drawn see-through), and It
+WORLD_ICON_OUT=/tmp/tag.png xvfb-run -a godot --path game \
+  --resolution 900x520 --rendering-method gl_compatibility \
+  res://tests/tag_look.tscn
 ```
 
 The first runs the real client under a virtual X server and saves a PNG
@@ -233,7 +239,10 @@ owner was — while the model loaded, the node parented, the clip played
 and the console stayed clean. Each is one command and a picture, and the
 last of them is one command and a column of dot products, because the
 first correction written for that bug looked fine in the photographs and
-was ninety degrees out.
+was ninety degrees out. A rule you cannot see is the same class of
+failure again: Tag's untouchable moment was drawn first as a flat red
+slab with no head and then, on the second attempt, as nothing at all,
+and both of those ran clean.
 
 The last two matter more than they look. Booting the project proves the
 scripts compile; it does not prove the game works, because an RPC sent to a

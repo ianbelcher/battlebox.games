@@ -639,15 +639,90 @@ static func knocked_out_skin(team := -1) -> StandardMaterial3D:
 	_knocked_out_skins[team] = skin
 	return skin
 
+## STILL GETTING AWAY, in Tag: the one who has just been tipped and has
+## not yet put TagRules.SAFE_DISTANCE between themselves and the person
+## they made It. They cannot be tagged, and a rule you cannot see is a
+## rule a five-year-old will read as the game being broken — It runs up
+## to them, swings, and nothing happens.
+##
+## SO THEY GO SEE-THROUGH, and come back solid the moment they are clear.
+##
+## NOT the material override the knocked-out ghost uses, and the
+## difference is the whole point. An override replaces every part of the
+## body with one flat colour, which for a ghost is right — they are OUT,
+## and grey is what says so. Someone getting away in Tag is still very
+## much in the game and you need to know WHICH of them it is: their face,
+## their shirt, their team. Tried as an override first and photographed
+## (tests/tag_look.tscn), a runner came out as a solid red slab with no
+## head, which says "something is wrong with that player" rather than
+## "that one is safe for another second".
+##
+## So their OWN materials are copied and thinned instead, one copy per
+## distinct material in the pack rather than per player — the parts are
+## shared, so there are only a handful. GeometryInstance3D.transparency,
+## which would have been simpler, does nothing here: it needs a material
+## that already blends, and the pack's are all opaque. Photographed as
+## well, because "the fade did nothing" and "the fade worked" are the same
+## clean console.
+##
+## The two states are never on at once — Tag has no knockouts — and
+## _refresh_skin keeps it that way regardless.
+const SAFE_ALPHA := 0.42
+static var _faded_skins: Dictionary = {}
+
+static func faded_skin(source: Material) -> Material:
+	if source == null:
+		return null
+	var key := source.get_instance_id()
+	var got: Variant = _faded_skins.get(key)
+	if got != null and is_instance_valid(got):
+		return got
+	var copy: Material = source.duplicate()
+	if copy is BaseMaterial3D:
+		var std: BaseMaterial3D = copy
+		std.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		var was := std.albedo_color
+		std.albedo_color = Color(was.r, was.g, was.b, SAFE_ALPHA)
+	_faded_skins[key] = copy
+	return copy
+
+## The two things that can change how a body is drawn, kept as flags with
+## one place that applies them. They used to be one call that wrote the
+## override directly, and a second reason to write it would have had the
+## two silently undoing each other every frame.
+var _look_downed := false
+var _look_safe := false
+
 func set_knocked_out_look(out_of_it: bool) -> void:
+	_look_downed = out_of_it
+	_refresh_skin()
+
+func set_safe_look(on: bool) -> void:
+	if _look_safe == on:
+		return
+	_look_safe = on
+	_refresh_skin()
+
+func _refresh_skin() -> void:
+	if _avatar == null:
+		return
 	var team := int(Game.roster.get(player_id, {}).get("team", -1))
-	var skin := knocked_out_skin(team) if out_of_it else null
+	# A GHOST IS ONE FLAT COLOUR OVER THE WHOLE BODY, because being out is
+	# all there is left to say about them. SOMEBODY GETTING AWAY KEEPS
+	# THEIR OWN, thinned per surface, because which of them it is still
+	# matters. An override beats a surface override, so a body that is
+	# somehow both comes out a ghost, which is the safer of the two.
+	var skin: StandardMaterial3D = knocked_out_skin(team) if _look_downed else null
+	var fade: bool = _look_safe and not _look_downed
 	for node in _avatar.find_children("*", "MeshInstance3D", true, false):
 		var mesh := node as MeshInstance3D
 		mesh.material_override = skin
-		# The old fade is off: the material carries the transparency now,
-		# and both at once made a ghost almost invisible.
 		mesh.transparency = 0.0
+		if mesh.mesh == null:
+			continue
+		for surface in mesh.mesh.get_surface_count():
+			mesh.set_surface_override_material(surface,
+				faded_skin(mesh.mesh.surface_get_material(surface)) if fade else null)
 
 func refresh_from_roster(entry: Dictionary) -> void:
 	set_team_glow(int(entry.get("team", -1)))
@@ -669,6 +744,10 @@ func refresh_from_roster(entry: Dictionary) -> void:
 		_watch_mixer()
 		old.queue_free()
 		_apply_render_layer()
+		# The override died with the old avatar's meshes. A player who
+		# changed character while out of the round, or mid-escape in Tag,
+		# would otherwise come back solid and look like an ordinary one.
+		_refresh_skin()
 		# The held item died with the old avatar's arm — force a rebuild.
 		_hand_sig = ""
 		_refresh_hand()

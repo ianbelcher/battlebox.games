@@ -1137,10 +1137,91 @@ func tick_tag(delta: float) -> void:
 	print("TAGTEST moved=%.2f blocks (a lift, not a teleport), hearts lost=%d (want 0), down=%s (want false)"
 		% [was_at.distance_to(now_at), was_hp - now_hp,
 			str(world.downed_ids.has(runner) or world.out_ids.has(runner))])
+	_tag_no_backsies(it, runner)
+
+## NO TAGGING BACK, played out. `it` has just tipped `runner` and is a
+## runner itself now; the whole question is whether it can be tipped
+## straight back before it has got TagRules.SAFE_DISTANCE clear.
+##
+## Worth a probe rather than only a unit test because the rule spans four
+## files — the mode holds who is getting away, the body director carries
+## it to the clients, the melee seam consults it and the tick clears it —
+## and every one of those fails silently. A tag that is refused and a tag
+## that never reached the mode look identical from outside.
+func _tag_no_backsies(was_it: String, new_it: String) -> void:
+	var at: Vector3 = world.player_state.get(was_it, {}).get("pos", Vector3.ZERO)
+	print("TAGTEST safe=%s (want true): %s is getting away from %s"
+		% [str(world.bodies.is_safe(was_it)), was_it, new_it])
+	var took: bool = world.bodies.melee_hit(new_it, was_it, at)
+	print("TAGTEST tag straight back: %s (want REFUSED)"
+		% ["TOOK — they can be tagged back" if took else "REFUSED"])
+	# Ten blocks and a tick, through the mode's own clearing pass rather
+	# than by setting a flag: teleport them apart, tick, ask again.
+	var them: Dictionary = world.player_state.get(new_it, {})
+	var mine: Dictionary = world.player_state.get(was_it, {})
+	if them.is_empty() or mine.is_empty():
+		return
+	mine.pos = Vector3(them.pos) + Vector3(TagRules.SAFE_DISTANCE + 2.0, 0, 0)
+	world.rules.tick(world, 0.1, 60.0)
+	print("TAGTEST %.0f blocks later: safe=%s (want false)"
+		% [TagRules.SAFE_DISTANCE + 2.0, str(world.bodies.is_safe(was_it))])
+	var after: bool = world.bodies.melee_hit(new_it, was_it, Vector3(mine.pos))
+	print("TAGTEST tag once clear: %s (want TOOK)"
+		% ["TOOK" if after else "REFUSED — they can never be tagged again"])
+
+## HOW SPREAD OUT THE RUNNERS ARE, printed every few seconds.
+##
+## "They just clump together" is a thing you can only see, and only over
+## time — every individual decision looks sensible, and the heap is what
+## a hundred sensible decisions add up to. So: the mean distance from a
+## runner to its nearest neighbour. A field playing tag holds this up; a
+## field walking into one knot drives it to nearly nothing, and it does it
+## within about fifteen seconds of the drop.
+var _spread_tag_t := 0.0
+
+func tick_tag_spread(delta: float) -> void:
+	if OS.get_environment("WORLD_TAG_SPREAD") != "1":
+		return
+	if world.match_phase != "BATTLE":
+		return
+	_spread_tag_t += delta
+	if _spread_tag_t < 5.0:
+		return
+	_spread_tag_t = 0.0
+	var runners: Array = []
+	var its: Array = []
+	for id: String in world.match_alive.keys():
+		var st: Dictionary = world.player_state.get(id, {})
+		if st.is_empty():
+			continue
+		if int(Game.roster.get(id, {}).get("team", 0)) == 1:
+			its.append(Vector3(st.pos))
+		else:
+			runners.append(Vector3(st.pos))
+	if runners.size() < 2:
+		return
+	var total := 0.0
+	var huddled := 0
+	for i in runners.size():
+		var closest := INF
+		for j in runners.size():
+			if i != j:
+				closest = minf(closest, runners[i].distance_to(runners[j]))
+		total += closest
+		if closest < 6.0:
+			huddled += 1
+	var chased := INF
+	for r: Vector3 in runners:
+		for it_pos: Vector3 in its:
+			chased = minf(chased, r.distance_to(it_pos))
+	print("TAGSPREAD %d runners, %d Its | nearest neighbour avg %.1f blocks, %d within 6, closest runner-to-It %.1f"
+		% [runners.size(), its.size(), total / float(runners.size()), huddled,
+			chased if chased < INF else -1.0])
 
 func tick(delta: float) -> void:
 	tick_giants(delta)
 	tick_tag(delta)
+	tick_tag_spread(delta)
 	tick_ghost(delta)
 	tick_siege(delta)
 	tick_pole(delta)
