@@ -35,39 +35,35 @@ const H := WorldGen.CHUNK_H
 ## trying this in the mesher alone, and the reason it is a switch.
 const SMOOTH_CORNERS := true
 
-## ROLLING GROUND. On top of the whole-block ramps above, every shared top
-## corner of open natural ground sits a little below its block's top:
-## anywhere from all of it down to SURFACE_DIP less. Flat ground stops
-## being a floor of tiles and becomes a gently uneven field, without a
-## block moving — it is the same picture-only change as the ramps, so the
-## ground you stand on is still exactly where it was.
+## ROLLING GROUND: THE LATTICE BENDS.
 ##
-## From smooth noise over the world rather than a coin per corner, so the
-## ground rolls instead of bristling, and skewed toward the top so most of
-## a field is only just off level and the deep dips are the exception.
-## Only corners with nothing but open natural ground around them move —
-## anything built, anything planted, water, and anything with something
-## standing over it holds its corners whole, which is what keeps every
-## join to the rest of the world closed. 0.0 turns it off.
-const SURFACE_DIP := 0.5
+## Every corner where blocks meet is a point of a lattice shared by the
+## eight blocks around it, and each one is nudged UP or DOWN by up to
+## WARP of a block. The offset belongs to the POINT, not to any block, so
+## every block touching it draws to wherever it has landed and nothing
+## can come apart: a block is whatever shape its eight corners make of
+## it. Nothing moves sideways — a block is still exactly where it was on
+## the map, and collision never hears about any of this.
+##
+## Flat ground stops being a floor of tiles; a step's ramp stops being
+## the same 45 degrees every time, because its four corners each have
+## their own offset and it tips along its length as well as down; and the
+## horizontal lines of a cliff stop being ruler-straight.
+##
+## A point is LOCKED — left exactly where it was — when any of the eight
+## blocks around it is something that has to stay square: anything built,
+## a plant standing on it, water, a slab, a fence. Those are drawn as
+## boxes and a box cannot follow a bent corner. A point walled in on all
+## eight sides is drawn by nobody, so it does not matter either way.
+##
+## From smooth noise over the world so the ground rolls rather than
+## bristles, and worked out from the point's own world position, which is
+## what makes two chunks meshed on different threads agree about the seam
+## between them. 0.0 turns the whole thing off.
+const WARP := 0.25
 ## Blocks across one swell of the noise.
 const DIP_CELL := 4.0
-
-## RAMP FEET. A one-block step is drawn as a ramp down to the ground it
-## lands on, and every ramp in the world met that ground at exactly the
-## block's bottom — so every one of them had precisely the same slope, and
-## the join at the bottom was a crease. The foot of a ramp now stands a
-## little proud of the ground below it, up to RAMP_FOOT of a block: the
-## ramp is shallower and the flat ground curves up into it.
-##
-## THE FOOT IS A VERTEX THE GROUND SHARES, like every other corner here,
-## and the two sides of it sit at different levels: the ramp reads it as
-## its own bottom corner, the ground beneath reads it as its own TOP. So
-## the lift is a function of where the junction is in the world, which
-## both of them work out for themselves and agree on, and the ground below
-## carries a corner ABOVE its own block — the one place in here that
-## happens. 0.0 turns it off.
-const RAMP_FOOT := 0.3
+const SWELL_SALT := 7919
 const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
 	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
 	Blocks.LEAVES, Blocks.LEAVES_DARK, Blocks.LEAVES_LIGHT, Blocks.LEAVES_PINK]
@@ -195,23 +191,35 @@ func _occludes(x: int, y: int, z: int) -> bool:
 ## so the pattern doesn't repeat chunk to chunk.
 var _lk_opaque := PackedByteArray()
 var _lk_solid := PackedByteArray()
+var _lk_smooth := PackedByteArray()
 # Per build: the shared height of every ground vertex, and every block's
 # slope on each axis — see _surface and _axes.
 var _surface_cache: Dictionary = {}
 var _axes_cache: Dictionary = {}
-## This chunk's origin in world blocks, so the dips line up across chunk
-## borders. And how deep they may go: SURFACE_DIP, unless a test wants
-## the bare shape rule on its own.
+## This chunk's origin in world blocks, so the warp lines up across chunk
+## borders. And how far a lattice point may move: WARP, unless a test
+## wants the bare shape rule on its own.
 var _wx0 := 0
 var _wz0 := 0
-var dip := SURFACE_DIP
-## How far a ramp's foot may stand above the ground it lands on. A test
-## wanting the bare shape rule sets both this and `dip` to zero.
-var foot := RAMP_FOOT
-## The plain rule's answer per vertex — a whole block up or down — before
-## any rolling or lifting. Kept apart from _surface_cache because the
-## ground under a ramp has to ask what the vertex ABOVE it is.
-var _base_cache: Dictionary = {}
+var warp := WARP
+## Each lattice point's offset, worked out once and read by the eight
+## blocks around it. A flat array rather than a dictionary: a chunk asks
+## for these tens of thousands of times, and this is one multiply-add
+## against a hashed Vector3i key. (SIZE + 1) points across, because the
+## far edge of the last block is a point too.
+const SPAN := SIZE + 1
+var _warp_lut := PackedFloat32Array()
+var _warp_done := PackedByteArray()
+## And the noise, which is the same all the way DOWN a column: a point
+## and the one above it move together, so a block is shifted rather than
+## squashed, and a cliff's horizontal lines all wave the same way.
+##
+## It was once per level, which is prettier in a cave and cost forty
+## milliseconds a chunk of hashing — most of it for points underground
+## that nothing draws. One value per column, worked out once per build,
+## is a couple of hundred for the whole chunk.
+var _noise_lut := PackedFloat32Array()
+var _noise_done := PackedByteArray()
 
 ## THE CUTAWAY LINE. Solid cubes at or above this y go into the "roof"
 ## surface instead of "opaque", so a camera can decline to draw them —
@@ -224,10 +232,18 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	roof_y = p_roof_y
 	_lk_opaque = Blocks.LK_OPAQUE
 	_lk_solid = Blocks.LK_SOLID
+	_lk_smooth = _smooth_lk
 	_data = data
 	_neighbors = neighbors
 	_surface_cache.clear()
-	_base_cache.clear()
+	if _warp_lut.is_empty():
+		_warp_lut.resize(SPAN * SPAN * (H + 1))
+		_warp_done.resize(SPAN * SPAN * (H + 1))
+		_noise_lut.resize(SPAN * SPAN)
+		_noise_done.resize(SPAN * SPAN)
+	else:
+		_warp_done.fill(0)
+		_noise_done.fill(0)
 	_axes_cache.clear()
 	_wx0 = cx * SIZE
 	_wz0 = cz * SIZE
@@ -368,12 +384,20 @@ func _smooth(block: int, x: int, y: int, z: int) -> bool:
 
 ## SMOOTH_BLOCKS as a table by id: `in` on the array was a linear search,
 ## run for every solid block and again for every corner test.
-static var _smooth_lk := PackedByteArray()
+##
+## Built ONCE, when the class loads, and never touched again. Filling it
+## on first use instead was a race: chunks are meshed on several worker
+## threads, and two of them arriving together had one resizing the array
+## while the other wrote into it — an out-of-bounds write on a good day.
+static var _smooth_lk: PackedByteArray = _build_smooth_lk()
+static func _build_smooth_lk() -> PackedByteArray:
+	var table := PackedByteArray()
+	table.resize(Blocks.ID_COUNT)
+	for id: int in SMOOTH_BLOCKS:
+		table[id] = 1
+	return table
+
 static func _smoothable() -> PackedByteArray:
-	if _smooth_lk.is_empty():
-		_smooth_lk.resize(Blocks.ID_COUNT)
-		for id: int in SMOOTH_BLOCKS:
-			_smooth_lk[id] = 1
 	return _smooth_lk
 
 ## Corner heights [NW, NE, SE, SW] of a block's top, relative to its
@@ -389,38 +413,6 @@ func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 	var key := Vector3i(x + cx, y, z + cz)
 	if _surface_cache.has(key):
 		return _surface_cache[key]
-	var vx := x + cx
-	var vz := z + cz
-	var top := _surface_base(x, y, z, cx, cz)
-	if top <= 0.0:
-		# The foot of a ramp, seen from the ramp.
-		top = _foot_lift(vx, y, vz)
-	elif _has_ground(vx, y + 1, vz) and _surface_base(x, y + 1, z, cx, cz) <= 0.0:
-		# The same junction, seen from the ground the ramp lands on: the
-		# vertex one level up is a foot, and this is that very point from
-		# underneath, so it carries the same lift — above this block's own
-		# top, which is why a shaped block may have a corner over 1.
-		top = 1.0 + _foot_lift(vx, y + 1, vz)
-	elif dip > 0.0 and _open_ground_corner(vx, y, vz):
-		top = 1.0 - _dip_at(_wx0 + vx, y, _wz0 + vz)
-	_surface_cache[key] = top
-	return top
-
-## Is any of the four blocks meeting this vertex at this level solid? Open
-## sky one level up is not a ramp landing here, and reads as a base of
-## zero just as a ramp's foot does.
-func _has_ground(vx: int, y: int, vz: int) -> bool:
-	for nx: int in [vx - 1, vx]:
-		for nz: int in [vz - 1, vz]:
-			if _firm_at(nx, y, nz):
-				return true
-	return false
-
-## The plain rule, a whole block up or down: see the note on _surface.
-func _surface_base(x: int, y: int, z: int, cx: int, cz: int) -> float:
-	var key := Vector3i(x + cx, y, z + cz)
-	if _base_cache.has(key):
-		return _base_cache[key]
 	var top := 0.0
 	for dx: int in [cx - 1, cx]:
 		for dz: int in [cz - 1, cz]:
@@ -438,76 +430,78 @@ func _surface_base(x: int, y: int, z: int, cx: int, cz: int) -> float:
 				break
 		if top >= 1.0:
 			break
-	_base_cache[key] = top
-	return top
+	# WHICH LATTICE POINT this corner sits on — its own block's top, or
+	# the one below when the ground steps down here — and then that
+	# point's own offset. Everything touching the point reaches the same
+	# answer: the ramp reading it as its foot, the ground beneath reading
+	# it as its top, the wall of the cliff below it. One point, one
+	# height, from every direction.
+	return _remember(key, top + _warp_at(x + cx, y + int(top), z + cz))
 
-## How far a ramp landing on this junction stands above the ground below
-## it, 0 .. foot. (vx, vz) is the vertex and `y` the level the ramp's
-## bottom is at — the level whose base height here is 0.
-##
-## Nothing but open natural ground either side of the junction, the same
-## rule the rolling uses and for the same reason: a neighbour that draws
-## itself square would part from ground that had lifted under it. Every
-## block still standing on the junction from above keeps it flat, and the
-## ground below only lifts where it is the surface, so a corner buried
-## under the ramp is left alone.
-func _foot_lift(vx: int, y: int, vz: int) -> float:
-	if foot <= 0.0 or y <= 0:
+func _remember(key: Vector3i, height: float) -> float:
+	_surface_cache[key] = height
+	return height
+
+## HOW FAR THIS LATTICE POINT HAS MOVED, up or down, in blocks. (vx, vz)
+## is the point and `wy` the level it sits at: the plane between the
+## block below it and the block above. See the note on WARP for what
+## locks one in place.
+func _warp_at(vx: int, wy: int, vz: int) -> float:
+	if warp <= 0.0 or wy <= 0 or wy >= H or vx < 0 or vx > SIZE or vz < 0 or vz > SIZE:
 		return 0.0
-	var ramp := false
-	for nx: int in [vx - 1, vx]:
-		for nz: int in [vz - 1, vz]:
-			if _block_at(nx, y + 1, nz) != Blocks.AIR:
-				return 0.0
-			var here := _block_at(nx, y, nz)
-			if here != Blocks.AIR:
-				# The ramp itself, or the ground it runs along.
-				if not _firm_at(nx, y, nz) or _smoothable()[here] != 1:
-					return 0.0
-				ramp = true
-			# GROUND ALL THE WAY UNDER THE JUNCTION, natural and unbroken.
-			# Lifting it lifts the floor of everything standing on it, and
-			# a block whose top corner has risen but which is drawn as a
-			# plain cube — because something sits on top of it — still
-			# draws its walls square. That only shows where such a block
-			# has a wall to draw, which is exactly where the ground below
-			# the junction breaks: the head of a two-block drop. So a foot
-			# is only lifted where the ground beneath it is continuous.
-			var under := _block_at(nx, y - 1, nz)
-			if under == Blocks.AIR or not _firm_at(nx, y - 1, nz) \
-					or _smoothable()[under] != 1:
-				return 0.0
-	if not ramp:
-		return 0.0     # nothing to run down from
-	# Its own swell of the noise, well away from the rolling's.
-	return foot * _swell(_wx0 + vx, y + 977, _wz0 + vz)
+	var slot := (wy * SPAN + vz) * SPAN + vx
+	if _warp_done[slot] == 1:
+		return _warp_lut[slot]
+	var moved := warp * _swell(vx, vz)
+	if vx > 0 and vx < SIZE and vz > 0 and vz < SIZE:
+		# Every one of the eight is inside this chunk: straight out of
+		# the bytes, no bounds arithmetic per block.
+		var base := ((wy * SIZE + vz) * SIZE + vx) << 1
+		for step: int in [-(SIZE * SIZE * 2), 0]:
+			for dz: int in [-(SIZE * 2), 0]:
+				for dx: int in [-2, 0]:
+					var block := _data.decode_u16(base + step + dz + dx)
+					if block == Blocks.AIR:
+						continue
+					# Natural ground bends. Everything else is a box.
+					if _lk_smooth[block] != 1 or _lk_solid[block] != 1:
+						_warp_lut[slot] = 0.0
+						_warp_done[slot] = 1
+						return 0.0   # exact either way
+	else:
+		for nx: int in [vx - 1, vx]:
+			for nz: int in [vz - 1, vz]:
+				for ny: int in [wy - 1, wy]:
+					var block := _block_at(nx, ny, nz)
+					if block == Blocks.AIR:
+						continue
+					if _lk_smooth[block] != 1 or _lk_solid[block] != 1:
+						moved = 0.0
+						break
+				if moved == 0.0:
+					break
+			if moved == 0.0:
+				break
+	_warp_lut[slot] = moved
+	_warp_done[slot] = 1
+	# Back out of the array, not the variable: the table holds 32-bit
+	# floats, so a point worked out here and the same point read from the
+	# table later must be the same number to the last bit. Otherwise the
+	# shape of a chunk depends on the order its blocks happened to ask,
+	# and two chunks disagree about their seam by a millionth of a block.
+	return _warp_lut[slot]
 
-## May this corner roll? Only if every block that meets it is open natural
-## ground or air, with nothing at all over any of them. One built block,
-## plant, puddle or overhang among the four and the corner stays whole,
-## because that neighbour draws itself square and would part from the
-## ground along the join. (vx, vz) is the vertex, not a block.
-func _open_ground_corner(vx: int, y: int, vz: int) -> bool:
-	for nx: int in [vx - 1, vx]:
-		for nz: int in [vz - 1, vz]:
-			if _block_at(nx, y + 1, nz) != Blocks.AIR:
-				return false
-			var block := _block_at(nx, y, nz)
-			if block == Blocks.AIR:
-				continue
-			if not _firm_at(nx, y, nz) or _smoothable()[block] != 1:
-				return false
-	return true
-
-## How far below whole this world vertex sits, 0 .. dip.
-func _dip_at(wx: int, y: int, wz: int) -> float:
-	return dip * _swell(wx, y, wz)
-
-## The shape of both the rolling and the ramp feet, 0 .. 1. Value noise on
-## a DIP_CELL lattice (smoothstepped, so it has no creases) with a little
-## of the vertex's own hash on top, squared so most of the ground stays
-## near the top and only some of it moves the whole way.
-func _swell(wx: int, y: int, wz: int) -> float:
+## The shape of the warp, -1 .. 1, for a column of this chunk. Value
+## noise on a DIP_CELL lattice (smoothstepped, so it has no creases) with
+## a little of the column's own hash on top. Worked out from the column's
+## place in the WORLD, which is what makes two chunks meshed on different
+## threads agree about the seam between them.
+func _swell(vx: int, vz: int) -> float:
+	var slot := vz * SPAN + vx
+	if _noise_done[slot] == 1:
+		return _noise_lut[slot]
+	var wx := _wx0 + vx
+	var wz := _wz0 + vz
 	var fx := float(wx) / DIP_CELL
 	var fz := float(wz) / DIP_CELL
 	var gx := floori(fx)
@@ -516,13 +510,15 @@ func _swell(wx: int, y: int, wz: int) -> float:
 	var tz := fz - float(gz)
 	tx = tx * tx * (3.0 - 2.0 * tx)
 	tz = tz * tz * (3.0 - 2.0 * tz)
-	var salt := 7919 + y * 13
 	var n := lerpf(
-		lerpf(WorldGen.hash01(gx, gz, salt), WorldGen.hash01(gx + 1, gz, salt), tx),
-		lerpf(WorldGen.hash01(gx, gz + 1, salt), WorldGen.hash01(gx + 1, gz + 1, salt), tx),
+		lerpf(WorldGen.hash01(gx, gz, SWELL_SALT), WorldGen.hash01(gx + 1, gz, SWELL_SALT), tx),
+		lerpf(WorldGen.hash01(gx, gz + 1, SWELL_SALT), WorldGen.hash01(gx + 1, gz + 1, SWELL_SALT), tx),
 		tz)
-	n = clampf(n * 0.8 + WorldGen.hash01(wx, wz, salt + 1) * 0.2, 0.0, 1.0)
-	return n * n
+	n = clampf(n * 0.8 + WorldGen.hash01(wx, wz, SWELL_SALT + 1) * 0.2, 0.0, 1.0)
+	var swell := n * 2.0 - 1.0
+	_noise_lut[slot] = swell
+	_noise_done[slot] = 1
+	return swell
 
 ## One block of ground's own view of one of its corners, 1 up or 0 down.
 func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
@@ -562,9 +558,8 @@ const CORNER_XZ := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
 ## stands on and the ground on top of it. Both cross the face as straight
 ## lines — from the height at one corner to the height at the other — and
 ## the face is whatever lies between them. Neither is cut off at the
-## block's own bottom or top: where a ramp lands, the junction is lifted
-## (see _foot_lift), so the ground below carries a corner above its own
-## block and the block above stands on ground higher than its floor. A
+## block's own bottom or top: a lattice point may have moved either way
+## (see WARP), so a corner can sit above the block it belongs to, and a
 ## wall that stopped at the block would leave that strip open.
 ##
 ## Coloured from the block's side colour at the ground to its top colour
@@ -626,16 +621,12 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 	for i in 4:
 		var c: Vector2 = CORNER_XZ[i]
 		p.append(o + Vector3(c.x, h[i], c.y))
-	# WHAT THIS BLOCK STANDS ON. Normally its own bottom, flat — but where
-	# a ramp's foot is lifted, the ground under it is lifted with it (one
-	# junction, one height), so the block's floor follows that surface up.
-	# Drawing from a flat bottom left the lifted ground poking through the
-	# ramp's own wall.
+	# ITS FLOOR IS THE LATTICE TOO: the four points under the block, each
+	# with its own offset, exactly as the ground below them draws its top.
 	var b := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
-	if foot > 0.0 and y > 0:
-		for i in 4:
-			var c: Vector2 = CORNER_XZ[i]
-			b[i] = maxf(0.0, _surface(x, y - 1, z, int(c.x), int(c.y)) - 1.0)
+	for i in 4:
+		var c: Vector2 = CORNER_XZ[i]
+		b[i] = _warp_at(x + int(c.x), y, z + int(c.y))
 	# Split through the diagonal whose two corners are LEVEL, so a block
 	# with one corner out of line is a flat triangle and a sloped one —
 	# flat from the midline — rather than a ridge from that corner to
@@ -756,6 +747,15 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 	var is_liquid := Blocks.LK_LIQUID[block] == 1
 	# Liquids drop their surface a bit below the block top, like Minecraft.
 	var top_y := 0.875 if is_liquid and _block_at(x, y + 1, z) != block else 1.0
+	# THE EIGHT CORNERS OF THIS BLOCK, as the lattice has them: [x][y][z],
+	# each 0 or 1 along the axis. A cube is only a cube when none of them
+	# has moved — which is the case for everything built, and for every
+	# block hemmed in by it (see WARP) — and otherwise it is drawn through
+	# whatever shape its corners make, the same as the ground around it.
+	var corner_dy := PackedFloat32Array()
+	corner_dy.resize(8)
+	var corner_ready := 0
+	var bent := warp > 0.0 and not translucent
 	# The surface's arrays once, not a dictionary lookup per append.
 	# Packed arrays are shared, so these ARE the surface's arrays.
 	var verts: PackedVector3Array = _verts[key]
@@ -845,6 +845,18 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 			var vert := center + half_u * float(cs.x) + half_v * float(cs.y)
 			if top_y != 1.0 and vert.y > y + top_y:
 				vert.y = y + top_y
+			if bent:
+				var ci := ((int(vert.x) - x) << 2) | ((int(vert.y) - y) << 1) \
+					| (int(vert.z) - z)
+				if (corner_ready >> ci) & 1 == 0:
+					corner_ready |= 1 << ci
+					var ax := (ci >> 2) & 1
+					var ay := (ci >> 1) & 1
+					var az := ci & 1
+					var slot := (((y + ay) * SPAN) + z + az) * SPAN + x + ax
+					corner_dy[ci] = _warp_lut[slot] if _warp_done[slot] == 1 \
+						else _warp_at(x + ax, y + ay, z + az)
+				vert.y += corner_dy[ci]
 			verts.append(vert)
 			normals.append(normal)
 			uvs.append(Vector2(pattern + CORNER_U[i], CORNER_V[i]))

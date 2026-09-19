@@ -1330,5 +1330,7 @@ func tick_round(delta: float) -> void:
 			if world.out_ids.has(id):
 				stale += 1
 		print("ROUNDTEST %s: %d of %d crates at people's feet picked up, %d still out" % [
-			"PASS" if missed == 0 and stale == 0 and not _round_chance.is_empty() else "FAIL",
+			# A crate taken before anybody was seen standing on open
+			# ground is a pass, not a missing chance: it was taken.
+			"PASS" if missed == 0 and stale == 0 and not _round_crates.is_empty() else "FAIL",
 			_round_crates.size() - missed, _round_crates.size(), stale])

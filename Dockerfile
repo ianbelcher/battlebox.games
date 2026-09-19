@@ -77,6 +77,15 @@ RUN godot --headless --path /game --script res://tests/ui_glyphs.gd
 # colour — and none of that errors, logs or shows up in a screenshot.
 RUN godot --headless --path /game --script res://tests/flag_beacons.gd
 
+# A HOLE IN THE GROUND is invisible in the same way. The lattice the
+# terrain is drawn on bends now (Mesher.WARP), every corner is shared by
+# up to eight blocks, and a rule that lets one of them move a corner
+# another draws square leaves a gap you can see the sky through — on one
+# hillside, in one world, out of hundreds. This meshes real generated
+# terrain in four themes and counts the edges that have nothing on the
+# other side.
+RUN godot --headless --path /game --script res://tests/mesh_watertight.gd
+
 # The unit suite. Fast, and the only check here that fails on logic rather
 # than on something failing to load.
 RUN godot --headless --path /game --script res://tests/run_tests.gd
