@@ -45,7 +45,7 @@ func test_a_diagonal_edge_is_flat_from_the_midline() -> void:
 	# one block and the rest of its top stays up: flat from the midline,
 	# never a ridge and never a cut deeper than a block.
 	var h := m._heights(6, 3, 5)
-	equal(h, PackedFloat32Array([0, 1, 1, 1]),
+	equal(h, PackedFloat64Array([0, 1, 1, 1]),
 		"the outer corner drops a block, the other three stay up: %s" % [h])
 	# And the tread below reads the same height for the vertex they
 	# share: (5, 5) at level 2 meets (6, 5) at level 3 at vertex (6, 5).
@@ -80,20 +80,20 @@ func test_neighbours_never_disagree_about_a_shared_vertex() -> void:
 
 func test_a_straight_step_is_a_ramp() -> void:
 	var m := _shaped(_ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1))
-	equal(m._heights(5, 1, 8), PackedFloat32Array([0, 0, 1, 1]),
+	equal(m._heights(5, 1, 8), PackedFloat64Array([0, 0, 1, 1]),
 		"open to the north, solid to the south: the north corners drop")
 
 func test_a_lone_block_stays_a_block() -> void:
 	var m := _shaped(_ground(func(x: int, z: int) -> int: return 2 if x == 8 and z == 8 else 1))
-	equal(m._heights(8, 1, 8), PackedFloat32Array([1, 1, 1, 1]),
+	equal(m._heights(8, 1, 8), PackedFloat64Array([1, 1, 1, 1]),
 		"nothing beside it slopes, so nothing pulls its corners down")
 	# And the ground around it is flat: the block stands on whole corners.
-	equal(m._heights(7, 0, 8), PackedFloat32Array([1, 1, 1, 1]),
+	equal(m._heights(7, 0, 8), PackedFloat64Array([1, 1, 1, 1]),
 		"the ground under a block does not dip beside it")
 
 func test_a_one_wide_hole_keeps_its_walls() -> void:
 	var m := _shaped(_ground(func(x: int, z: int) -> int: return 1 if x == 8 and z == 8 else 2))
-	equal(m._heights(8, 1, 7), PackedFloat32Array([1, 1, 1, 1]),
+	equal(m._heights(8, 1, 7), PackedFloat64Array([1, 1, 1, 1]),
 		"a hole one block wide is a hole, not a funnel")
 
 func test_anything_solid_holds_the_ground_up_beside_it() -> void:
@@ -104,9 +104,9 @@ func test_anything_solid_holds_the_ground_up_beside_it() -> void:
 	var data := _ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1)
 	data[_at(8, 1, 7)] = Blocks.GLOWSTONE
 	var m := _shaped(data)
-	equal(m._heights(8, 1, 8), PackedFloat32Array([1, 1, 1, 1]),
+	equal(m._heights(8, 1, 8), PackedFloat64Array([1, 1, 1, 1]),
 		"the step stays whole against the glowstone")
-	equal(m._heights(7, 1, 8), PackedFloat32Array([0, 1, 1, 1]),
+	equal(m._heights(7, 1, 8), PackedFloat64Array([0, 1, 1, 1]),
 		"and its neighbour keeps the shared corner up")
 
 ## Every edge of the ground's mesh is shared by exactly two faces: a
@@ -243,3 +243,35 @@ func test_a_bent_lattice_lines_up_across_a_chunk_border() -> void:
 		var b := east._heights(0, y, z)
 		equal(a[1], b[0], "the border point at z=%d reads the same from both chunks" % z)
 		equal(a[2], b[3], "...and its southern neighbour")
+
+func test_a_cliff_face_varies_from_level_to_level() -> void:
+	# A wall of natural stone with open ground in front of it. The offset
+	# must change as you go UP the wall, or a cliff moves as one piece
+	# and is exactly as square as it was — which is what a warp worked
+	# out per column, rather than per point, quietly did.
+	var data := _ground(func(x: int, _z: int) -> int: return 8 if x >= 8 else 1)
+	var m := _shaped(data, Mesher.WARP)
+	var seen: Array = []
+	for level in range(2, 8):
+		seen.append(m._warp_at(8, level, 6))
+	var different := {}
+	for value: float in seen:
+		different["%.4f" % value] = true
+		check(absf(value) <= Mesher.WARP + 0.0001, "and none of them moves too far: %s" % value)
+	check(different.size() >= 4,
+		"the face of a cliff moves by a different amount at each level: %s" % [seen])
+	# ...and the blocks of the wall are genuinely different heights, not
+	# the same block shifted.
+	var tall := 0
+	var short := 0
+	for vz in range(2, 14):
+		for level in range(2, 8):
+			# A block of the wall runs from the lattice point under it to
+			# the one over it, and both have moved.
+			var height := 1.0 + m._warp_at(8, level + 1, vz) - m._warp_at(8, level, vz)
+			if height > 1.05:
+				tall += 1
+			elif height < 0.95:
+				short += 1
+	check(tall > 0 and short > 0,
+		"some blocks of the wall are taller and some shorter (%d up, %d down)" % [tall, short])

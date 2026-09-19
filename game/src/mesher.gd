@@ -60,7 +60,15 @@ const SMOOTH_CORNERS := true
 ## bristles, and worked out from the point's own world position, which is
 ## what makes two chunks meshed on different threads agree about the seam
 ## between them. 0.0 turns the whole thing off.
-const WARP := 0.25
+##
+## A QUARTER OF A BLOCK WAS NOT ENOUGH TO SEE. Half a block of movement
+## between two corners is what makes a hillside read as ground rather
+## than as boxes, and the edges of a cliff wave instead of ruling
+## straight lines. It cannot go past 0.5, where two corners a block apart
+## could swap over. It is also the only thing in the game where what you
+## see is not exactly where you stand: the ground is drawn up to this far
+## from the block you are actually standing on.
+const WARP := 0.35
 ## Blocks across one swell of the noise.
 const DIP_CELL := 4.0
 const SWELL_SALT := 7919
@@ -210,16 +218,25 @@ var warp := WARP
 const SPAN := SIZE + 1
 var _warp_lut := PackedFloat32Array()
 var _warp_done := PackedByteArray()
-## And the noise, which is the same all the way DOWN a column: a point
-## and the one above it move together, so a block is shifted rather than
-## squashed, and a cliff's horizontal lines all wave the same way.
+## And the noise, which varies with HEIGHT as well as across the map —
+## every level of a cliff gets its own offset, or a wall of blocks moves
+## as one piece and looks exactly as square as it did before.
 ##
-## It was once per level, which is prettier in a cave and cost forty
-## milliseconds a chunk of hashing — most of it for points underground
-## that nothing draws. One value per column, worked out once per build,
-## is a couple of hundred for the whole chunk.
+## Smooth in all three directions, from a lattice of its own: DIP_CELL
+## blocks across and SWELL_RISE high, trilinear between its corners. So a
+## cliff face erodes in bands rather than flickering block to block, and
+## a point and the one above it are related instead of independent.
+##
+## Its corners are the only thing hashed, and there are a few hundred of
+## them for a whole chunk against tens of thousands of lattice points —
+## which is what makes height-varying noise affordable at all. The first
+## attempt hashed per point and cost forty milliseconds a chunk.
+const SWELL_RISE := 3.0
+const CELL_SPAN := 8
 var _noise_lut := PackedFloat32Array()
 var _noise_done := PackedByteArray()
+var _gx0 := 0
+var _gz0 := 0
 
 ## THE CUTAWAY LINE. Solid cubes at or above this y go into the "roof"
 ## surface instead of "opaque", so a camera can decline to draw them —
@@ -239,11 +256,13 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	if _warp_lut.is_empty():
 		_warp_lut.resize(SPAN * SPAN * (H + 1))
 		_warp_done.resize(SPAN * SPAN * (H + 1))
-		_noise_lut.resize(SPAN * SPAN)
-		_noise_done.resize(SPAN * SPAN)
+		_noise_lut.resize(CELL_SPAN * CELL_SPAN * (int(H / SWELL_RISE) + 3))
+		_noise_done.resize(CELL_SPAN * CELL_SPAN * (int(H / SWELL_RISE) + 3))
 	else:
 		_warp_done.fill(0)
 		_noise_done.fill(0)
+	_gx0 = floori(float(cx * SIZE) / DIP_CELL)
+	_gz0 = floori(float(cz * SIZE) / DIP_CELL)
 	_axes_cache.clear()
 	_wx0 = cx * SIZE
 	_wz0 = cz * SIZE
@@ -402,8 +421,13 @@ static func _smoothable() -> PackedByteArray:
 
 ## Corner heights [NW, NE, SE, SW] of a block's top, relative to its
 ## bottom: 1 is its own top, 0 its bottom.
-func _heights(x: int, y: int, z: int) -> PackedFloat32Array:
-	return PackedFloat32Array([_surface(x, y, z, 0, 0), _surface(x, y, z, 1, 0),
+func _heights(x: int, y: int, z: int) -> PackedFloat64Array:
+	# FULL PRECISION, all the way to the vertex. Through a 32-bit array a
+	# corner one level up reads `1 + offset`, rounded around 1, while the
+	# block above reads the same point as `0 + offset`, rounded around
+	# nothing — and the two land a millionth of a block apart. Every
+	# height here is rounded exactly once: when it becomes a vertex.
+	return PackedFloat64Array([_surface(x, y, z, 0, 0), _surface(x, y, z, 1, 0),
 		_surface(x, y, z, 1, 1), _surface(x, y, z, 0, 1)])
 
 ## The shared height of the vertex at the (cx, cz) corner of block (x, z)
@@ -452,7 +476,7 @@ func _warp_at(vx: int, wy: int, vz: int) -> float:
 	var slot := (wy * SPAN + vz) * SPAN + vx
 	if _warp_done[slot] == 1:
 		return _warp_lut[slot]
-	var moved := warp * _swell(vx, vz)
+	var moved := warp * _swell(vx, wy, vz)
 	if vx > 0 and vx < SIZE and vz > 0 and vz < SIZE:
 		# Every one of the eight is inside this chunk: straight out of
 		# the bytes, no bounds arithmetic per block.
@@ -496,29 +520,48 @@ func _warp_at(vx: int, wy: int, vz: int) -> float:
 ## a little of the column's own hash on top. Worked out from the column's
 ## place in the WORLD, which is what makes two chunks meshed on different
 ## threads agree about the seam between them.
-func _swell(vx: int, vz: int) -> float:
-	var slot := vz * SPAN + vx
-	if _noise_done[slot] == 1:
-		return _noise_lut[slot]
+func _swell(vx: int, wy: int, vz: int) -> float:
 	var wx := _wx0 + vx
 	var wz := _wz0 + vz
 	var fx := float(wx) / DIP_CELL
 	var fz := float(wz) / DIP_CELL
+	var fy := float(wy) / SWELL_RISE
 	var gx := floori(fx)
 	var gz := floori(fz)
+	var gy := floori(fy)
 	var tx := fx - float(gx)
 	var tz := fz - float(gz)
+	var ty := fy - float(gy)
 	tx = tx * tx * (3.0 - 2.0 * tx)
 	tz = tz * tz * (3.0 - 2.0 * tz)
-	var n := lerpf(
-		lerpf(WorldGen.hash01(gx, gz, SWELL_SALT), WorldGen.hash01(gx + 1, gz, SWELL_SALT), tx),
-		lerpf(WorldGen.hash01(gx, gz + 1, SWELL_SALT), WorldGen.hash01(gx + 1, gz + 1, SWELL_SALT), tx),
-		tz)
-	n = clampf(n * 0.8 + WorldGen.hash01(wx, wz, SWELL_SALT + 1) * 0.2, 0.0, 1.0)
-	var swell := n * 2.0 - 1.0
-	_noise_lut[slot] = swell
+	ty = ty * ty * (3.0 - 2.0 * ty)
+	var low := lerpf(
+		lerpf(_cell(gx, gy, gz), _cell(gx + 1, gy, gz), tx),
+		lerpf(_cell(gx, gy, gz + 1), _cell(gx + 1, gy, gz + 1), tx), tz)
+	var high := lerpf(
+		lerpf(_cell(gx, gy + 1, gz), _cell(gx + 1, gy + 1, gz), tx),
+		lerpf(_cell(gx, gy + 1, gz + 1), _cell(gx + 1, gy + 1, gz + 1), tx), tz)
+	# A little of the point's own hash on top of the swell, so a broad
+	# face is not perfectly smooth either.
+	var n := clampf(lerpf(low, high, ty) * 0.82
+		+ WorldGen.hash01(wx * 3 + wy, wz * 5 - wy, SWELL_SALT + 1) * 0.18, 0.0, 1.0)
+	return n * 2.0 - 1.0
+
+## One corner of the noise's own lattice, hashed once per build.
+func _cell(gx: int, gy: int, gz: int) -> float:
+	var ix := gx - _gx0
+	var iz := gz - _gz0
+	if ix < 0 or ix >= CELL_SPAN or iz < 0 or iz >= CELL_SPAN or gy < 0:
+		return WorldGen.hash01(gx * 92837111 + gy, gz, SWELL_SALT)
+	var slot := (gy * CELL_SPAN + iz) * CELL_SPAN + ix
+	if slot >= _noise_done.size():
+		return WorldGen.hash01(gx * 92837111 + gy, gz, SWELL_SALT)
+	if _noise_done[slot] == 1:
+		return _noise_lut[slot]
+	var value := WorldGen.hash01(gx * 92837111 + gy, gz, SWELL_SALT)
+	_noise_lut[slot] = value
 	_noise_done[slot] = 1
-	return swell
+	return value
 
 ## One block of ground's own view of one of its corners, 1 up or 0 down.
 func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
@@ -565,12 +608,13 @@ const CORNER_XZ := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
 ## Coloured from the block's side colour at the ground to its top colour
 ## at the top, so a cut runs green down to a brown foot rather than brown
 ## all over.
-func _side_face(x: int, y: int, z: int, side: int, top: Vector2, bottom: Vector2,
+func _side_face(x: int, y: int, z: int, side: int, top0: float, top1: float,
+		bot0: float, bot1: float,
 		base_color: Color, top_color: Color, brightness: float, emit: float) -> void:
-	if top.x <= bottom.x and top.y <= bottom.y:
+	if top0 <= bot0 and top1 <= bot1:
 		return
-	var d := top.y - top.x
-	var db := bottom.y - bottom.x
+	var d := top1 - top0
+	var db := bot1 - bot0
 	# Where the two lines cross, if they do inside the face: past that the
 	# ground above has sunk below the ground beneath and there is nothing
 	# of the block left to draw.
@@ -578,31 +622,56 @@ func _side_face(x: int, y: int, z: int, side: int, top: Vector2, bottom: Vector2
 	var s1 := 1.0
 	var gap := d - db
 	if gap != 0.0:
-		var cross := (bottom.x - top.x) / gap
+		var cross := (bot0 - top0) / gap
 		if cross > 0.0 and cross < 1.0:
-			if top.x <= bottom.x:
+			if top0 <= bot0:
 				s0 = cross
 			else:
 				s1 = cross
 	# Around the face: along the ground below, up the far end, back along
 	# the surface line, down the near end.
-	var pts: Array = [Vector2(s0, bottom.x + db * s0), Vector2(s1, bottom.x + db * s1),
-		Vector2(s1, top.x + d * s1), Vector2(s0, top.x + d * s0)]
+	# AT AN END OF THE FACE, the height IS the corner's height — not the
+	# line evaluated there. `a + (b - a) * 1` is not b to the last bit,
+	# and the top face of this same block puts its corner at b: a
+	# millionth of a block apart is still two faces that do not meet.
+	var along := PackedFloat64Array([s0, s1, s1, s0])
+	var heights := PackedFloat64Array([
+		bot0 if s0 == 0.0 else bot0 + db * s0,
+		bot1 if s1 == 1.0 else bot0 + db * s1,
+		top1 if s1 == 1.0 else top0 + d * s1,
+		top0 if s0 == 0.0 else top0 + d * s0])
 	var pair: Array = SIDE_CORNERS[side]
 	var c0: Vector2 = CORNER_XZ[pair[0]]
 	var c1: Vector2 = CORNER_XZ[pair[1]]
 	var o := Vector3(x, y, z)
 	var step: Vector2i = SIDE_STEP[side]
 	var normal := Vector3(step.x, 0, step.y)
+	# ANY point that lands on one already there is dropped, not just one
+	# following it. Where the ground above meets the ground below — a
+	# ramp's foot, a face that has closed to nothing — two corners of
+	# this shape are the same place, and a triangle between them is a
+	# sliver with no area: nothing to see, two edges into the mesh that
+	# nothing matches, and something for the depth buffer to argue with.
 	var world: Array = []
 	var cols: Array = []
-	for q: Vector2 in pts:
-		if not world.is_empty() and (world.back() as Vector3).is_equal_approx(
-				o + Vector3(lerpf(c0.x, c1.x, q.x), q.y, lerpf(c0.y, c1.y, q.x))):
+	for i in along.size():
+		var q: float = along[i]
+		var at := o + Vector3(lerpf(c0.x, c1.x, q), 0.0, lerpf(c0.y, c1.y, q))
+		at.y = float(y) + heights[i]    # once, as in _add_shaped
+		var seen := false
+		for other: Vector3 in world:
+			if other.distance_squared_to(at) < 0.000001:
+				seen = true
+				break
+		if seen:
 			continue
-		world.append(o + Vector3(lerpf(c0.x, c1.x, q.x), q.y, lerpf(c0.y, c1.y, q.x)))
-		cols.append(base_color.lerp(top_color, q.y))
+		world.append(at)
+		cols.append(base_color.lerp(top_color, float(heights[i])))
 	for i in range(1, world.size() - 1):
+		var ab: Vector3 = world[i] - world[0]
+		var ac: Vector3 = world[i + 1] - world[0]
+		if ab.cross(ac).length_squared() < 0.00000001:
+			continue      # three points in a line: no face, only edges
 		_tri("opaque", [world[0], world[i], world[i + 1]], normal,
 			[cols[0], cols[i], cols[i + 1]], brightness, emit)
 
@@ -611,7 +680,7 @@ func _side_face(x: int, y: int, z: int, side: int, top: Vector2, bottom: Vector2
 ## there is nothing beneath. Sides against another solid block draw
 ## nothing: the surface is shared, so there is nothing left bare.
 func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
-		h: PackedFloat32Array) -> void:
+		h: PackedFloat64Array) -> void:
 	var base_color := Blocks.LK_COLOR[block]
 	var top_color := Blocks.LK_TOP[block]
 	var jitter := _jitter(x, y, z, cx, cz, Blocks.LK_ROUGH[block])
@@ -620,10 +689,17 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 	var p: Array = []
 	for i in 4:
 		var c: Vector2 = CORNER_XZ[i]
-		p.append(o + Vector3(c.x, h[i], c.y))
+		# THE HEIGHT GOES IN ONCE, at the height it lands. Building
+		# Vector3(c.x, h, c.y) and adding the block's corner rounds the
+		# height twice — once around 1, once around 31 — and a cube face
+		# meeting this one rounds once, so the two put the same point two
+		# millionths of a block apart and the mesh has a seam in it.
+		var point := o + Vector3(c.x, 0.0, c.y)
+		point.y = float(y) + h[i]
+		p.append(point)
 	# ITS FLOOR IS THE LATTICE TOO: the four points under the block, each
 	# with its own offset, exactly as the ground below them draws its top.
-	var b := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+	var b := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	for i in 4:
 		var c: Vector2 = CORNER_XZ[i]
 		b[i] = _warp_at(x + int(c.x), y, z + int(c.y))
@@ -668,16 +744,17 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 			continue
 		var pair: Array = SIDE_CORNERS[side]
 		var shade := SHADE_Z if side % 2 == 0 else SHADE_X
-		_side_face(x, y, z, side, Vector2(h[pair[0]], h[pair[1]]),
-			Vector2(b[pair[0]], b[pair[1]]), base_color, top_color,
-			shade * jitter, emit)
+		_side_face(x, y, z, side, h[pair[0]], h[pair[1]], b[pair[0]], b[pair[1]],
+			base_color, top_color, shade * jitter, emit)
 	if not _is_opaque_at(x, y - 1, z):
 		# Through the same four corners as the sides start from, or the
 		# underside would part from them.
 		var u: Array = []
 		for i in 4:
 			var c: Vector2 = CORNER_XZ[i]
-			u.append(o + Vector3(c.x, b[i], c.y))
+			var point := o + Vector3(c.x, 0.0, c.y)
+			point.y = float(y) + b[i]   # once, as above
+			u.append(point)
 		_tri("opaque", [u[0], u[1], u[2]], Vector3.DOWN,
 			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
 		_tri("opaque", [u[0], u[2], u[3]], Vector3.DOWN,

@@ -17,10 +17,12 @@ extends SceneTree
 ## another draws it square does not error, log, or show up in anything
 ## but a screenshot of that exact spot.
 ##
-## Faces that shaped blocks (slabs, fences, doors) draw without culling
-## are counted too, and they overlap each other by design, so the number
-## is compared against the SAME world with the lattice flat rather than
-## against zero. Bending must not add one.
+## Two kinds of block draw faces that nothing is supposed to match, and
+## both are deliberate: a slab or a fence emits all six sides of each of
+## its little boxes without culling, and a block that is SOLID BUT NOT
+## OPAQUE — a glowstone, a pane of glass — has its neighbours draw into
+## it while it culls against them. Edges touching either are left out of
+## the count, and what remains has to be nothing at all.
 
 const THEMES := ["classic", "desert", "isles", "caverns"]
 const SPAN := 1      # chunks either side of the middle one
@@ -35,9 +37,9 @@ func _init() -> void:
 		var flat := _open_edges(theme, 0.0)
 		print("WATERTIGHT %s: %d open edges bent, %d flat (%d triangles, %d%% of corners moved)"
 			% [theme, bent.open, flat.open, bent.tris, bent.moved])
-		if bent.open > flat.open:
-			failures.append("%s: bending the lattice opened %d edges, e.g. %s"
-				% [theme, bent.open - flat.open, bent.samples])
+		if bent.open > 0 or flat.open > 0:
+			failures.append("%s: %d edges with nothing on the other side (%d with the lattice flat), e.g. %s"
+				% [theme, bent.open, flat.open, bent.samples])
 		if bent.moved < 20 and theme != "isles":
 			failures.append("%s: only %d%% of corners moved — is the warp reaching the world?"
 				% [theme, bent.moved])
@@ -57,6 +59,7 @@ func _open_edges(theme: String, warp: float) -> Dictionary:
 	for cz in range(-SPAN - 1, SPAN + 2):
 		for cx in range(-SPAN - 1, SPAN + 2):
 			chunks[Vector2i(cx, cz)] = gen.generate_chunk(cx, cz)
+	_chunks = chunks
 	var edges := {}
 	var tris := 0
 	var moved := 0
@@ -91,7 +94,11 @@ func _open_edges(theme: String, warp: float) -> Dictionary:
 						edges[edge] = int(edges.get(edge, 0)) + 1
 	var open := 0
 	var samples: Array = []
-	var rim := float(SPAN * 16 + 16)
+	# The patch runs from -SPAN chunks to SPAN + 1 chunks: its two rims
+	# are not the same number, and calling them both SPAN * 16 + 16 left
+	# every edge on the low side counted as a hole.
+	var low := float(-SPAN * 16)
+	var high := float((SPAN + 1) * 16)
 	for edge: String in edges.keys():
 		var pair := edge.split(">")
 		if int(edges.get("%s>%s" % [pair[1], pair[0]], 0)) == int(edges[edge]):
@@ -101,16 +108,49 @@ func _open_edges(theme: String, warp: float) -> Dictionary:
 		var a := _point(pair[0])
 		var b := _point(pair[1])
 		if (a.y <= 0.001 and b.y <= 0.001) \
-				or (a.x <= -rim + 0.001 and b.x <= -rim + 0.001) \
-				or (a.x >= rim - 0.001 and b.x >= rim - 0.001) \
-				or (a.z <= -rim + 0.001 and b.z <= -rim + 0.001) \
-				or (a.z >= rim - 0.001 and b.z >= rim - 0.001):
+				or (a.x <= low + 0.001 and b.x <= low + 0.001) \
+				or (a.x >= high - 0.001 and b.x >= high - 0.001) \
+				or (a.z <= low + 0.001 and b.z <= low + 0.001) \
+				or (a.z >= high - 0.001 and b.z >= high - 0.001):
+			continue
+		if _drawn_loose_beside(a, b):
 			continue
 		open += 1
 		if samples.size() < 4:
 			samples.append(edge)
 	return {"open": open, "tris": tris, "samples": samples,
 		"moved": int(100.0 * float(moved) / maxf(float(seen), 1.0))}
+
+## The world this run is counting, for _drawn_loose_beside.
+var _chunks: Dictionary = {}
+
+## Is there a block beside this edge that draws faces nobody matches? A
+## slab, a fence, a door — every side of every box, uncalled — or a solid
+## block that is not opaque, which its neighbours draw into while it culls
+## against them. Both are on purpose, and both leave edges over.
+func _drawn_loose_beside(a: Vector3, b: Vector3) -> bool:
+	var middle := (a + b) * 0.5
+	for dx in [-1, 0]:
+		for dy in [-1, 0]:
+			for dz in [-1, 0]:
+				var block := _block_at(floori(middle.x) + dx,
+					floori(middle.y + 0.5) + dy, floori(middle.z) + dz)
+				if block == Blocks.AIR:
+					continue
+				if int(Blocks.LK_SHAPE[block]) != 0:
+					return true
+				if Blocks.LK_SOLID[block] == 1 and Blocks.LK_OPAQUE[block] != 1:
+					return true
+	return false
+
+func _block_at(wx: int, wy: int, wz: int) -> int:
+	if wy < 0 or wy >= WorldGen.CHUNK_H:
+		return Blocks.AIR
+	var cpos := Vector2i(floori(float(wx) / 16.0), floori(float(wz) / 16.0))
+	var data: PackedByteArray = _chunks.get(cpos, PackedByteArray())
+	if data.is_empty():
+		return Blocks.AIR
+	return data.decode_u16(WorldGen.bidx(posmod(wx, 16), wy, posmod(wz, 16)))
 
 func _point(text: String) -> Vector3:
 	var bits := text.substr(1, text.length() - 2).split(", ")
