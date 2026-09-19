@@ -94,6 +94,13 @@ var _chips: Array = []
 var _last_index := -1
 var _last_style := -1
 var _last_size := Vector2(-1, -1)
+## What the per-frame refreshes last pushed into a theme override. Setting
+## one is never free, even to the value it already has: the control is
+## told its theme changed, and a Label re-shapes its text. Three of those
+## every frame, per player, for values that change a few times a game.
+var _crosshair_px := -1
+var _score_tint := Color(0, 0, 0, 0)
+var _storm_urgent := -1
 var _last_held := ""
 var _slots_dirty := true
 ## What the eight slots held last time they were drawn. Any change repaints.
@@ -2547,6 +2554,7 @@ func _process(delta: float) -> void:
 	_refresh_tints(player)
 	_refresh_menu_hints()
 	_refresh_hotbar_icons(player)
+	map.step_radar()
 
 ## This seat's own input: menu keys, picker, page navigation.
 ##
@@ -2781,8 +2789,10 @@ func _refresh_notices(player: Player, delta: float) -> void:
 			# Plain while the wall is on its way in; the warning colour
 			# once there is nowhere left to go but the arena.
 			var urgent: bool = world.storm_radius <= StormClock.HOLD_RADIUS + 0.5
-			_storm_label.add_theme_color_override("font_color",
-				UiTheme.DANGER if urgent else UiTheme.INK_DIM)
+			if int(urgent) != _storm_urgent:
+				_storm_urgent = int(urgent)
+				_storm_label.add_theme_color_override("font_color",
+					UiTheme.DANGER if urgent else UiTheme.INK_DIM)
 			if world.storm_radius <= 0.0:
 				_storm_label.text = "STORM  ·  NO WAY OUT"
 			elif urgent:
@@ -2941,9 +2951,10 @@ func _refresh_scoreline(player: Player, delta: float) -> void:
 				team_name = str(world.client_team_names[team])
 			# The flag glyph is always red, so tint the whole label to the
 			# team's colour — a red flag over "Blue" told you nothing.
-			if team >= 0 and team < WorldNode.TEAM_COLORS.size():
-				_score_label.add_theme_color_override("font_color",
-					WorldNode.TEAM_COLORS[team])
+			if team >= 0 and team < WorldNode.TEAM_COLORS.size() \
+					and WorldNode.TEAM_COLORS[team] != _score_tint:
+				_score_tint = WorldNode.TEAM_COLORS[team]
+				_score_label.add_theme_color_override("font_color", _score_tint)
 			_score_label.text = "%s  %d/%d alive   ·   %d still standing" % [
 				team_name, mates_alive, mates_total, standing]
 	if _vignette != null and world != null:
@@ -2983,7 +2994,10 @@ func _refresh_crosshair_and_layout(player: Player) -> void:
 	# crosshair does.
 	_crosshair.visible = player.fp_mode and not _menu.visible \
 		and not (_round_card != null and _round_card.visible)
-	_crosshair.add_theme_font_size_override("font_size", _us(int(30 * (1.0 + player.fp_zoom * 0.8))))
+	var crosshair_px := _us(int(30 * (1.0 + player.fp_zoom * 0.8)))
+	if crosshair_px != _crosshair_px:
+		_crosshair_px = crosshair_px
+		_crosshair.add_theme_font_size_override("font_size", crosshair_px)
 	if size != _last_size:
 		_last_size = size
 		# Going fullscreen (or dragging the window) changes what a design

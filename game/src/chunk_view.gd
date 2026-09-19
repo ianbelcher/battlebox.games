@@ -84,6 +84,33 @@ var _mesh_exit := false
 var _mesh_gen: Dictionary = {}      # cpos -> generation of the latest submitted job
 var _applied_gen: Dictionary = {}   # cpos -> generation actually on screen
 var _inflight: Dictionary = {}      # cpos -> submit time msec
+## When a worker actually PICKED UP each chunk's job, as cpos ->
+## [generation, msec], under _mesh_mutex. The stall fallback times from here, not from submission:
+## a job still waiting its turn in the queue is not stalled, and on a slow
+## machine the queue alone can be longer than the four-second limit —
+## which then meshed a chunk synchronously on the main thread, half a
+## second of frozen game for work a worker was about to do anyway.
+var _mesh_started: Dictionary = {}
+## Chunks whose drawn mesh (or lack of one) is older than their blocks.
+##
+## ONLY CHUNKS NEAR A PLAYER ARE MESHED. The client is sent far more of the
+## world than it draws — all of it, in the background, so travel never
+## waits on the server — and every chunk it received used to be meshed on
+## arrival. A chunk is 200-500 ms of GDScript to mesh on a fast desktop
+## (the shaped ground made it dearer again), and well over half of them
+## sat hidden past the draw distance: minutes of worker time at the start
+## of a game, on machines whose two or four cores are also running the
+## game itself. Out of range, a chunk now gets only the cheap summary the
+## maps and the warp stones need (_summary_of), stays in here, and is
+## meshed properly once somebody comes within MESH_MARGIN chunks of the
+## draw distance.
+var _mesh_dirty: Dictionary = {}
+## How far past the draw distance (in chunks) meshing reaches, so the edge
+## is built before anybody can see it.
+const MESH_MARGIN := 2
+## Set when lamps come or go; the budget is redone once, at the end of the
+## frame, however many chunks were uploaded in it.
+var _lamps_dirty := false
 
 ## Chunks this client has actually received and kept.
 func loaded_count() -> int:
@@ -133,12 +160,19 @@ func _mesh_worker() -> void:
 			job = _mesh_jobs_urgent.pop_front()
 		elif not _mesh_jobs.is_empty():
 			job = _mesh_jobs.pop_front()
+		if not job.is_empty() and not job.get("summary", false):
+			_mesh_started[job.cpos] = [int(job.gen), Time.get_ticks_msec()]
 		_mesh_mutex.unlock()
 		if job.is_empty():
 			continue
 		var t0 := Time.get_ticks_msec()
-		var surfaces: Dictionary = Mesher.new().build(
-			job.data, job.neighbors, job.cpos.x, job.cpos.y, int(job.get("roof", -1)))
+		var surfaces: Dictionary
+		if job.get("summary", false):
+			surfaces = _summary_of(job.data)
+		else:
+			surfaces = Mesher.new().build(job.data, job.neighbors, job.cpos.x,
+				job.cpos.y, int(job.get("roof", -1)))
+			surfaces["foliage"] = _foliage_of(job.data, job.cpos)
 		var build_ms := Time.get_ticks_msec() - t0
 		if build_ms > 500:
 			push_warning("Slow mesh build: %s took %d ms" % [job.cpos, build_ms])
@@ -151,7 +185,10 @@ const AROUND := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1
 	Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
 
 func _ready() -> void:
-	for i in 3:
+	# One worker per core the game is not already using for its main and
+	# render threads, up to three. A fixed three on a dual-core machine
+	# puts three GDScript meshers on the same two cores as the frame.
+	for i in clampi(OS.get_processor_count() - 2, 1, 3):
 		var worker := Thread.new()
 		worker.start(_mesh_worker)
 		_mesh_threads.append(worker)
@@ -198,20 +235,33 @@ func set_focus(positions: Array) -> void:
 ## loaded world keeps a few hundred lamps at most, and this only runs on
 ## the 0.4s focus cadence, not per frame.
 func _refresh_light_budget() -> void:
-	var scored: Array = []
+	var lamps: Array[OmniLight3D] = []
+	var d2 := PackedFloat32Array()
 	for arr: Array in _chunk_lamps.values():
 		for entry: Dictionary in arr:
 			var light: OmniLight3D = entry.light
 			if is_instance_valid(light):
-				scored.append({"light": light, "d2": _nearest_focus_dist2(entry.pos)})
+				lamps.append(light)
+				d2.append(_nearest_focus_dist2(entry.pos))
 	if light_cap <= 0 or _focus_positions.is_empty():
-		for entry: Dictionary in scored:
-			(entry.light as OmniLight3D).visible = false
+		for light in lamps:
+			light.visible = false
 		return
-	scored.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return float(a.d2) < float(b.d2))
-	for i in scored.size():
-		(scored[i].light as OmniLight3D).visible = i < light_cap
+	# The distance of the LIGHT_CAP-th nearest lamp, from a sorted copy of
+	# the distances — a sort in C++, where a sort_custom over a dictionary
+	# per lamp cost ~3 ms, and ran for every chunk with a lamp in it that
+	# was uploaded (three a frame while a world streams in).
+	var cutoff := INF
+	if d2.size() > light_cap:
+		var sorted := d2.duplicate()
+		sorted.sort()
+		cutoff = sorted[light_cap - 1]
+	var lit := 0
+	for i in lamps.size():
+		var on := d2[i] <= cutoff and lit < light_cap
+		if on:
+			lit += 1
+		lamps[i].visible = on
 
 func _nearest_focus_dist2(pos: Vector3) -> float:
 	var best := 1e18
@@ -269,6 +319,15 @@ func _refresh_interest() -> void:
 			holder.visible = false
 		elif not holder.visible and best <= show_r * show_r:
 			holder.visible = true
+	# Somebody walked (or zoomed the draw distance) up to chunks that were
+	# only summarised: mesh them now.
+	for cpos: Vector2i in _mesh_dirty.keys():
+		if not _queued.has(cpos) and _in_mesh_range(cpos):
+			_queue_mesh(cpos)
+
+func _in_mesh_range(cpos: Vector2i) -> bool:
+	var reach := view_radius + MESH_MARGIN
+	return _dist_to_focus(cpos) <= float(reach * reach)
 
 func _dist_to_focus(cpos: Vector2i) -> float:
 	var best := 1e9
@@ -306,17 +365,23 @@ func _submit_urgent(cpos: Vector2i) -> void:
 		return
 	_mesh_queue.erase(cpos)
 	_queued.erase(cpos)
+	# All eight neighbours and the roof line, exactly as the streaming path
+	# sends them. This sent four and no roof, so a chunk you had just dug
+	# in was rebuilt with its corner ground shaped against air beyond the
+	# diagonals and, indoors, its ceiling back in the surface the orbit
+	# camera draws — until something else happened to remesh it.
 	var nb := {}
-	for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+	for off: Vector2i in AROUND:
 		var n: PackedByteArray = _data.get(cpos + off, PackedByteArray())
 		if not n.is_empty():
 			nb[off] = n.duplicate()
 	var gen: int = int(_mesh_gen.get(cpos, 0)) + 1
 	_mesh_gen[cpos] = gen
 	_inflight[cpos] = Time.get_ticks_msec()
+	_mesh_dirty.erase(cpos)
 	_mesh_mutex.lock()
 	_mesh_jobs_urgent.append({"cpos": cpos, "data": _data[cpos].duplicate(),
-		"neighbors": nb, "gen": gen})
+		"neighbors": nb, "gen": gen, "roof": roof_y})
 	_mesh_mutex.unlock()
 	_mesh_sem.post()
 
@@ -369,6 +434,7 @@ func ground_height(wx: int, wz: int) -> int:
 func _queue_mesh(cpos: Vector2i, urgent := false) -> void:
 	if not _data.has(cpos):
 		return
+	_mesh_dirty[cpos] = true
 	if _queued.has(cpos):
 		# An edit can promote an already-queued chunk to the front.
 		if urgent:
@@ -409,6 +475,18 @@ func _process(_delta: float) -> void:
 		_queued.erase(cpos)
 		if not _data.has(cpos):
 			continue
+		if not _in_mesh_range(cpos):
+			# Summary only; it stays dirty until someone comes near.
+			var summary_gen: int = int(_mesh_gen.get(cpos, 0)) + 1
+			_mesh_gen[cpos] = summary_gen
+			_mesh_mutex.lock()
+			_mesh_jobs.append({"cpos": cpos, "data": _data[cpos].duplicate(),
+				"gen": summary_gen, "summary": true})
+			_mesh_mutex.unlock()
+			_mesh_sem.post()
+			backlog += 1
+			continue
+		_mesh_dirty.erase(cpos)
 		var neighbors := {}
 		# All eight, diagonals included: the shape of a corner block reads
 		# the block diagonally beyond it.
@@ -449,9 +527,18 @@ func _process(_delta: float) -> void:
 		# showing now; a fresher one lands right behind it.
 		if not _data.has(rpos) or rgen <= int(_applied_gen.get(rpos, -1)):
 			continue  # a newer result already showed this chunk
+		if result.surfaces.get("summary", false):
+			# Nothing drawn, so nothing "on screen" moves on: only what
+			# the maps and the warp stones read.
+			_topmaps[rpos] = result.surfaces.topmap
+			_set_teleporters(rpos, result.surfaces)
+			continue
 		_applied_gen[rpos] = rgen
 		if rgen >= int(_mesh_gen.get(rpos, 0)):
 			_inflight.erase(rpos)  # this WAS the latest request
+			_mesh_mutex.lock()
+			_mesh_started.erase(rpos)
+			_mesh_mutex.unlock()
 		_topmaps[rpos] = result.surfaces.get("topmap", PackedByteArray())
 		_apply_surfaces(rpos, result.surfaces)
 	# Stall fallback: if the worker hasn't returned a chunk within 4s,
@@ -460,24 +547,38 @@ func _process(_delta: float) -> void:
 	# fed a death spiral (main-thread hitches → more stalls → freeze).
 	var now_ms := Time.get_ticks_msec()
 	var fallback_done := false
+	_mesh_mutex.lock()
+	var started: Dictionary = _mesh_started.duplicate()
+	_mesh_mutex.unlock()
 	for spos: Vector2i in _inflight.keys().duplicate():
-		if fallback_done or now_ms - int(_inflight[spos]) < 4000:
+		# Only the LATEST job for the chunk counts, and only once a worker
+		# has it.
+		var picked: Array = started.get(spos, [-1, 0])
+		if fallback_done or int(picked[0]) != int(_mesh_gen.get(spos, 0)) \
+				or now_ms - int(picked[1]) < 4000:
 			continue
 		fallback_done = true
 		_inflight.erase(spos)
+		_mesh_mutex.lock()
+		_mesh_started.erase(spos)
+		_mesh_mutex.unlock()
 		if not _data.has(spos):
 			continue
 		push_warning("Mesh worker stalled on %s — meshing synchronously" % spos)
 		_mesh_gen[spos] = int(_mesh_gen.get(spos, 0)) + 1
 		var nb := {}
-		for off in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		for off: Vector2i in AROUND:
 			var n: PackedByteArray = _data.get(spos + off, PackedByteArray())
 			if not n.is_empty():
 				nb[off] = n
 		var sync_surfaces := Mesher.new().build(_data[spos], nb, spos.x, spos.y, roof_y)
+		sync_surfaces["foliage"] = _foliage_of(_data[spos], spos)
 		_applied_gen[spos] = int(_mesh_gen[spos])
 		_topmaps[spos] = sync_surfaces.get("topmap", PackedByteArray())
 		_apply_surfaces(spos, sync_surfaces)
+	if _lamps_dirty:
+		_lamps_dirty = false
+		_refresh_light_budget()
 	if not _announced_ready and _mesh_queue.is_empty() and done.is_empty() \
 			and _data.size() > 8:
 		_announced_ready = true
@@ -491,7 +592,7 @@ func _process(_delta: float) -> void:
 			var phase: float = entry.phase
 			light.light_energy = base * (0.86 + 0.22 * sin(t * 11.0 + phase) + 0.1 * sin(t * 27.0 + phase * 2.0))
 
-func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
+func _set_teleporters(cpos: Vector2i, surfaces: Dictionary) -> void:
 	var warps: Array = []
 	for local: Vector3i in surfaces.get("teleporters", []):
 		warps.append(Vector3(cpos.x * 16 + local.x, local.y, cpos.y * 16 + local.z))
@@ -500,11 +601,15 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 	else:
 		_teleporters[cpos] = warps
 
+func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
+	_set_teleporters(cpos, surfaces)
 	var holder: Node3D = _holders.get(cpos)
 	if holder != null:
 		_forget_flickers(holder)
 		holder.queue_free()
-	_chunk_lamps.erase(cpos)
+	if _chunk_lamps.has(cpos):
+		_chunk_lamps.erase(cpos)
+		_lamps_dirty = true
 	holder = Node3D.new()
 	holder.position = Vector3(cpos.x * 16, 0, cpos.y * 16)
 	# Born with the right visibility: chunks beyond the draw distance
@@ -533,7 +638,7 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 			instance.layers = RenderLayers.ROOF
 		holder.add_child(instance)
 
-	_add_foliage(holder, cpos)
+	_add_foliage(holder, surfaces.get("foliage", {}))
 
 	var lights: Array = surfaces.get("lights", [])
 	var made: Array = []
@@ -557,7 +662,7 @@ func _apply_surfaces(cpos: Vector2i, surfaces: Dictionary) -> void:
 			holder.add_child(_campfire_particles(spec.pos))
 	if not made.is_empty():
 		_chunk_lamps[cpos] = made
-		_refresh_light_budget()
+		_lamps_dirty = true
 
 func _campfire_particles(pos: Vector3) -> GPUParticles3D:
 	var particles := GPUParticles3D.new()
@@ -634,8 +739,17 @@ func top_block(wx: int, wz: int) -> int:
 		return -1
 	return topmap.decode_u16((posmod(wz, 16) * 16 + posmod(wx, 16)) << 1)
 
+## One chunk's whole top map (16x16 two-byte block ids, z-major), or
+## empty. For the maps, which walk thousands of columns and cannot afford
+## top_block's dictionary lookup on every one of them.
+func topmap_of(cpos: Vector2i) -> PackedByteArray:
+	return _topmaps.get(cpos, PackedByteArray())
+
 func _drop_chunk(cpos: Vector2i) -> void:
 	_topmaps.erase(cpos)
+	_mesh_dirty.erase(cpos)
+	if _chunk_lamps.erase(cpos):
+		_lamps_dirty = true
 	_data.erase(cpos)
 	_pending.erase(cpos)
 	_teleporters.erase(cpos)
@@ -696,12 +810,12 @@ func _foliage_mesh(model: String) -> Mesh:
 	_foliage_meshes[model] = mesh
 	return mesh
 
-func _add_foliage(holder: Node3D, cpos: Vector2i) -> void:
-	# Read the CLIENT's own chunk copy (_data, fed by the server) — the
-	# world.store only holds real data on the server side.
-	var data: PackedByteArray = _data.get(cpos, PackedByteArray())
-	if data.is_empty():
-		return
+## Where every plant model in a chunk goes: model name -> Array of
+## Transform3D. Runs on the MESH WORKERS, beside the mesher — it is a walk
+## over every block of the chunk, 3-9 ms of GDScript, and on the main
+## thread it was paid again for every chunk uploaded (three a frame while
+## streaming) and every edit remesh.
+static func _foliage_of(data: PackedByteArray, cpos: Vector2i) -> Dictionary:
 	# Bucketed by MODEL rather than by block, because one block can be
 	# drawn as any of several models — see GRASS_VARIANTS.
 	var buckets: Dictionary = {}
@@ -732,6 +846,38 @@ func _add_foliage(holder: Node3D, cpos: Vector2i) -> void:
 		if not buckets.has(model):
 			buckets[model] = []
 		(buckets[model] as Array).append(t)
+	return buckets
+
+## What a chunk that is NOT being meshed still has to provide (see
+## _mesh_dirty): its top map for the radar and big map, and its warp
+## stones for nearest_teleporter(). The same answers Mesher.build gives.
+static func _summary_of(data: PackedByteArray) -> Dictionary:
+	var topmap := PackedByteArray()
+	topmap.resize(256 * 2)
+	var teleporters: Array = []
+	var slab_bytes := 256 * 2
+	for y in WorldGen.CHUNK_H:
+		var slab := y * slab_bytes
+		# All-air layers (most of the sky) are skipped in C++.
+		if data.slice(slab, slab + slab_bytes).count(0) == slab_bytes:
+			continue
+		for column in 256:
+			var block := data.decode_u16(slab + (column << 1))
+			if block != Blocks.AIR:
+				topmap.encode_u16(column << 1, block)
+				if block == Blocks.TELEPORT:
+					teleporters.append(Vector3i(column % 16, y, column / 16))
+	return {"summary": true, "topmap": topmap, "teleporters": teleporters}
+
+## Plants beyond this (from the camera) are not drawn. A tuft of grass is
+## a pixel or two by then and deep in the draw-distance fog, but every
+## model in every chunk is its own draw call — over a thousand of them in
+## view, hundreds of thousands of blade vertices, for every split-screen
+## camera.
+const FOLIAGE_VISIBLE_TO := 112.0
+
+## Plant models from _foliage_of's buckets, one MultiMesh per model.
+func _add_foliage(holder: Node3D, buckets: Dictionary) -> void:
 	for model: String in buckets:
 		var mesh := _foliage_mesh(model)
 		if mesh == null:
@@ -746,4 +892,6 @@ func _add_foliage(holder: Node3D, cpos: Vector2i) -> void:
 		var mmi := MultiMeshInstance3D.new()
 		mmi.multimesh = mm
 		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mmi.visibility_range_end = FOLIAGE_VISIBLE_TO
+		mmi.visibility_range_end_margin = 8.0
 		holder.add_child(mmi)

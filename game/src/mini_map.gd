@@ -27,6 +27,24 @@ const RADAR_ARROW_INSET := 8.0
 
 var _radar: TextureRect
 var _radar_tick := 0
+## The radar is BUILT A SLICE AT A TIME: RADAR_ROWS_PER_FRAME rows a frame
+## until all 128 are in, then shown. Even at a table read a pixel (see
+## MapPixels), a whole 128x128 radar is ~10 ms of GDScript on a fast
+## desktop and several times that on the older machines this has to run
+## on — one hitch per player every 0.3 s if it is done in one go. Eight
+## thin slices of it are not felt, and a radar 1/8 of a second older than
+## it could be is not noticed either.
+const RADAR_ROWS_PER_FRAME := 16
+var _radar_px := PackedInt32Array()
+## The next row to build; 128 when no build is in progress.
+var _radar_next_row := 128
+## What the build in progress is of: the view as it was when it started,
+## so all of its rows agree with each other.
+var _radar_center := Vector3.ZERO
+var _radar_yaw := 0.0
+var _radar_span := 0.75
+var _radar_eye_row := 64.0
+var _radar_half_world := 0
 ## A BIG map you can move around: pan with the right stick (or drag),
 ## zoom with up/down on the left stick. The corner radar only ever shows
 ## what is right around you; this is for working out where to go.
@@ -36,6 +54,13 @@ var _map_zoom := 2.0          # blocks per pixel
 ## The zoom that exactly fits the world: the furthest you may pull out.
 var _map_fit := 2.0
 var _map_tick := 0.0
+## The big map's terrain, kept between redraws. The blips move every
+## frame, the ground only when you pan or zoom (or new chunks arrive,
+## which the timed refresh picks up) — so only the blips are redrawn at
+## stick rate.
+var _map_ground_px := PackedInt32Array()
+var _map_ground_key := Vector3.INF
+var _map_ground_age := 0.0
 
 ## Open the map showing the WHOLE world and nothing but the world.
 ##
@@ -70,13 +95,13 @@ func _draw_big_map() -> void:
 	if _map_tex == null or hud.world == null or hud.world.chunks == null:
 		return
 	var size_px := MAP_IMAGE_PX
-	var image := Image.create(size_px, size_px, false, Image.FORMAT_RGB8)
-	var half := float(int(hud.world.client_size) / 2)
-	for py in size_px:
-		for px in size_px:
-			var wx := int(_map_centre.x + float(px - size_px / 2) * _map_zoom)
-			var wz := int(_map_centre.y + float(py - size_px / 2) * _map_zoom)
-			image.set_pixel(px, py, _map_ground(wx, wz, half))
+	var key := Vector3(_map_centre.x, _map_centre.y, _map_zoom)
+	_map_ground_age += 0.04
+	if key != _map_ground_key or _map_ground_age > 1.0:
+		_map_ground_key = key
+		_map_ground_age = 0.0
+		_map_ground_px = _map_ground_image(size_px)
+	var image := MapPixels.image_of(size_px, _map_ground_px)
 	# Everyone playing, as a fat blip — this is a radar, the ground is
 	# only there so you can tell where the blips ARE.
 	# Whose map this is. Taken from the player node rather than from a
@@ -119,7 +144,7 @@ func _draw_big_map() -> void:
 		var tint: Color = WorldNode.TEAM_COLORS[team] if team >= 0 \
 			and team < WorldNode.TEAM_COLORS.size() else Color.WHITE
 		_map_flag(image, home, tint, size_px, present)
-	_map_tex.texture = ImageTexture.create_from_image(image)
+	_show(_map_tex, image)
 ## A flag on the big map — as a little flag where it stands, or as a
 ## chevron pinned to the edge pointing at it when it is off the view.
 ##
@@ -165,20 +190,50 @@ func _map_dot(image: Image, x: int, y: int, size_px: int, c: Color) -> void:
 	if x < 0 or y < 0 or x >= size_px or y >= size_px:
 		return
 	image.set_pixel(x, y, c)
-func _map_ground(wx: int, wz: int, half: float) -> Color:
-	if absf(float(wx)) > half or absf(float(wz)) > half:
-		return Color(0.03, 0.035, 0.05)
-	var block: int = hud.world.chunks.top_block(wx, wz)
-	if block <= 0:
-		block = hud.world.overview_block(wx, wz)
-	if block <= 0:
-		return Color(0.07, 0.08, 0.11)
-	# Washed right out: a low-contrast grey-blue wash of the terrain, so
-	# the coloured blips are the only strong thing on it. At full colour
-	# the map was a speckled mess nobody could read.
-	var raw := Blocks.top_color_of(block)
-	var grey := raw.get_luminance()
-	return Color(grey * 0.42 + 0.10, grey * 0.44 + 0.11, grey * 0.48 + 0.14)
+## The big map's terrain alone, as MapPixels.rgba pixels in the same
+## washed-out palette as the radar.
+func _map_ground_image(size_px: int) -> PackedInt32Array:
+	var wash := MapPixels.wash_table()
+	var chunks: ChunkView = hud.world.chunks
+	var pixels := PackedInt32Array()
+	pixels.resize(size_px * size_px)
+	var half := int(hud.world.client_size) / 2
+	var off_world := MapPixels.rgba(Color(0.03, 0.035, 0.05))
+	var unknown := MapPixels.rgba(Color(0.07, 0.08, 0.11))
+	# A run of pixels over one chunk costs one dictionary lookup, not one
+	# each.
+	var last_key := Vector2i(1 << 30, 0)
+	var top := PackedByteArray()
+	var o := 0
+	for py in size_px:
+		var wz := int(_map_centre.y + float(py - size_px / 2) * _map_zoom)
+		for px in size_px:
+			var wx := int(_map_centre.x + float(px - size_px / 2) * _map_zoom)
+			var colour := off_world
+			if absi(wx) <= half and absi(wz) <= half:
+				var key := Vector2i(wx >> 4, wz >> 4)
+				if key != last_key:
+					last_key = key
+					top = chunks.topmap_of(key)
+				var block := 0
+				if not top.is_empty():
+					block = top.decode_u16((((wz & 15) << 4) | (wx & 15)) << 1)
+				if block <= 0:
+					block = hud.world.overview_block(wx, wz)
+				colour = wash[block] if block > 0 and block < wash.size() else unknown
+			pixels[o] = colour
+			o += 1
+	return pixels
+
+## Shows `image` in `rect`, reusing its texture when the size allows —
+## a fresh ImageTexture each refresh is a fresh GPU texture each refresh.
+static func _show(rect: TextureRect, image: Image) -> void:
+	var tex := rect.texture as ImageTexture
+	if tex != null and tex.get_width() == image.get_width() \
+			and tex.get_height() == image.get_height():
+		tex.update(image)
+	else:
+		rect.texture = ImageTexture.create_from_image(image)
 func _map_blip(image: Image, at: Vector3, tint: Color, size_px: int,
 		mine: bool, hollow := false) -> void:
 	var px := size_px / 2 + int((at.x - _map_centre.x) / _map_zoom)
@@ -235,35 +290,79 @@ func _update_radar() -> void:
 	# the whole reason you zoomed. Half way up at rest, then four, three
 	# and two tenths up at each zoom step.
 	var from_bottom := 0.5 - 0.1 * float(player.fp_zoom)
-	var eye_row := 128.0 * (1.0 - from_bottom)
-	var image := Image.create(128, 128, false, Image.FORMAT_RGB8)
-	for py in 128:
+	# Still finishing the last one (a slow frame rate stretches a build
+	# past the timer): let it, or it would restart forever and never show.
+	if _radar_next_row < 128:
+		return
+	# A new build starts from here and is finished a slice at a time by
+	# step_radar(); the one on screen stays up until it is done.
+	_radar_center = center
+	_radar_yaw = yaw
+	_radar_span = span
+	_radar_eye_row = 128.0 * (1.0 - from_bottom)
+	_radar_half_world = half_world
+	_radar_px.resize(128 * 128)
+	_radar_next_row = 0
+
+## Builds the next RADAR_ROWS_PER_FRAME rows of a radar _update_radar()
+## started, and puts it on screen once the last row is in. Every frame.
+func step_radar() -> void:
+	if _radar_next_row >= 128 or hud.world == null or hud.world.chunks == null:
+		return
+	var center := _radar_center
+	var half_world := _radar_half_world
+	# Washed out on purpose, and built fast on purpose: see MapPixels.
+	var wash := MapPixels.wash_table()
+	var none := MapPixels.rgba(Color(0.06, 0.07, 0.1))
+	var chunks: ChunkView = hud.world.chunks
+	var pixels := _radar_px
+	var last_key := Vector2i(1 << 30, 0)
+	var top := PackedByteArray()
+	var first := _radar_next_row
+	_radar_next_row = mini(first + RADAR_ROWS_PER_FRAME, 128)
+	var o := first * 128
+	for py in range(first, _radar_next_row):
+		var row := MapPixels.radar_row(center, _radar_yaw, _radar_span,
+			_radar_eye_row, py)
 		for px in 128:
-			var off := Vector2(float(px) - 64.0,
-				float(py) - eye_row).rotated(-yaw) * span
-			var wx := int(center.x + off.x)
-			var wz := int(center.z + off.y)
+			var wx := int(row.x + float(px) * row.z)
+			var wz := int(row.y + float(px) * row.w)
 			# Off the edge of the world is BLACK. Both sources will
 			# happily answer for a column that does not exist — the
 			# chunk store hands back border filler, the overview is a
 			# pure function of noise — so the radar drew a whole island
 			# around a 50-block map. Ask the world how big it is first.
-			var block := 0
+			var colour := none
 			if absi(wx) <= half_world and absi(wz) <= half_world:
-				block = hud.world.chunks.top_block(wx, wz)
+				# The chunk's own top map when this client has meshed
+				# it, else the server's coarse overview.
+				var key := Vector2i(wx >> 4, wz >> 4)
+				if key != last_key:
+					last_key = key
+					top = chunks.topmap_of(key)
+				var block := 0
+				if not top.is_empty():
+					block = top.decode_u16((((wz & 15) << 4) | (wx & 15)) << 1)
 				if block <= 0:
 					block = hud.world.overview_block(wx, wz)
-			# WASHED OUT ON PURPOSE. At full colour, with per-block noise
-			# on top, this was a speckled mess you could not read anything
-			# off. The ground is now a low-contrast grey-blue wash — enough
-			# to make out coastlines and buildings — so the only strong
-			# colours on the radar are the players.
-			var color := Color(0.06, 0.07, 0.1)
-			if block > 0:
-				var grey := Blocks.top_color_of(block).get_luminance()
-				color = Color(grey * 0.42 + 0.10, grey * 0.44 + 0.11,
-					grey * 0.48 + 0.14)
-			image.set_pixel(px, py, color)
+				if block > 0 and block < wash.size():
+					colour = wash[block]
+			pixels[o] = colour
+			o += 1
+	if _radar_next_row >= 128:
+		_finish_radar()
+
+## The overlays on a finished radar — storm, players, flags — and onto the
+## screen with it.
+func _finish_radar() -> void:
+	var player := hud._player()
+	if player == null or hud.world == null or hud.world.players == null:
+		return
+	var center := _radar_center
+	var yaw := _radar_yaw
+	var span := _radar_span
+	var eye_row := _radar_eye_row
+	var image := MapPixels.image_of(128, _radar_px)
 	if hud.world.match_phase == "BATTLE" and hud.world.storm_radius > 0.0:
 		var ring: float = hud.world.storm_radius
 		for angle_i in 200:
@@ -305,8 +404,8 @@ func _update_radar() -> void:
 				and fteam < WorldNode.TEAM_COLORS.size() else Color.WHITE
 			_radar_flag(image, center, yaw, fhome, ftint, span, eye_row,
 				bool(entry[2]))
-	_blip(image, center, yaw, player.position, Color.WHITE, true, span, eye_row)
-	_radar.texture = ImageTexture.create_from_image(image)
+	_blip(image, center, yaw, center, Color.WHITE, true, span, eye_row)
+	_show(_radar, image)
 ## A flag on the personal radar: the flag itself where it stands, or a
 ## chevron out at the edge pointing the way when it is off the map.
 ## Everything here is already rotated by `yaw`, so the chevron turns with
