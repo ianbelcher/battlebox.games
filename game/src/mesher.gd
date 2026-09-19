@@ -34,6 +34,24 @@ const H := WorldGen.CHUNK_H
 ## on and dig — the lowered part can be stood on. That is the price of
 ## trying this in the mesher alone, and the reason it is a switch.
 const SMOOTH_CORNERS := true
+
+## ROLLING GROUND. On top of the whole-block ramps above, every shared top
+## corner of open natural ground sits a little below its block's top:
+## anywhere from all of it down to SURFACE_DIP less. Flat ground stops
+## being a floor of tiles and becomes a gently uneven field, without a
+## block moving — it is the same picture-only change as the ramps, so the
+## ground you stand on is still exactly where it was.
+##
+## From smooth noise over the world rather than a coin per corner, so the
+## ground rolls instead of bristling, and skewed toward the top so most of
+## a field is only just off level and the deep dips are the exception.
+## Only corners with nothing but open natural ground around them move —
+## anything built, anything planted, water, and anything with something
+## standing over it holds its corners whole, which is what keeps every
+## join to the rest of the world closed. 0.0 turns it off.
+const SURFACE_DIP := 0.5
+## Blocks across one swell of the noise.
+const DIP_CELL := 4.0
 const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
 	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
 	Blocks.LEAVES, Blocks.LEAVES_DARK, Blocks.LEAVES_LIGHT, Blocks.LEAVES_PINK]
@@ -147,6 +165,12 @@ var _lk_solid := PackedByteArray()
 # slope on each axis — see _surface and _axes.
 var _surface_cache: Dictionary = {}
 var _axes_cache: Dictionary = {}
+## This chunk's origin in world blocks, so the dips line up across chunk
+## borders. And how deep they may go: SURFACE_DIP, unless a test wants
+## the bare shape rule on its own.
+var _wx0 := 0
+var _wz0 := 0
+var dip := SURFACE_DIP
 
 ## THE CUTAWAY LINE. Solid cubes at or above this y go into the "roof"
 ## surface instead of "opaque", so a camera can decline to draw them —
@@ -163,6 +187,8 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	_neighbors = neighbors
 	_surface_cache.clear()
 	_axes_cache.clear()
+	_wx0 = cx * SIZE
+	_wz0 = cz * SIZE
 	# The minimap's block per column, two bytes each like everything else
 	# that holds a block id.
 	var topmap := PackedByteArray()
@@ -308,8 +334,48 @@ func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 				break
 		if top >= 1.0:
 			break
+	if top >= 1.0 and dip > 0.0 and _open_ground_corner(x + cx, y, z + cz):
+		top = 1.0 - _dip_at(_wx0 + x + cx, y, _wz0 + z + cz)
 	_surface_cache[key] = top
 	return top
+
+## May this corner roll? Only if every block that meets it is open natural
+## ground or air, with nothing at all over any of them. One built block,
+## plant, puddle or overhang among the four and the corner stays whole,
+## because that neighbour draws itself square and would part from the
+## ground along the join. (vx, vz) is the vertex, not a block.
+func _open_ground_corner(vx: int, y: int, vz: int) -> bool:
+	for nx: int in [vx - 1, vx]:
+		for nz: int in [vz - 1, vz]:
+			if _block_at(nx, y + 1, nz) != Blocks.AIR:
+				return false
+			var block := _block_at(nx, y, nz)
+			if block == Blocks.AIR:
+				continue
+			if not _firm_at(nx, y, nz) or not (block in SMOOTH_BLOCKS):
+				return false
+	return true
+
+## How far below whole this world vertex sits, 0 .. dip. Value noise on a
+## DIP_CELL lattice (smoothstepped, so it has no creases) with a little of
+## the vertex's own hash on top, squared so most of the ground stays near
+## the top and only some of it sinks the whole way.
+func _dip_at(wx: int, y: int, wz: int) -> float:
+	var fx := float(wx) / DIP_CELL
+	var fz := float(wz) / DIP_CELL
+	var gx := floori(fx)
+	var gz := floori(fz)
+	var tx := fx - float(gx)
+	var tz := fz - float(gz)
+	tx = tx * tx * (3.0 - 2.0 * tx)
+	tz = tz * tz * (3.0 - 2.0 * tz)
+	var salt := 7919 + y * 13
+	var n := lerpf(
+		lerpf(WorldGen.hash01(gx, gz, salt), WorldGen.hash01(gx + 1, gz, salt), tx),
+		lerpf(WorldGen.hash01(gx, gz + 1, salt), WorldGen.hash01(gx + 1, gz + 1, salt), tx),
+		tz)
+	n = clampf(n * 0.8 + WorldGen.hash01(wx, wz, salt + 1) * 0.2, 0.0, 1.0)
+	return dip * n * n
 
 ## One block of ground's own view of one of its corners, 1 up or 0 down.
 func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
@@ -413,6 +479,22 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 	var d13 := absf(h[1] - h[3])
 	var through_02 := d02 < d13 if d02 != d13 else h[0] + h[2] >= h[1] + h[3]
 	var tris: Array = [[0, 1, 2], [0, 2, 3]] if through_02 else [[1, 2, 3], [1, 3, 0]]
+	# The same corner shading a cube's top gets. Shaped tops had none,
+	# which did not show while they were only the edges of steps — but
+	# with rolling ground most of a field is shaped, and ground running up
+	# to a wall lost the dark line along its foot.
+	var top_cols: Array = []
+	for i in 4:
+		var c: Vector2 = CORNER_XZ[i]
+		var sx := 1 if c.x > 0.5 else -1
+		var sz := 1 if c.y > 0.5 else -1
+		var s1 := _occludes(x + sx, y + 1, z)
+		var s2 := _occludes(x, y + 1, z + sz)
+		var sc := _occludes(x + sx, y + 1, z + sz)
+		var ao := 3.0 if (s1 and s2) else float(int(s1) + int(s2) + int(sc))
+		var shade := 1.0 - ao_step * ao
+		top_cols.append(Color(top_color.r * shade, top_color.g * shade,
+			top_color.b * shade, top_color.a))
 	for t: Array in tris:
 		var a: Vector3 = p[t[0]]
 		var bpt: Vector3 = p[t[1]]
@@ -422,7 +504,8 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 			n = -n
 		# Lit between a side and a top, by how far it tips.
 		var bright := lerpf((SHADE_X + SHADE_Z) * 0.5, SHADE_TOP, clampf(n.y, 0.0, 1.0)) * jitter
-		_tri("opaque", [a, bpt, c], n, [top_color, top_color, top_color], bright, emit)
+		_tri("opaque", [a, bpt, c], n, [top_cols[t[0]], top_cols[t[1]], top_cols[t[2]]],
+			bright, emit)
 	for side in 4:
 		var step: Vector2i = SIDE_STEP[side]
 		if _is_opaque_at(x + step.x, y, z + step.y):

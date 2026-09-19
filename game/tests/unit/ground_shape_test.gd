@@ -24,9 +24,12 @@ func _ground(height: Callable) -> PackedByteArray:
 				data.encode_u16(_at(x, y, z), Blocks.GRASS)
 	return data
 
-func _shaped(data: PackedByteArray) -> Mesher:
+## The bare shape rule — whole-block ramps, no rolling — unless `dip`
+## says otherwise. The rolling is tested on its own at the bottom.
+func _shaped(data: PackedByteArray, dip := 0.0, neighbors := {}, cx := 0) -> Mesher:
 	var mesher := Mesher.new()
-	mesher.build(data, {}, 0, 0)
+	mesher.dip = dip
+	mesher.build(data, neighbors, cx, 0)
 	return mesher
 
 ## A hillside rising one block per step diagonally: solid at level y
@@ -117,7 +120,12 @@ func test_the_ground_has_no_holes_in_it() -> void:
 	data[_at(12, 4, 12)] = Blocks.PLANKS
 	data[_at(10, 3, 10)] = Blocks.TALL_GRASS
 	data[_at(5, 1, 5)] = Blocks.AIR
-	var built: Dictionary = Mesher.new().build(data, {}, 0, 0)
+	_equal_no_holes(data, 0.0)
+
+func _equal_no_holes(data: PackedByteArray, dip: float) -> void:
+	var mesher := Mesher.new()
+	mesher.dip = dip
+	var built: Dictionary = mesher.build(data, {}, 0, 0)
 	var arrays: Array = built["opaque"]
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var index: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
@@ -134,4 +142,70 @@ func test_the_ground_has_no_holes_in_it() -> void:
 		var back := "%s>%s" % [parts[1], parts[0]]
 		if int(edges.get(back, 0)) != int(edges[key]):
 			open.append(key)
-	equal(open.size(), 0, "edges with nothing on the other side: %s" % [open.slice(0, 8)])
+	equal(open.size(), 0, "edges with nothing on the other side (dip %.2f): %s"
+		% [dip, open.slice(0, 8)])
+
+# ---- rolling ground (Mesher.SURFACE_DIP) ---------------------------------
+
+func test_rolling_ground_stays_within_half_a_block_and_actually_rolls() -> void:
+	var m := _shaped(_ground(func(_x: int, _z: int) -> int: return 3), Mesher.SURFACE_DIP)
+	var lowest := 1.0
+	for z in range(1, SIZE - 1):
+		for x in range(1, SIZE - 1):
+			for c in m._heights(x, 2, z):
+				check(c >= 1.0 - Mesher.SURFACE_DIP - 0.0001 and c <= 1.0,
+					"a corner of open ground is between %.2f and 1: %s at (%d,%d)"
+					% [1.0 - Mesher.SURFACE_DIP, c, x, z])
+				lowest = minf(lowest, c)
+	check(lowest < 0.9, "a field of open ground is not flat any more (lowest %.2f)" % lowest)
+
+func test_rolling_neighbours_never_disagree_about_a_shared_vertex() -> void:
+	var m := _shaped(_ground(_diagonal), Mesher.SURFACE_DIP)
+	var seams := 0
+	for z in range(1, SIZE - 2):
+		for x in range(1, SIZE - 2):
+			var y := _diagonal(x, z) - 1
+			var h := m._heights(x, y, z)
+			if _diagonal(x + 1, z) - 1 == y:
+				var e := m._heights(x + 1, y, z)
+				if h[1] != e[0] or h[2] != e[3]:
+					seams += 1
+			if _diagonal(x, z + 1) - 1 == y:
+				var s := m._heights(x, y, z + 1)
+				if h[3] != s[0] or h[2] != s[1]:
+					seams += 1
+	equal(seams, 0, "rolling ground still agrees along every shared edge")
+
+func test_rolling_ground_has_no_holes_in_it() -> void:
+	var data := _ground(_diagonal)
+	data[_at(3, 1, 12)] = Blocks.GLOWSTONE
+	data[_at(9, 2, 3)] = Blocks.GLOWSTONE
+	data[_at(12, 4, 12)] = Blocks.PLANKS
+	data[_at(10, 3, 10)] = Blocks.TALL_GRASS
+	data[_at(5, 1, 5)] = Blocks.AIR
+	data[_at(2, 1, 2)] = Blocks.WATER
+	_equal_no_holes(data, Mesher.SURFACE_DIP)
+
+func test_anything_built_planted_or_wet_keeps_its_corners_whole() -> void:
+	var data := _ground(func(_x: int, _z: int) -> int: return 3)
+	data[_at(8, 3, 8)] = Blocks.PLANKS        # a block built on the field
+	data[_at(4, 3, 4)] = Blocks.TALL_GRASS    # a plant
+	data[_at(12, 2, 12)] = Blocks.WATER       # a puddle set into it
+	var m := _shaped(data, Mesher.SURFACE_DIP)
+	# The corners of the four blocks around each thing, at the vertices
+	# they share with it.
+	equal(m._heights(7, 2, 8)[1], 1.0, "beside the planks, the shared corner is whole")
+	equal(m._heights(7, 2, 8)[2], 1.0, "...both of them")
+	equal(m._heights(3, 2, 4)[1], 1.0, "beside the plant's block, whole")
+	equal(m._heights(11, 2, 12)[1], 1.0, "beside the water, whole")
+	equal(m._heights(11, 2, 12)[2], 1.0, "...both of them")
+
+func test_rolling_ground_lines_up_across_a_chunk_border() -> void:
+	var data := _ground(func(_x: int, _z: int) -> int: return 3)
+	var west := _shaped(data, Mesher.SURFACE_DIP, {Vector2i(1, 0): data}, 0)
+	var east := _shaped(data, Mesher.SURFACE_DIP, {Vector2i(-1, 0): data}, 1)
+	for z in range(1, SIZE - 1):
+		var a := west._heights(SIZE - 1, 2, z)
+		var b := east._heights(0, 2, z)
+		equal(a[1], b[0], "the border vertex at z=%d reads the same from both chunks" % z)
+		equal(a[2], b[3], "...and its southern neighbour")
