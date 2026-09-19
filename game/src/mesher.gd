@@ -52,6 +52,22 @@ const SMOOTH_CORNERS := true
 const SURFACE_DIP := 0.5
 ## Blocks across one swell of the noise.
 const DIP_CELL := 4.0
+
+## RAMP FEET. A one-block step is drawn as a ramp down to the ground it
+## lands on, and every ramp in the world met that ground at exactly the
+## block's bottom — so every one of them had precisely the same slope, and
+## the join at the bottom was a crease. The foot of a ramp now stands a
+## little proud of the ground below it, up to RAMP_FOOT of a block: the
+## ramp is shallower and the flat ground curves up into it.
+##
+## THE FOOT IS A VERTEX THE GROUND SHARES, like every other corner here,
+## and the two sides of it sit at different levels: the ramp reads it as
+## its own bottom corner, the ground beneath reads it as its own TOP. So
+## the lift is a function of where the junction is in the world, which
+## both of them work out for themselves and agree on, and the ground below
+## carries a corner ABOVE its own block — the one place in here that
+## happens. 0.0 turns it off.
+const RAMP_FOOT := 0.3
 const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
 	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
 	Blocks.LEAVES, Blocks.LEAVES_DARK, Blocks.LEAVES_LIGHT, Blocks.LEAVES_PINK]
@@ -189,6 +205,13 @@ var _axes_cache: Dictionary = {}
 var _wx0 := 0
 var _wz0 := 0
 var dip := SURFACE_DIP
+## How far a ramp's foot may stand above the ground it lands on. A test
+## wanting the bare shape rule sets both this and `dip` to zero.
+var foot := RAMP_FOOT
+## The plain rule's answer per vertex — a whole block up or down — before
+## any rolling or lifting. Kept apart from _surface_cache because the
+## ground under a ramp has to ask what the vertex ABOVE it is.
+var _base_cache: Dictionary = {}
 
 ## THE CUTAWAY LINE. Solid cubes at or above this y go into the "roof"
 ## surface instead of "opaque", so a camera can decline to draw them —
@@ -204,6 +227,7 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	_data = data
 	_neighbors = neighbors
 	_surface_cache.clear()
+	_base_cache.clear()
 	_axes_cache.clear()
 	_wx0 = cx * SIZE
 	_wz0 = cz * SIZE
@@ -280,7 +304,7 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 				var shaped := false
 				if _smooth(block, x, y, z):
 					var h := _heights(x, y, z)
-					if h[0] < 1.0 or h[1] < 1.0 or h[2] < 1.0 or h[3] < 1.0:
+					if h[0] != 1.0 or h[1] != 1.0 or h[2] != 1.0 or h[3] != 1.0:
 						_add_shaped(draw, x, y, z, cx, cz, h)
 						shaped = true
 				if not shaped:
@@ -365,6 +389,38 @@ func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 	var key := Vector3i(x + cx, y, z + cz)
 	if _surface_cache.has(key):
 		return _surface_cache[key]
+	var vx := x + cx
+	var vz := z + cz
+	var top := _surface_base(x, y, z, cx, cz)
+	if top <= 0.0:
+		# The foot of a ramp, seen from the ramp.
+		top = _foot_lift(vx, y, vz)
+	elif _has_ground(vx, y + 1, vz) and _surface_base(x, y + 1, z, cx, cz) <= 0.0:
+		# The same junction, seen from the ground the ramp lands on: the
+		# vertex one level up is a foot, and this is that very point from
+		# underneath, so it carries the same lift — above this block's own
+		# top, which is why a shaped block may have a corner over 1.
+		top = 1.0 + _foot_lift(vx, y + 1, vz)
+	elif dip > 0.0 and _open_ground_corner(vx, y, vz):
+		top = 1.0 - _dip_at(_wx0 + vx, y, _wz0 + vz)
+	_surface_cache[key] = top
+	return top
+
+## Is any of the four blocks meeting this vertex at this level solid? Open
+## sky one level up is not a ramp landing here, and reads as a base of
+## zero just as a ramp's foot does.
+func _has_ground(vx: int, y: int, vz: int) -> bool:
+	for nx: int in [vx - 1, vx]:
+		for nz: int in [vz - 1, vz]:
+			if _firm_at(nx, y, nz):
+				return true
+	return false
+
+## The plain rule, a whole block up or down: see the note on _surface.
+func _surface_base(x: int, y: int, z: int, cx: int, cz: int) -> float:
+	var key := Vector3i(x + cx, y, z + cz)
+	if _base_cache.has(key):
+		return _base_cache[key]
 	var top := 0.0
 	for dx: int in [cx - 1, cx]:
 		for dz: int in [cz - 1, cz]:
@@ -382,10 +438,49 @@ func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 				break
 		if top >= 1.0:
 			break
-	if top >= 1.0 and dip > 0.0 and _open_ground_corner(x + cx, y, z + cz):
-		top = 1.0 - _dip_at(_wx0 + x + cx, y, _wz0 + z + cz)
-	_surface_cache[key] = top
+	_base_cache[key] = top
 	return top
+
+## How far a ramp landing on this junction stands above the ground below
+## it, 0 .. foot. (vx, vz) is the vertex and `y` the level the ramp's
+## bottom is at — the level whose base height here is 0.
+##
+## Nothing but open natural ground either side of the junction, the same
+## rule the rolling uses and for the same reason: a neighbour that draws
+## itself square would part from ground that had lifted under it. Every
+## block still standing on the junction from above keeps it flat, and the
+## ground below only lifts where it is the surface, so a corner buried
+## under the ramp is left alone.
+func _foot_lift(vx: int, y: int, vz: int) -> float:
+	if foot <= 0.0 or y <= 0:
+		return 0.0
+	var ramp := false
+	for nx: int in [vx - 1, vx]:
+		for nz: int in [vz - 1, vz]:
+			if _block_at(nx, y + 1, nz) != Blocks.AIR:
+				return 0.0
+			var here := _block_at(nx, y, nz)
+			if here != Blocks.AIR:
+				# The ramp itself, or the ground it runs along.
+				if not _firm_at(nx, y, nz) or _smoothable()[here] != 1:
+					return 0.0
+				ramp = true
+			# GROUND ALL THE WAY UNDER THE JUNCTION, natural and unbroken.
+			# Lifting it lifts the floor of everything standing on it, and
+			# a block whose top corner has risen but which is drawn as a
+			# plain cube — because something sits on top of it — still
+			# draws its walls square. That only shows where such a block
+			# has a wall to draw, which is exactly where the ground below
+			# the junction breaks: the head of a two-block drop. So a foot
+			# is only lifted where the ground beneath it is continuous.
+			var under := _block_at(nx, y - 1, nz)
+			if under == Blocks.AIR or not _firm_at(nx, y - 1, nz) \
+					or _smoothable()[under] != 1:
+				return 0.0
+	if not ramp:
+		return 0.0     # nothing to run down from
+	# Its own swell of the noise, well away from the rolling's.
+	return foot * _swell(_wx0 + vx, y + 977, _wz0 + vz)
 
 ## May this corner roll? Only if every block that meets it is open natural
 ## ground or air, with nothing at all over any of them. One built block,
@@ -404,11 +499,15 @@ func _open_ground_corner(vx: int, y: int, vz: int) -> bool:
 				return false
 	return true
 
-## How far below whole this world vertex sits, 0 .. dip. Value noise on a
-## DIP_CELL lattice (smoothstepped, so it has no creases) with a little of
-## the vertex's own hash on top, squared so most of the ground stays near
-## the top and only some of it sinks the whole way.
+## How far below whole this world vertex sits, 0 .. dip.
 func _dip_at(wx: int, y: int, wz: int) -> float:
+	return dip * _swell(wx, y, wz)
+
+## The shape of both the rolling and the ramp feet, 0 .. 1. Value noise on
+## a DIP_CELL lattice (smoothstepped, so it has no creases) with a little
+## of the vertex's own hash on top, squared so most of the ground stays
+## near the top and only some of it moves the whole way.
+func _swell(wx: int, y: int, wz: int) -> float:
 	var fx := float(wx) / DIP_CELL
 	var fz := float(wz) / DIP_CELL
 	var gx := floori(fx)
@@ -423,7 +522,7 @@ func _dip_at(wx: int, y: int, wz: int) -> float:
 		lerpf(WorldGen.hash01(gx, gz + 1, salt), WorldGen.hash01(gx + 1, gz + 1, salt), tx),
 		tz)
 	n = clampf(n * 0.8 + WorldGen.hash01(wx, wz, salt + 1) * 0.2, 0.0, 1.0)
-	return dip * n * n
+	return n * n
 
 ## One block of ground's own view of one of its corners, 1 up or 0 down.
 func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
@@ -459,33 +558,41 @@ const SIDE_CORNERS := [[0, 1], [1, 2], [2, 3], [3, 0]]
 const SIDE_STEP := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]
 const CORNER_XZ := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
 
-## One side of a block, against air: the part of it under the ground.
-## The surface crosses the face as a straight line from the height at
-## one corner to the height at the other — unclamped, so it may start
-## below the block's bottom or run off above its top — and the face is
-## whatever lies between the bottom, the top and that line. Coloured from
-## the block's side colour at the ground to its top colour at the top, so
-## a cut runs green down to a brown foot rather than brown all over.
-func _side_face(x: int, y: int, z: int, side: int, top: Vector2,
+## One side of a block, against air: the part of it between the ground it
+## stands on and the ground on top of it. Both cross the face as straight
+## lines — from the height at one corner to the height at the other — and
+## the face is whatever lies between them. Neither is cut off at the
+## block's own bottom or top: where a ramp lands, the junction is lifted
+## (see _foot_lift), so the ground below carries a corner above its own
+## block and the block above stands on ground higher than its floor. A
+## wall that stopped at the block would leave that strip open.
+##
+## Coloured from the block's side colour at the ground to its top colour
+## at the top, so a cut runs green down to a brown foot rather than brown
+## all over.
+func _side_face(x: int, y: int, z: int, side: int, top: Vector2, bottom: Vector2,
 		base_color: Color, top_color: Color, brightness: float, emit: float) -> void:
-	if top.x <= 0.0 and top.y <= 0.0:
+	if top.x <= bottom.x and top.y <= bottom.y:
 		return
 	var d := top.y - top.x
+	var db := bottom.y - bottom.x
+	# Where the two lines cross, if they do inside the face: past that the
+	# ground above has sunk below the ground beneath and there is nothing
+	# of the block left to draw.
 	var s0 := 0.0
 	var s1 := 1.0
-	if top.x <= 0.0:
-		s0 = -top.x / d
-	elif top.y <= 0.0:
-		s1 = -top.x / d
-	# Around the face: along the bottom, up the far end, back along the
-	# surface line (with a bend where it runs off the top), down the near end.
-	var pts: Array = [Vector2(s0, 0), Vector2(s1, 0),
-		Vector2(s1, minf(1.0, top.x + d * s1))]
-	if d != 0.0:
-		var sk := (1.0 - top.x) / d
-		if sk > s0 and sk < s1:
-			pts.append(Vector2(sk, 1))
-	pts.append(Vector2(s0, minf(1.0, top.x + d * s0)))
+	var gap := d - db
+	if gap != 0.0:
+		var cross := (bottom.x - top.x) / gap
+		if cross > 0.0 and cross < 1.0:
+			if top.x <= bottom.x:
+				s0 = cross
+			else:
+				s1 = cross
+	# Around the face: along the ground below, up the far end, back along
+	# the surface line, down the near end.
+	var pts: Array = [Vector2(s0, bottom.x + db * s0), Vector2(s1, bottom.x + db * s1),
+		Vector2(s1, top.x + d * s1), Vector2(s0, top.x + d * s0)]
 	var pair: Array = SIDE_CORNERS[side]
 	var c0: Vector2 = CORNER_XZ[pair[0]]
 	var c1: Vector2 = CORNER_XZ[pair[1]]
@@ -519,6 +626,16 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 	for i in 4:
 		var c: Vector2 = CORNER_XZ[i]
 		p.append(o + Vector3(c.x, h[i], c.y))
+	# WHAT THIS BLOCK STANDS ON. Normally its own bottom, flat — but where
+	# a ramp's foot is lifted, the ground under it is lifted with it (one
+	# junction, one height), so the block's floor follows that surface up.
+	# Drawing from a flat bottom left the lifted ground poking through the
+	# ramp's own wall.
+	var b := PackedFloat32Array([0.0, 0.0, 0.0, 0.0])
+	if foot > 0.0 and y > 0:
+		for i in 4:
+			var c: Vector2 = CORNER_XZ[i]
+			b[i] = maxf(0.0, _surface(x, y - 1, z, int(c.x), int(c.y)) - 1.0)
 	# Split through the diagonal whose two corners are LEVEL, so a block
 	# with one corner out of line is a flat triangle and a sloped one —
 	# flat from the midline — rather than a ridge from that corner to
@@ -561,11 +678,18 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		var pair: Array = SIDE_CORNERS[side]
 		var shade := SHADE_Z if side % 2 == 0 else SHADE_X
 		_side_face(x, y, z, side, Vector2(h[pair[0]], h[pair[1]]),
-			base_color, top_color, shade * jitter, emit)
+			Vector2(b[pair[0]], b[pair[1]]), base_color, top_color,
+			shade * jitter, emit)
 	if not _is_opaque_at(x, y - 1, z):
-		_tri("opaque", [o, o + Vector3(1, 0, 0), o + Vector3(1, 0, 1)], Vector3.DOWN,
+		# Through the same four corners as the sides start from, or the
+		# underside would part from them.
+		var u: Array = []
+		for i in 4:
+			var c: Vector2 = CORNER_XZ[i]
+			u.append(o + Vector3(c.x, b[i], c.y))
+		_tri("opaque", [u[0], u[1], u[2]], Vector3.DOWN,
 			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
-		_tri("opaque", [o, o + Vector3(1, 0, 1), o + Vector3(0, 0, 1)], Vector3.DOWN,
+		_tri("opaque", [u[0], u[2], u[3]], Vector3.DOWN,
 			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
 
 ## LAMPS CLOSE TOGETHER BECOME ONE, and the strongest come first. A dense

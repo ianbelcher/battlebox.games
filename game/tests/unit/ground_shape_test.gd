@@ -26,9 +26,11 @@ func _ground(height: Callable) -> PackedByteArray:
 
 ## The bare shape rule — whole-block ramps, no rolling — unless `dip`
 ## says otherwise. The rolling is tested on its own at the bottom.
-func _shaped(data: PackedByteArray, dip := 0.0, neighbors := {}, cx := 0) -> Mesher:
+func _shaped(data: PackedByteArray, dip := 0.0, neighbors := {}, cx := 0,
+		foot := 0.0) -> Mesher:
 	var mesher := Mesher.new()
 	mesher.dip = dip
+	mesher.foot = foot
 	mesher.build(data, neighbors, cx, 0)
 	return mesher
 
@@ -122,9 +124,10 @@ func test_the_ground_has_no_holes_in_it() -> void:
 	data[_at(5, 1, 5)] = Blocks.AIR
 	_equal_no_holes(data, 0.0)
 
-func _equal_no_holes(data: PackedByteArray, dip: float) -> void:
+func _equal_no_holes(data: PackedByteArray, dip: float, foot := 0.0) -> void:
 	var mesher := Mesher.new()
 	mesher.dip = dip
+	mesher.foot = foot
 	var built: Dictionary = mesher.build(data, {}, 0, 0)
 	var arrays: Array = built["opaque"]
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
@@ -209,3 +212,76 @@ func test_rolling_ground_lines_up_across_a_chunk_border() -> void:
 		var b := east._heights(0, 2, z)
 		equal(a[1], b[0], "the border vertex at z=%d reads the same from both chunks" % z)
 		equal(a[2], b[3], "...and its southern neighbour")
+
+# ---- ramp feet (Mesher.RAMP_FOOT) ---------------------------------------
+
+func test_a_ramp_foot_stands_proud_of_the_ground_it_lands_on() -> void:
+	# A straight step: ground at level 1 to the south, level 0 to the
+	# north, so every block along z=8 is a ramp down to the north.
+	var data := _ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1)
+	var m := _shaped(data, 0.0, {}, 0, Mesher.RAMP_FOOT)
+	var lifted := 0
+	for x in range(1, SIZE - 1):
+		var ramp := m._heights(x, 1, 8)
+		for c in [ramp[0], ramp[1]]:
+			check(c >= 0.0 and c <= Mesher.RAMP_FOOT + 0.0001,
+				"a ramp's foot is between 0 and %.2f: %s" % [Mesher.RAMP_FOOT, c])
+			if c > 0.01:
+				lifted += 1
+	check(lifted > 0, "some ramps land above the ground below them")
+
+func test_the_ground_below_carries_the_foot_at_the_same_height() -> void:
+	var data := _ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1)
+	var m := _shaped(data, 0.0, {}, 0, Mesher.RAMP_FOOT)
+	for x in range(1, SIZE - 1):
+		# The ramp at (x, level 1, z=8) and the flat ground at (x, level 0,
+		# z=7) share the vertices along z=8. One junction, one height.
+		var ramp := m._heights(x, 1, 8)
+		var flat := m._heights(x, 0, 7)
+		equal(1.0 + ramp[0], 0.0 + flat[3], "the west end of the junction agrees")
+		equal(1.0 + ramp[1], 0.0 + flat[2], "and the east end")
+		check(flat[3] >= 1.0, "the ground below carries its corner above its own block")
+
+func test_ramp_feet_leave_no_holes() -> void:
+	var data := _ground(_diagonal)
+	data[_at(3, 1, 12)] = Blocks.GLOWSTONE
+	data[_at(9, 2, 3)] = Blocks.GLOWSTONE
+	data[_at(12, 4, 12)] = Blocks.PLANKS
+	data[_at(10, 3, 10)] = Blocks.TALL_GRASS
+	data[_at(5, 1, 5)] = Blocks.AIR
+	data[_at(2, 1, 2)] = Blocks.WATER
+	_equal_no_holes(data, 0.0, Mesher.RAMP_FOOT)
+	# ...and with the rolling on at the same time, which is how it ships.
+	_equal_no_holes(data, Mesher.SURFACE_DIP, Mesher.RAMP_FOOT)
+
+func test_a_ramp_landing_on_anything_built_keeps_its_foot_down() -> void:
+	# The same step, with a plank floor laid along the bottom of it.
+	var data := _ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1)
+	for x in SIZE:
+		data[_at(x, 0, 7)] = Blocks.PLANKS
+	var m := _shaped(data, 0.0, {}, 0, Mesher.RAMP_FOOT)
+	for x in range(2, SIZE - 2):
+		var ramp := m._heights(x, 1, 8)
+		equal(ramp[0], 0.0, "a ramp landing on a built floor keeps its foot down")
+		equal(ramp[1], 0.0, "...at both ends")
+
+func test_ramp_feet_line_up_across_a_chunk_border() -> void:
+	var data := _ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1)
+	var west := _shaped(data, 0.0, {Vector2i(1, 0): data}, 0, Mesher.RAMP_FOOT)
+	var east := _shaped(data, 0.0, {Vector2i(-1, 0): data}, 1, Mesher.RAMP_FOOT)
+	var a := west._heights(SIZE - 1, 1, 8)
+	var b := east._heights(0, 1, 8)
+	equal(a[1], b[0], "the border vertex reads the same from both chunks")
+
+func test_the_head_of_a_two_block_drop_keeps_its_foot_down() -> void:
+	# Ground at level 2 to the south, level 0 to the north: the ramp at
+	# the edge has a block under it whose own wall shows in the drop, and
+	# that block is drawn as a plain cube. Lifting the junction there
+	# would open a hole in the cliff, so it stays down.
+	var data := _ground(func(_x: int, z: int) -> int: return 3 if z >= 8 else 1)
+	var m := _shaped(data, 0.0, {}, 0, Mesher.RAMP_FOOT)
+	for x in range(2, SIZE - 2):
+		var ramp := m._heights(x, 2, 8)
+		equal(ramp[0], 0.0, "the foot over a two-block drop stays down")
+		equal(ramp[1], 0.0, "...at both ends")
+	_equal_no_holes(data, Mesher.SURFACE_DIP, Mesher.RAMP_FOOT)
