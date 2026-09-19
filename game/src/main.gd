@@ -44,6 +44,12 @@ var _minimap: TextureRect
 var _loading_label: Label
 
 var _prev_pressed: Dictionary = {}
+## Only fresh presses join — see join_gate.gd for the grown-up who kept
+## getting a seat for setting the game up.
+var _join_gate := JoinGate.new()
+## Whether joining was closed (a menu up) on the last poll, so the frame it
+## reopens can make everything still held be released first.
+var _join_was_blocked := false
 var _leave_hold: Dictionary = {}
 var _in_world := false
 ## Connected, but the world screen is not up yet: the first chunks are
@@ -779,26 +785,18 @@ func _arrive() -> void:
 			Game.join_local(input as InputSlot)
 		_split.update_layout()
 		_news("Back in the world")
-	elif _should_seat_the_keyboard():
-		# STRAIGHT INTO THE GAME. Pressing Play and then being asked to
-		# "press SPACE to jump in" is being asked to join twice; no game
-		# of this kind does that. The person at the keyboard is seated
-		# the moment the world is up. Controllers still hop in with Ⓐ —
-		# and when one is plugged in this stays out of the way, because
-		# then the keyboard may belong to nobody and the prompt is for
-		# whoever is holding the pad.
-		Game.join_local(InputSlot.new(InputSlot.Kind.KEYBOARD_WASD))
-		_split.update_layout()
-
-func _should_seat_the_keyboard() -> bool:
-	if not Game.local_inputs.is_empty():
-		return false
-	var scripted := OS.get_environment("WORLD_AUTOTEST")
-	if scripted.is_valid_int() and scripted.to_int() > 0:
-		return false
-	if not OS.get_environment("WORLD_FAKE_PADS").is_empty():
-		return false
-	return Input.get_connected_joypads().is_empty()
+	# NOBODY IS SEATED FOR THEM. The keyboard used to be, the moment the
+	# world was up, whenever no controller was plugged in — on the idea
+	# that pressing Play and then "Jump in" is joining twice. At a table
+	# of split-screen kids it was the wrong seat: the grown-up sets the
+	# game up on the keyboard, a pad that is asleep or not enumerated yet
+	# reads as "no controllers", and the keyboard took player one. Then it
+	# had to be kicked before the child holding the pad could get in. The
+	# "Jump in" card now always comes up, and each device takes a seat by
+	# pressing its own button: Space on the keyboard, Ⓐ on a pad. And
+	# whatever was pressed to get here — Play, often pressed again while
+	# the world loads — may still be down; it is not a join (JoinGate).
+	_join_gate.hold_all()
 
 ## "Loading BattleBox… 38 of 90", as the chunks land.
 func _refresh_loading() -> void:
@@ -1417,17 +1415,32 @@ func _poll_join_leave(delta: float) -> void:
 	# Unclaimed devices hop in with A — but only devices that have proven
 	# they're a real separate controller (see _pad_join_eligible), never
 	# while a menu is open, one join per press.
-	var menu_open := _split != null and _split.any_menu_open()
+	#
+	# The WORLD menu and the final table count as menus too. The world menu
+	# is driven from the keyboard, and Space presses its focused buttons;
+	# the table is dismissed with Space or Ⓐ. Before they counted, each of
+	# those presses also sat whoever made it down as a player.
+	var menu_open := (_split != null and _split.any_menu_open()) \
+		or (_world_menu != null and _world_menu.visible) \
+		or is_instance_valid(final_scores.panel)
+	if _join_was_blocked and not menu_open:
+		# A menu can shut on the very press that would otherwise join
+		# (input events are handled before this poll), so the press that
+		# closed it has to be released before it counts.
+		_join_gate.hold_all()
+	_join_was_blocked = menu_open
 	for slot: InputSlot in InputSlot.candidate_slots():
 		var key := slot.device_key()
 		if _claimed_keys().has(key):
 			continue
 		var eligible := _pad_join_eligible(slot)
-		# Rising edge of "pressed AND eligible": a fresh press joins at
+		# Rising edge of "fresh press AND eligible": a fresh press joins at
 		# once when the pad has already proven itself, and a HELD press
 		# joins the moment eligibility arrives (a brand-new second
-		# controller proves divergence during the press itself).
-		var wants_join := slot.is_primary_pressed() and eligible and not menu_open
+		# controller proves divergence during the press itself). A press
+		# left over from the lobby or a menu never counts — JoinGate.
+		var fresh := _join_gate.press_counts(key, slot.is_primary_pressed(), menu_open)
+		var wants_join := fresh and eligible
 		if wants_join and not _prev_pressed.get(key, false) \
 				and Time.get_ticks_msec() - _last_join_ms > 700:
 			_last_join_ms = Time.get_ticks_msec()

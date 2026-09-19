@@ -149,10 +149,11 @@ func _add_cell(slot: int, frac: Rect2) -> void:
 		"size": ZOOM_SIZES[DEFAULT_ZOOM], "prev_rot": 0, "prev_zoom": 0,
 		"fp": true, "prev_view": false, "fp_zoom": 0})
 
-## Only ever seen with a controller plugged in — the keyboard player is
-## seated the moment the world is up (Main._arrive) — or after everybody
-## on this machine has left. So it is a card in the game's own voice
-## rather than a line of outlined white text: what to press, on what.
+## The first thing on screen in every game: nobody is seated for them
+## (Main._arrive), each keyboard or pad joins by pressing its own button.
+## Also what comes back after everybody on this machine has left. So it is
+## a card in the game's own voice rather than a line of outlined white
+## text: what to press, on what.
 func _spectator_prompt() -> Control:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
