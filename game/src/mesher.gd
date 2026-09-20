@@ -70,18 +70,22 @@ const SMOOTH_CORNERS := true
 ## their own amount and it tips along its length as well as down; and
 ## the horizontal lines of a cliff stop being ruler-straight.
 ##
-## From smooth noise over the world so the ground rolls rather than
-## bristles, worked out from the point's own place in the world, which is
-## what makes two chunks meshed on different threads agree about the seam
-## between them. 0.0 turns the whole thing off.
+## EVERY CORNER GETS ITS OWN NUMBER, hashed from its own place in the
+## world. Not smooth noise: that was the first attempt, and neighbouring
+## corners came out within seven hundredths of a block of each other, so
+## whole hillsides sank together, kept their shape exactly, and the whole
+## thing read as "the slightest drop". What is seen is not how far a
+## corner falls, it is how far it falls COMPARED TO THE ONE NEXT TO IT.
+##
+## Being its own place in the world is also what makes two chunks meshed
+## on different threads agree about the seam between them. 0.0 turns the
+## whole thing off.
 ##
 ## It is the one thing in the game where what you see is not exactly
 ## where you stand: the ground is drawn up to this far below the block
 ## you are actually standing on. That is the price of doing it in the
 ## mesher alone, and why it stops well short of a whole block.
 const DROP := 0.6
-## Blocks across one swell of the noise.
-const DIP_CELL := 4.0
 const SWELL_SALT := 7919
 const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
 	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
@@ -229,25 +233,6 @@ var drop := DROP
 const SPAN := SIZE + 1
 var _drop_lut := PackedFloat32Array()
 var _drop_done := PackedByteArray()
-## And the noise, which varies with HEIGHT as well as across the map —
-## every level of a cliff gets its own offset, or a wall of blocks moves
-## as one piece and looks exactly as square as it did before.
-##
-## Smooth in all three directions, from a lattice of its own: DIP_CELL
-## blocks across and SWELL_RISE high, trilinear between its corners. So a
-## cliff face erodes in bands rather than flickering block to block, and
-## a point and the one above it are related instead of independent.
-##
-## Its corners are the only thing hashed, and there are a few hundred of
-## them for a whole chunk against tens of thousands of lattice points —
-## which is what makes height-varying noise affordable at all. The first
-## attempt hashed per point and cost forty milliseconds a chunk.
-const SWELL_RISE := 3.0
-const CELL_SPAN := 8
-var _noise_lut := PackedFloat32Array()
-var _noise_done := PackedByteArray()
-var _gx0 := 0
-var _gz0 := 0
 
 ## THE CUTAWAY LINE. Solid cubes at or above this y go into the "roof"
 ## surface instead of "opaque", so a camera can decline to draw them —
@@ -267,13 +252,8 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	if _drop_lut.is_empty():
 		_drop_lut.resize(SPAN * SPAN * (H + 1))
 		_drop_done.resize(SPAN * SPAN * (H + 1))
-		_noise_lut.resize(CELL_SPAN * CELL_SPAN * (int(H / SWELL_RISE) + 3))
-		_noise_done.resize(CELL_SPAN * CELL_SPAN * (int(H / SWELL_RISE) + 3))
 	else:
 		_drop_done.fill(0)
-		_noise_done.fill(0)
-	_gx0 = floori(float(cx * SIZE) / DIP_CELL)
-	_gz0 = floori(float(cz * SIZE) / DIP_CELL)
 	_axes_cache.clear()
 	_wx0 = cx * SIZE
 	_wz0 = cz * SIZE
@@ -524,54 +504,11 @@ func _drop_at(vx: int, wy: int, vz: int) -> float:
 	# ask, and two chunks disagree about their seam by a millionth.
 	return _drop_lut[slot]
 
-## The shape of the drop, 0 .. 1, for a corner of this chunk. Value
-## noise on a DIP_CELL lattice (smoothstepped, so it has no creases) with
-## a little of the column's own hash on top. Worked out from the column's
-## place in the WORLD, which is what makes two chunks meshed on different
-## threads agree about the seam between them.
+## How much of the drop this corner takes, 0 .. 1. One hash of where the
+## corner is: its own number, unrelated to the corners beside it, which
+## is the whole point (see DROP).
 func _swell(vx: int, wy: int, vz: int) -> float:
-	var wx := _wx0 + vx
-	var wz := _wz0 + vz
-	var fx := float(wx) / DIP_CELL
-	var fz := float(wz) / DIP_CELL
-	var fy := float(wy) / SWELL_RISE
-	var gx := floori(fx)
-	var gz := floori(fz)
-	var gy := floori(fy)
-	var tx := fx - float(gx)
-	var tz := fz - float(gz)
-	var ty := fy - float(gy)
-	tx = tx * tx * (3.0 - 2.0 * tx)
-	tz = tz * tz * (3.0 - 2.0 * tz)
-	ty = ty * ty * (3.0 - 2.0 * ty)
-	var low := lerpf(
-		lerpf(_cell(gx, gy, gz), _cell(gx + 1, gy, gz), tx),
-		lerpf(_cell(gx, gy, gz + 1), _cell(gx + 1, gy, gz + 1), tx), tz)
-	var high := lerpf(
-		lerpf(_cell(gx, gy + 1, gz), _cell(gx + 1, gy + 1, gz), tx),
-		lerpf(_cell(gx, gy + 1, gz + 1), _cell(gx + 1, gy + 1, gz + 1), tx), tz)
-	# A little of the point's own hash on top of the swell, so a broad
-	# face is not perfectly smooth either.
-	# 0 .. 1: none of the drop, or all of it. Never below nothing — a
-	# corner only ever falls.
-	return clampf(lerpf(low, high, ty) * 0.82
-		+ WorldGen.hash01(wx * 3 + wy, wz * 5 - wy, SWELL_SALT + 1) * 0.18, 0.0, 1.0)
-
-## One corner of the noise's own lattice, hashed once per build.
-func _cell(gx: int, gy: int, gz: int) -> float:
-	var ix := gx - _gx0
-	var iz := gz - _gz0
-	if ix < 0 or ix >= CELL_SPAN or iz < 0 or iz >= CELL_SPAN or gy < 0:
-		return WorldGen.hash01(gx * 92837111 + gy, gz, SWELL_SALT)
-	var slot := (gy * CELL_SPAN + iz) * CELL_SPAN + ix
-	if slot >= _noise_done.size():
-		return WorldGen.hash01(gx * 92837111 + gy, gz, SWELL_SALT)
-	if _noise_done[slot] == 1:
-		return _noise_lut[slot]
-	var value := WorldGen.hash01(gx * 92837111 + gy, gz, SWELL_SALT)
-	_noise_lut[slot] = value
-	_noise_done[slot] = 1
-	return value
+	return WorldGen.hash01((_wx0 + vx) * 31 + wy, (_wz0 + vz) * 17 - wy, SWELL_SALT)
 
 ## One block of ground's own view of one of its corners, 1 up or 0 down.
 func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
