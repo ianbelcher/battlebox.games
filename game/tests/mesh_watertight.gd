@@ -11,7 +11,7 @@ extends SceneTree
 ## where a rule that is right in nine cases out of ten still leaves a
 ## hole every few hundred blocks.
 ##
-## It exists because the lattice bends (Mesher.DROP). Every corner where
+## It exists because the lattice bends (Mesher.ROUGH). Every corner where
 ## blocks meet is shared by up to eight of them, each drawing its own
 ## faces to it, and a rule that lets one of them move a corner while
 ## another draws it square does not error, log, or show up in anything
@@ -33,7 +33,7 @@ const AROUND := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1
 func _init() -> void:
 	var failures: Array = []
 	for theme: String in THEMES:
-		var bent := _open_edges(theme, Mesher.DROP)
+		var bent := _open_edges(theme, Mesher.ROUGH)
 		var flat := _open_edges(theme, 0.0)
 		print("WATERTIGHT %s: %d open edges bent, %d flat (%d triangles, %d%% of corners moved)"
 			% [theme, bent.open, flat.open, bent.tris, bent.moved])
@@ -53,7 +53,7 @@ func _init() -> void:
 
 ## One world's worth: how many edges have nothing on the other side, how
 ## many triangles there were, and how much of the lattice actually moved.
-func _open_edges(theme: String, drop: float) -> Dictionary:
+func _open_edges(theme: String, rough: float) -> Dictionary:
 	var gen := WorldGen.new(4242, theme, 250)
 	var chunks := {}
 	for cz in range(-SPAN - 1, SPAN + 2):
@@ -71,7 +71,7 @@ func _open_edges(theme: String, drop: float) -> Dictionary:
 			for off: Vector2i in AROUND:
 				neighbors[off] = chunks[here + off]
 			var mesher := Mesher.new()
-			mesher.drop = drop
+			mesher.rough = rough
 			var built: Dictionary = mesher.build(chunks[here], neighbors, cx, cz)
 			for key: String in ["opaque", "roof"]:
 				if not built.has(key):
@@ -88,8 +88,8 @@ func _open_edges(theme: String, drop: float) -> Dictionary:
 						moved += 1
 				for i in range(0, index.size(), 3):
 					for k in 3:
-						var a := (verts[index[i + k]] + origin).snapped(Vector3.ONE * 0.001)
-						var b := (verts[index[i + (k + 1) % 3]] + origin).snapped(Vector3.ONE * 0.001)
+						var a := (verts[index[i + k]] + origin).snapped(Vector3.ONE * 0.00002)
+						var b := (verts[index[i + (k + 1) % 3]] + origin).snapped(Vector3.ONE * 0.00002)
 						var edge := "%s>%s" % [a, b]
 						edges[edge] = int(edges.get(edge, 0)) + 1
 	var open := 0

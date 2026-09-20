@@ -79,7 +79,7 @@ func _ready() -> void:
 			chunks[key] = data
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/terrain.gdshader")
-	var fall := Mesher.DROP
+	var fall := Mesher.ROUGH
 	if OS.has_environment("WORLD_DROP"):
 		fall = float(OS.get_environment("WORLD_DROP"))
 	for cz in range(-1, 2):
@@ -90,7 +90,7 @@ func _ready() -> void:
 					Vector2i(1, -1), Vector2i(-1, 1)]:
 				neighbors[off] = chunks[Vector2i(cx, cz) + off]
 			var mesher := Mesher.new()
-			mesher.drop = fall
+			mesher.rough = fall
 			var built: Dictionary = mesher.build(chunks[Vector2i(cx, cz)], neighbors, cx, cz)
 			if not built.has("opaque"):
 				continue
@@ -116,6 +116,16 @@ func _ready() -> void:
 		# ground still reach its trunk?
 		look_at = Vector3(12.5, 30.5, -10.5)
 		eye = Vector3(-7, 1.5, 6)
+	# WORLD_DROP_EYE="x,y,z|tx,ty,tz" puts the camera somewhere else: the
+	# same ground from another angle, which is how a change that looks
+	# fine from one spot gets caught.
+	var placed := OS.get_environment("WORLD_DROP_EYE")
+	if placed.contains("|"):
+		var halves := placed.split("|")
+		var from := halves[0].split(",")
+		var at := halves[1].split(",")
+		eye = Vector3(float(from[0]), float(from[1]), float(from[2]))
+		look_at = Vector3(float(at[0]), float(at[1]), float(at[2]))
 	cam.position = look_at + eye
 	cam.look_at_from_position(cam.position, look_at, Vector3.UP)
 	cam.fov = 60.0

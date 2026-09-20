@@ -100,6 +100,7 @@ const KNOWN := {
 	"WORLD_DROP": "how far corners drop in tests/terrain_look (0 draws the ground square)",
 	"WORLD_DROP_SCENE": "wall for a sheer face in tests/terrain_look, otherwise a hillside",
 	"WORLD_DROP_THEME": "which world tests/terrain_look photographs",
+	"WORLD_DROP_EYE": "where tests/terrain_look stands: from_x,y,z|look_x,y,z",
 	"WORLD_GIANTS_TEST": "seconds into the battle to grow somebody, and report size, hit box and hearts",
 	"WORLD_TAG_TEST": "1 tags somebody: did they change sides, stay put, keep every heart, and can they tag back",
 	"WORLD_TAG_SPREAD": "1 reports how spread out the runners are, every five seconds",

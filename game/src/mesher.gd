@@ -35,58 +35,36 @@ const H := WorldGen.CHUNK_H
 ## trying this in the mesher alone, and the reason it is a switch.
 const SMOOTH_CORNERS := true
 
-## ROLLING GROUND: CORNERS DROP.
+## THE GROUND IS A HEIGHT MAP, AND THE CORNERS ARE ITS SAMPLES.
 ##
 ## Every corner where blocks meet is a point shared by the eight blocks
-## around it — four above, four below — and each one is pulled DOWN by
-## between nothing and DROP of a block's height. Never up, never
-## sideways: a block is still exactly where it was on the map, and
+## around it, and its height is HOW MUCH GROUND IS UNDER IT: of the four
+## blocks directly below, each one missing takes a quarter off. Nothing
+## moves sideways — a block is still exactly where it was on the map, and
 ## collision never hears about any of this.
 ##
 ## The offset belongs to the POINT, not to any block, so everything
-## touching it draws to where it has landed and nothing can come apart.
-## The block below is shorter at that corner, and the block above grows
-## down by the same amount to fill the space. Drops do not stack: each
-## corner is its own number, measured from where the corner actually is,
-## so a corner that drops the whole 60% says nothing about its
-## neighbours or about the corner below it in the column.
+## touching it draws to where it lands and nothing can come apart. See
+## _sink_at, which is the whole rule.
 ##
-## WHICH CORNERS DROP, by counting the eight blocks around the point:
+## Thinking in blocks is what made the ground pointy. A corner was up, or
+## a whole block down, so a step fell its full height at one edge, a lone
+## block was a pyramid, a hole was a funnel and a diagonal hillside was a
+## field of spikes. Thinking in POINTS, each one carrying the average of
+## what is beneath it, makes those the same shapes a height map would
+## give: a step is a ramp two blocks wide, a lone block is a low mound, a
+## diagonal is a diagonal.
 ##
-##   eight        left alone. It is walled in, nothing there is drawn,
-##                and moving it would only bend the inside of the rock
-##   one to seven drops
-##   none         nothing to do — there is no corner there
-##
-## ...and a corner does not move at all if any of the eight is something
-## that has to stay SQUARE: anything built, a slab, a fence, a pane. A
-## building is a building, and a box cannot follow a bent corner. Water
-## and plants do not hold a corner up — the ground under a lake rolls
-## like any other ground — and neither counts as one of the eight, so a
-## lake bed with air above it and water below still drops.
-##
-## Flat ground stops being a floor of tiles; a step's ramp stops being
-## the same 45 degrees every time, because its four corners each drop by
-## their own amount and it tips along its length as well as down; and
-## the horizontal lines of a cliff stop being ruler-straight.
-##
-## EVERY CORNER GETS ITS OWN NUMBER, hashed from its own place in the
-## world. Not smooth noise: that was the first attempt, and neighbouring
-## corners came out within seven hundredths of a block of each other, so
-## whole hillsides sank together, kept their shape exactly, and the whole
-## thing read as "the slightest drop". What is seen is not how far a
-## corner falls, it is how far it falls COMPARED TO THE ONE NEXT TO IT.
-##
-## Being its own place in the world is also what makes two chunks meshed
-## on different threads agree about the seam between them. 0.0 turns the
-## whole thing off.
-##
-## It is the one thing in the game where what you see is not exactly
-## where you stand: the ground is drawn up to this far below the block
-## you are actually standing on. That is the price of doing it in the
-## mesher alone, and why it stops well short of a whole block.
-const DROP := 0.75
+## ROUGH is what is added on top: a little per-point noise so that ground
+## which the map says is flat is not a plane, and so the bands of a cliff
+## face are not ruler-straight. It is the only knob, and 0.0 leaves the
+## map alone.
+const ROUGH := 0.3
+## The sliver a corner always leaves between itself and its own block's
+## floor. See _sink_at.
+const FLOOR_GAP := 0.004
 const SWELL_SALT := 7919
+
 ## What counts as GROWN rather than built, and so bends with the ground.
 ##
 ## TREE TRUNKS ARE IN IT, and they have to be. A log that kept its corners
@@ -234,7 +212,7 @@ var _axes_cache: Dictionary = {}
 ## bare shape rule on its own.
 var _wx0 := 0
 var _wz0 := 0
-var drop := DROP
+var rough := ROUGH
 ## Each corner's drop, worked out once and read by the eight blocks
 ## around it. A flat array rather than a dictionary: a chunk asks
 ## for these tens of thousands of times, and this is one multiply-add
@@ -446,79 +424,96 @@ func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 	var key := Vector3i(x + cx, y, z + cz)
 	if _surface_cache.has(key):
 		return _surface_cache[key]
-	# THE GROUND FALLS TO WHATEVER IS MISSING. Of the four columns that
-	# meet at this corner, if any one of them is open at this level then
-	# the ground steps down here and the corner goes with it — one block,
-	# never more, so a cliff is still a cliff.
-	#
-	# It used to ask each block whether ITS OWN two axes stepped down,
-	# which cannot see the column diagonally across the corner. On ground
-	# that climbs north or east that is the same answer; on ground that
-	# climbs diagonally it is not, and half the blocks of a diagonal
-	# slope kept a flat top between two that had ramped. That is what
-	# made a diagonal hillside a field of little pyramids instead of a
-	# slope.
-	var top := 1.0
-	for dx: int in [cx - 1, cx]:
-		for dz: int in [cz - 1, cz]:
-			var nx: int = x + dx
-			var nz: int = z + dz
-			if _firm_at(nx, y + 1, nz):
-				return _remember(key, 1.0 - _drop_at(x + cx, y + 1, z + cz))
-			if not _firm_at(nx, y, nz):
-				top = 0.0          # open: the ground steps down here
-			elif not _smooth(_block_at(nx, y, nz), nx, y, nz):
-				# Built, or carrying something: it keeps its corners.
-				return _remember(key, 1.0 - _drop_at(x + cx, y + 1, z + cz))
-	# WHICH LATTICE POINT this corner sits on — its own block's top, or
-	# the one below when the ground steps down here — and then that
-	# point's own offset. Everything touching the point reaches the same
-	# answer: the ramp reading it as its foot, the ground beneath reading
-	# it as its top, the wall of the cliff below it. One point, one
-	# height, from every direction.
-	return _remember(key, top - _drop_at(x + cx, y + int(top), z + cz))
+	# A BLOCK'S TOP CORNER IS THE LATTICE POINT ABOVE IT, and where that
+	# point sits is decided by _sink_at — how much ground is actually
+	# under it — not by this block. Its bottom corners are the points
+	# below it, which _add_shaped reads the same way.
+	return _remember(key, 1.0 - _sink_at(x + cx, y + 1, z + cz))
 
 func _remember(key: Vector3i, height: float) -> float:
 	_surface_cache[key] = height
 	return height
 
-## HOW FAR THIS CORNER HAS DROPPED, in blocks, never less than nothing
-## and never more than `drop`. (vx, vz) is the corner and `wy` the level
-## it sits at: the plane between the block below it and the block above.
-## See the note on DROP for which corners move at all.
-func _drop_at(vx: int, wy: int, vz: int) -> float:
-	if drop <= 0.0 or wy <= 0 or wy >= H or vx < 0 or vx > SIZE or vz < 0 or vz > SIZE:
+## HOW FAR THIS LATTICE POINT SITS BELOW ITS OWN LEVEL, 0 .. 1.
+##
+## THE POINTS ARE A HEIGHT MAP, and this is the sample. A point's height
+## is how much ground is underneath it: of the four blocks directly
+## below, each one missing takes a QUARTER off. Three missing and it
+## sits a quarter of a block above the level below, not a whole block
+## down.
+##
+## That one line is what makes the ground smooth rather than pointy. The
+## rule before it was all-or-nothing — a corner was up, or a whole block
+## down — so the edge of a step fell its whole height in one go, a lone
+## block became a pyramid, a hole became a funnel, and a diagonal
+## hillside came out as a field of spikes. Quarters turn all of those
+## into slopes: a one-block step is a ramp two blocks wide, a lone block
+## is a low mound, a diagonal is a diagonal.
+##
+## It is capped at a whole block, so a cliff is still a cliff: what is
+## further down than that is drawn by the blocks further down.
+##
+## SOMETHING STANDING ON THE POINT holds it up — otherwise the floor of
+## whatever stands there would part from the ground it stands on — and so
+## does anything built, a slab, a fence or a pane among the eight blocks
+## around it: those are drawn as boxes and a box cannot follow a bent
+## corner. The roughness is added even under a standing block, because
+## that is the line between two blocks of a cliff face and a cliff with
+## ruler-straight bands reads as brickwork.
+func _sink_at(vx: int, wy: int, vz: int) -> float:
+	if wy <= 0 or wy >= H or vx < 0 or vx > SIZE or vz < 0 or vz > SIZE:
 		return 0.0
 	var slot := (wy * SPAN + vz) * SPAN + vx
 	if _drop_done[slot] == 1:
 		return _drop_lut[slot]
-	var blocks := 0
+	var missing := 0
 	var square := false
-	var inside := vx > 0 and vx < SIZE and vz > 0 and vz < SIZE
-	var base := ((wy * SIZE + vz) * SIZE + vx) << 1
-	for ny: int in [wy - 1, wy]:
+	var covered := false
+	for nx: int in [vx - 1, vx]:
 		for nz: int in [vz - 1, vz]:
-			for nx: int in [vx - 1, vx]:
-				# Inside the chunk it is straight out of the bytes; on an
-				# edge it has to go through the neighbouring chunk.
-				var block := _data.decode_u16(base
-						+ ((ny - wy) * SIZE + (nz - vz)) * SIZE * 2 + (nx - vx) * 2) \
-					if inside else _block_at(nx, ny, nz)
-				if block == Blocks.AIR or _lk_solid[block] != 1:
-					continue     # air, water, a plant: not one of the eight
-				blocks += 1
-				if _lk_smooth[block] != 1:
+			# What is under the point decides its height...
+			var below := _block_at(nx, wy - 1, nz)
+			if below == Blocks.AIR or _lk_solid[below] != 1:
+				missing += 1
+			elif _lk_smooth[below] != 1:
+				square = true
+			# ...and what is over it can hold it up.
+			var above := _block_at(nx, wy, nz)
+			if above != Blocks.AIR and _lk_solid[above] == 1:
+				covered = true
+				if _lk_smooth[above] != 1:
 					square = true
-	var fallen := 0.0
-	if blocks > 0 and blocks < 8 and not square:
-		fallen = drop * _swell(vx, wy, vz)
-	_drop_lut[slot] = fallen
+	var sank := 0.0
+	if not square:
+		if not covered:
+			sank = float(missing) * 0.25
+		# The roughness is DOWNWARD like everything else here, and a point
+		# with solid ground over it takes it too: that line is where two
+		# blocks of a cliff face meet, and a cliff whose bands all rule
+		# straight reads as brickwork.
+		#
+		# Down only, and that is not a style choice. A point that rose
+		# above its own level could end up higher than the point above
+		# it — a block inside out, its top below its bottom — and the
+		# face of such a block has to be clipped where the two cross,
+		# which leaves a vertex in the middle of a neighbour's edge and a
+		# seam you can see the sky through. Falling only, that cannot
+		# happen: every bottom is at or below zero and every top at or
+		# above it.
+		# NEVER THE WHOLE BLOCK. A corner that fell exactly to its own
+		# block's floor met a floor that had itself fallen a hair, which
+		# is a block inside out by a thousandth — and the face of one has
+		# to be clipped where its top and bottom cross, leaving a vertex
+		# in the middle of a neighbour's edge and a seam. A sliver of a
+		# block left over costs nothing to look at and cannot invert.
+		sank = clampf(sank + rough * _swell(vx, wy, vz), 0.0, 1.0 - FLOOR_GAP)
+	_drop_lut[slot] = sank
 	_drop_done[slot] = 1
 	# Back out of the array, not the variable: the table holds 32-bit
-	# floats, so a corner worked out here and the same corner read from
-	# the table later must be the same number to the last bit. Otherwise
-	# the shape of a chunk depends on the order its blocks happened to
-	# ask, and two chunks disagree about their seam by a millionth.
+	# floats, so a point worked out here and the same point read from the
+	# table later must be the same number to the last bit. Otherwise the
+	# shape of a chunk depends on the order its blocks happened to ask,
+	# and two chunks disagree about their seam by a millionth.
 	return _drop_lut[slot]
 
 ## How much of the drop this corner takes, 0 .. 1. One hash of where the
@@ -666,7 +661,7 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 	var b := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	for i in 4:
 		var c: Vector2 = CORNER_XZ[i]
-		b[i] = -_drop_at(x + int(c.x), y, z + int(c.y))
+		b[i] = -_sink_at(x + int(c.x), y, z + int(c.y))
 	# Split through the diagonal whose two corners are LEVEL, so a block
 	# with one corner out of line is a flat triangle and a sloped one —
 	# flat from the midline — rather than a ridge from that corner to
@@ -801,7 +796,7 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 	var corner_dy := PackedFloat32Array()
 	corner_dy.resize(8)
 	var corner_ready := 0
-	var bent := drop > 0.0
+	var bent := true
 	# The surface's arrays once, not a dictionary lookup per append.
 	# Packed arrays are shared, so these ARE the surface's arrays.
 	var verts: PackedVector3Array = _verts[key]
@@ -903,7 +898,7 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 					var az := ci & 1
 					var slot := (((y + ay) * SPAN) + z + az) * SPAN + x + ax
 					var fell: float = _drop_lut[slot] if _drop_done[slot] == 1 \
-						else _drop_at(x + ax, y + ay, z + az)
+						else _sink_at(x + ax, y + ay, z + az)
 					# A liquid's own surface never moves; only what it
 					# stands on does.
 					corner_dy[ci] = 0.0 if (is_liquid and ay == 1) else -fell
@@ -1174,8 +1169,8 @@ func _is_opaque_at(x: int, y: int, z: int) -> bool:
 ## corners it stands on. What a plant — a tuft here, a Kenney model in
 ## ChunkView — has to come down by to keep its feet in the ground.
 func _ground_drop(x: int, y: int, z: int) -> float:
-	return (_drop_at(x, y, z) + _drop_at(x + 1, y, z)
-		+ _drop_at(x, y, z + 1) + _drop_at(x + 1, y, z + 1)) * 0.25
+	return (_sink_at(x, y, z) + _sink_at(x + 1, y, z)
+		+ _sink_at(x, y, z + 1) + _sink_at(x + 1, y, z + 1)) * 0.25
 
 ## Which cutout silhouette the plants shader draws for a cross block.
 ## 0 grass tuft · 1 flower · 2 mushroom · 3 flame · 4 leafy bush ·
