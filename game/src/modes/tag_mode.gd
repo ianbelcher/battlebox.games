@@ -40,8 +40,8 @@ const PLAYERS_PER_IT := 8
 ## What you can build with. Six blocks, and they are the six a child
 ## reaches for when what they want is somewhere to hide: something solid,
 ## something they can see out of, and something soft to land on.
-const BLOCKS: Array = [Blocks.PLANKS, Blocks.COBBLE, Blocks.GLASS,
-	Blocks.WOOL_RED, Blocks.WOOL_BLUE, Blocks.SNOW]
+const BLOCKS: Array = [Blocks.PLANKS, Blocks.COBBLE_BLOCK, Blocks.GLASS,
+	Blocks.WOOL_RED, Blocks.WOOL_BLUE, Blocks.SNOW_BLOCK]
 
 ## The two sides. A player is on one or the other and being tagged moves
 ## them across, where they stand, without being sent anywhere.

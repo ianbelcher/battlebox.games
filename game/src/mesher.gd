@@ -59,9 +59,12 @@ const SWELL_SALT := 7919
 ## LEAVES ARE NOT. A canopy is a loose shell of blocks, and dropping the
 ## corners of blocks that only touch each other at an edge tears it into
 ## scraps hanging off the top of a trunk.
+## The square twins of these (Blocks.BUILT_TWIN — "Stone Block", "Sand
+## Block") are deliberately NOT here: same material, cut square, and what
+## a pavement, a kerb, a castle wall or a bridge deck is made of.
 const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
 	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
-	Blocks.CHARRED]
+	Blocks.CHARRED, Blocks.SLATE, Blocks.MOSSY_COBBLE, Blocks.MAGMA]
 
 ## Baked face shading kept subtle - the sun and SSAO do the heavy lifting.
 ## Per-face shading, BAKED into the vertex colour as a stand-in for the

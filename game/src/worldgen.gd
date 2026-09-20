@@ -427,7 +427,7 @@ func _cavern_bridge(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int) -
 		var here := data.decode_u16(bidx(lx, deck, lz))
 		if here != Blocks.AIR and here != Blocks.WATER:
 			continue
-		data.encode_u16(bidx(lx, deck, lz), Blocks.COBBLE)
+		data.encode_u16(bidx(lx, deck, lz), Blocks.COBBLE_BLOCK)
 		if absi(off) == BRIDGE_HALF_WIDTH and data.decode_u16(bidx(lx, deck + 1, lz)) == Blocks.AIR:
 			data.encode_u16(bidx(lx, deck + 1, lz), Blocks.WALL)
 
@@ -561,7 +561,7 @@ func _landmark_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 			if k <= 2 and dz == -(size - k) and absi(dx) <= 1:
 				shell = false
 			if shell:
-				data.encode_u16(bidx(lx, y, lz), Blocks.SANDSTONE)
+				data.encode_u16(bidx(lx, y, lz), Blocks.SANDSTONE_BLOCK)
 			else:
 				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 				if k % 5 == 1 and hash01(wx, wz, 902 + k) < 0.02:
@@ -578,7 +578,7 @@ func _landmark_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 				if h + k < CHUNK_H:
 					var crenel: bool = k == height and not tower and posmod(wx + wz, 2) == 1
 					if not crenel:
-						data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE)
+						data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE_BLOCK)
 			if tower and h + 9 < CHUNK_H:
 				data.encode_u16(bidx(lx, h + 9, lz), Blocks.LANTERN)
 	elif theme == "isles" and roll < 0.6 and h < SEA_LEVEL - 3:
@@ -642,7 +642,7 @@ func _city_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 	var on_kerb: bool = dx <= kerb_x or dz <= kerb_z
 
 	if on_road:
-		data.encode_u16(bidx(lx, h, lz), Blocks.SLATE)
+		data.encode_u16(bidx(lx, h, lz), Blocks.SLATE_BLOCK)
 		_city_clear(data, lx, lz, h, 10)
 		# Dashed white centre line down the middle of the main avenues,
 		# broken at the crossroads so junctions stay clear.
@@ -653,7 +653,7 @@ func _city_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, h: 
 		return
 
 	if on_kerb:
-		data.encode_u16(bidx(lx, h, lz), Blocks.SANDSTONE)
+		data.encode_u16(bidx(lx, h, lz), Blocks.SANDSTONE_BLOCK)
 		_city_clear(data, lx, lz, h, 10)
 		# Street lights stand on the kerb of the main avenues, spaced out
 		# along the road and never in the middle of a junction.
@@ -752,7 +752,7 @@ func _city_car_park(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 	data.encode_u16(bidx(lx, h, lz), Blocks.PATH)
 	_city_clear(data, lx, lz, h, 8)
 	if posmod(wz, 4) == 0:
-		data.encode_u16(bidx(lx, h, lz), Blocks.SANDSTONE)  # bay marking
+		data.encode_u16(bidx(lx, h, lz), Blocks.SANDSTONE_BLOCK)  # bay marking
 	if verge_x < CITY_VERGE + 2 or verge_z < CITY_VERGE + 2 or h + 3 >= CHUNK_H:
 		return
 	var car_x := posmod(wx, 5)
@@ -799,8 +799,8 @@ func _city_building(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 	var height: int = mini(floors * storey, CHUNK_H - 4 - h)
 	if height < storey:
 		return
-	var material: int = [Blocks.BRICK, Blocks.MARBLE, Blocks.SLATE,
-		Blocks.SANDSTONE, Blocks.DARK_PLANKS][int(hash01(kx, kz, 802) * 5.0)]
+	var material: int = [Blocks.BRICK, Blocks.MARBLE, Blocks.SLATE_BLOCK,
+		Blocks.SANDSTONE_BLOCK, Blocks.DARK_PLANKS][int(hash01(kx, kz, 802) * 5.0)]
 	var wall: bool = verge_x == CITY_VERGE + setback_x + 1 \
 		or verge_z == CITY_VERGE + setback_z + 1
 	# The stair run: THREE wide and out in the middle of the floor plate,
@@ -860,7 +860,7 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 				if h + k < CHUNK_H:
 					var crenel: bool = k == 10 and posmod(wx + wz, 2) == 1
 					if not crenel:
-						data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE)
+						data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE_BLOCK)
 		return
 	# Corner towers.
 	if absi(absi(wx) - 57) <= 4 and absi(absi(wz) - 57) <= 4:
@@ -870,7 +870,7 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 				if h + k >= CHUNK_H:
 					break
 				if tower_r >= 3 or k >= 14:
-					data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE)
+					data.encode_u16(bidx(lx, h + k, lz), Blocks.COBBLE_BLOCK)
 				else:
 					data.encode_u16(bidx(lx, h + k, lz), Blocks.AIR)
 			if tower_r == 0 and h + 16 < CHUNK_H:
@@ -885,7 +885,7 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 		if h > base + 20:
 			return
 		for fy in range(mini(h, base), base):
-			data.encode_u16(bidx(lx, fy, lz), Blocks.STONE)  # foundation up to the court
+			data.encode_u16(bidx(lx, fy, lz), Blocks.STONE_BLOCK)  # foundation up to the court
 		for k in range(0, 27):
 			var y := base + k
 			if y >= CHUNK_H - 1:
@@ -903,7 +903,7 @@ func _megacastle_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: in
 			if door:
 				data.encode_u16(bidx(lx, y, lz), Blocks.AIR)
 			elif shell:
-				data.encode_u16(bidx(lx, y, lz), Blocks.GLASS if window else Blocks.STONE)
+				data.encode_u16(bidx(lx, y, lz), Blocks.GLASS if window else Blocks.STONE_BLOCK)
 			elif k == 0:
 				data.encode_u16(bidx(lx, y, lz), Blocks.WOOL_RED if carpet else Blocks.MARBLE)
 			elif throne and (k <= 2 or (k == 3 and wz == 9)):
@@ -1090,7 +1090,7 @@ func _space_landmark(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int,
 			if floor_y - 1 > 0:
 				data.encode_u16(bidx(lx, floor_y - 1, lz), Blocks.STEEL)
 			if floor_y + head + 1 < CHUNK_H:
-				data.encode_u16(bidx(lx, floor_y + head + 1, lz), Blocks.STONE)
+				data.encode_u16(bidx(lx, floor_y + head + 1, lz), Blocks.STONE_BLOCK)
 			# Lights down the middle of the corridors and in room corners.
 			if in_room and (ix == 2 or ix == 7) and (iz == 2 or iz == 6) \
 					and floor_y + head < CHUNK_H:
@@ -1896,12 +1896,13 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 			if ground <= 0 or ground + 1 >= CHUNK_H:
 				continue
 			var surface := data.decode_u16(bidx(lx, ground, lz))
-			# NOTHING GROWS ON A BLOCK THAT WILL SLOPE. The mesher draws a
-			# block of ground that is open on one side of an axis and
-			# solid on the other as a ramp (Mesher._heights), and a plant
-			# on a ramp was a plant standing in the air.
-			if _slopes(data, lx, lz, ground):
-				continue
+			# Things DO grow on a slope. Nothing used to: the ground was
+			# drawn as ramps and a plant left at the block's own height
+			# stood in the air above one, so every sloping column was
+			# left bare — which is most of a hillside. The mesher hands
+			# ChunkView how far the ground under each column has come
+			# down now (Mesher._ground_drop) and the plant comes down
+			# with it, so there is nothing left to avoid.
 			if surface == Blocks.GRASS:
 				_scatter_grass_column(data, lx, lz, wx, wz, ground)
 			elif surface == Blocks.SAND and ground <= SEA_LEVEL + 2:
@@ -1923,19 +1924,6 @@ func _scatter_features(data: PackedByteArray, cx: int, cz: int) -> void:
 ## read from this chunk's own data: one side open and the other solid on
 ## either axis. A neighbour past the chunk edge counts as solid, which
 ## errs on the side of leaving a plant where it was.
-func _slopes(data: PackedByteArray, lx: int, lz: int, y: int) -> bool:
-	var n := _ground_at(data, lx, lz - 1, y)
-	var e := _ground_at(data, lx + 1, lz, y)
-	var s := _ground_at(data, lx, lz + 1, y)
-	var w := _ground_at(data, lx - 1, lz, y)
-	return n != s or e != w
-
-func _ground_at(data: PackedByteArray, lx: int, lz: int, y: int) -> bool:
-	if lx < 0 or lx >= CHUNK_SIZE or lz < 0 or lz >= CHUNK_SIZE:
-		return true
-	var b := data.decode_u16(bidx(lx, y, lz))
-	return b != Blocks.AIR and not Blocks.is_liquid(b) and Blocks.LK_CROSS[b] != 1
-
 ## Is there water within two blocks of this column at its own height?
 ## Looks inside the chunk only — generation stays independent per chunk,
 ## and a reed that misses by being on a chunk edge is one reed.
@@ -2042,7 +2030,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				var h := 2 + int(hash01(wx, wz, 51) * 3.0)
 				for dy in h:
 					if hash01(wx, dy, wz) < 0.8:
-						data.encode_u16(bidx(lx, ground + 1 + dy, lz), Blocks.COBBLE)
+						data.encode_u16(bidx(lx, ground + 1 + dy, lz), Blocks.COBBLE_BLOCK)
 				if lx < 13:
 					data.encode_u16(bidx(lx + 1, ground + 1, lz), Blocks.COBBLE)
 				return

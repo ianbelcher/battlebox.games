@@ -135,7 +135,7 @@ static func _windmill() -> Array:
 		for x in range(-1, 2):
 			for z in range(-1, 2):
 				if absi(x) == 1 or absi(z) == 1:
-					_put(list, x, y, z, Blocks.COBBLE if y < 4 else Blocks.PLANKS)
+					_put(list, x, y, z, Blocks.COBBLE_BLOCK if y < 4 else Blocks.PLANKS)
 	_put(list, 0, 0, -1, Blocks.AIR)
 	for arm in range(1, 4):
 		_put(list, 0, 6 + arm, -2, Blocks.WOOL_WHITE)
@@ -153,15 +153,15 @@ static func _castle_gate() -> Array:
 			for x in range(side - 1, side + 2):
 				for z in range(-1, 2):
 					if absi(x - side) == 1 or absi(z) == 1:
-						_put(list, x, y, z, Blocks.STONE)
+						_put(list, x, y, z, Blocks.STONE_BLOCK)
 			_put(list, side, y, 0, Blocks.AIR)
 		for x in range(side - 1, side + 2):
 			for z in range(-1, 2):
 				if (absi(x - side) + absi(z)) % 2 == 0:
-					_put(list, x, 6, z, Blocks.COBBLE)
+					_put(list, x, 6, z, Blocks.COBBLE_BLOCK)
 	for x in range(-2, 3):
-		_put(list, x, 4, 0, Blocks.STONE)
-		_put(list, x, 5, 0, Blocks.COBBLE)
+		_put(list, x, 4, 0, Blocks.STONE_BLOCK)
+		_put(list, x, 5, 0, Blocks.COBBLE_BLOCK)
 		if x != 0:
 			_put(list, x, 3, 0, Blocks.WALL)
 	return list
@@ -177,12 +177,12 @@ static func _fort() -> Array:
 			for y in range(0, 3):
 				if z == -4 and absi(x) <= 1 and y < 2:
 					continue  # gate
-				_put(list, x, y, z, Blocks.COBBLE)
+				_put(list, x, y, z, Blocks.COBBLE_BLOCK)
 			if (absi(x) == 4 and absi(z) == 4):
-				_put(list, x, 3, z, Blocks.COBBLE)
+				_put(list, x, 3, z, Blocks.COBBLE_BLOCK)
 				_put(list, x, 4, z, Blocks.LANTERN)
 			elif posmod(x + z, 2) == 0:
-				_put(list, x, 3, z, Blocks.COBBLE)
+				_put(list, x, 3, z, Blocks.COBBLE_BLOCK)
 	return list
 
 ## Small steel pillbox: pellet-proof, bazooka chips it one block at a time.
@@ -224,9 +224,9 @@ static func _sniper() -> Array:
 static func _barricade() -> Array:
 	var list: Array = []
 	for x in range(-3, 4):
-		_put(list, x, 0, 0, Blocks.SAND)
+		_put(list, x, 0, 0, Blocks.SAND_BLOCK)
 		if absi(x) < 3:
-			_put(list, x, 1, 0, Blocks.SAND)
+			_put(list, x, 1, 0, Blocks.SAND_BLOCK)
 	return list
 
 ## The picker tile's picture: a front elevation of the build itself,
@@ -310,19 +310,19 @@ static func _tower() -> Array:
 				if absi(x) == 1 or absi(z) == 1:
 					if y == 0 and z == -1 and x == 0:
 						continue  # doorway
-					_put(list, x, y, z, Blocks.COBBLE)
+					_put(list, x, y, z, Blocks.COBBLE_BLOCK)
 	# Stairs of blocks spiraling up the outside corner.
 	var steps := [Vector3i(2, 0, 2), Vector3i(2, 1, 1), Vector3i(2, 2, 0),
 		Vector3i(2, 3, -1), Vector3i(1, 4, -2), Vector3i(0, 5, -2),
 		Vector3i(-1, 6, -2), Vector3i(-2, 7, -1)]
 	for step in steps:
-		list.append([step, Blocks.COBBLE])
+		list.append([step, Blocks.COBBLE_BLOCK])
 	for x in range(-2, 3):
 		for z in range(-2, 3):
 			_put(list, x, 8, z, Blocks.PLANKS)
 	for x in [-2, 2]:
 		for z in [-2, 2]:
-			_put(list, x, 9, z, Blocks.COBBLE)
+			_put(list, x, 9, z, Blocks.COBBLE_BLOCK)
 	_put(list, 0, 9, 0, Blocks.LANTERN)
 	return list
 
@@ -374,9 +374,9 @@ static func _wall() -> Array:
 	var list: Array = []
 	for x in range(-3, 4):
 		for y in range(0, 3):
-			_put(list, x, y, 0, Blocks.COBBLE)
+			_put(list, x, y, 0, Blocks.COBBLE_BLOCK)
 		if posmod(x, 2) == 0:
-			_put(list, x, 3, 0, Blocks.COBBLE)
+			_put(list, x, 3, 0, Blocks.COBBLE_BLOCK)
 	return list
 
 ## A sunken 5x5 pool with a marble rim.

@@ -88,8 +88,11 @@ const STONE_NAMES := ["Ruby Rock", "Topaz Rock", "Amber Rock", "Jade",
 	"Lapis", "Amethyst", "Gypsum", "Coal"]
 const ORGANIC_NAMES := ["Redwood", "Timber", "Sand Pile", "Turf",
 	"Clay", "Lavender", "Birch Bark", "Peat"]
+## "Blue Snow" rather than "Blue Ice": 135 is already called Blue Ice and
+## the two sat next to each other on the same page of the build picker,
+## one of them a solid block and the other a soft translucent one.
 const SNOW_NAMES := ["Rose Snow", "Peach Snow", "Golden Snow", "Mint Snow",
-	"Blue Ice", "Violet Snow", "Snow Drift", "Ash"]
+	"Blue Snow", "Violet Snow", "Snow Drift", "Ash"]
 static var EXTRA: Dictionary = {}
 ## Extra cross-plants past the family rows.
 const FERN := 95
@@ -253,7 +256,51 @@ const OFFICE_PALM := 295
 ## a hole out of the world, which is the one thing the ring exists to
 ## prevent. Every other map spends its ring on bedrock for exactly this.
 const MULLION_EDGE := 296
-const NEXT_FREE_ID := 297
+
+## ---- BUILT OUT OF THE SAME STUFF (297+) --------------------------------
+##
+## THE SAME MATERIAL, CUT SQUARE.
+##
+## Ground BENDS — see Mesher.SMOOTH_BLOCKS and the note at the top of
+## that file. A hillside of stone rolls, a bank of sand slopes into the
+## sea, and a step of one level has nothing vertical in it. That is right
+## for ground and exactly wrong for a pavement, a kerb, a castle wall or
+## the deck of a bridge, which are things somebody BUILT out of the same
+## material and which are supposed to have edges.
+##
+## So a material used both ways gets TWO ids:
+##
+##   * the plain name — "Stone", "Sand" — is the ground. It bends.
+##   * "<Name> Block" is the built one. It is always a cube, and it is
+##     what the towns, the castles and the kits are made of.
+##
+## The pair is only made where a material really is used both ways. Most
+## blocks need one or the other and have only that: nothing that is only
+## ever built (a plank, a brick, a pane) needs a bending twin, and
+## nothing that is only ever ground (mycelium, charred earth) needs a
+## square one.
+const GRASS_BLOCK := 297
+const DIRT_BLOCK := 298
+const STONE_BLOCK := 299
+const SAND_BLOCK := 300
+const SANDSTONE_BLOCK := 301
+const COBBLE_BLOCK := 302
+const SLATE_BLOCK := 303
+const SNOW_BLOCK := 304
+const CHARRED_BLOCK := 305
+const MAGMA_BLOCK := 306
+const MOSSY_COBBLE_BLOCK := 307
+const NEXT_FREE_ID := 308
+
+## Ground on the left, the square twin of it on the right. Read by
+## _twins_init to make the twins, and by anything that needs to know a
+## block's other half.
+const BUILT_TWIN := {
+	GRASS: GRASS_BLOCK, DIRT: DIRT_BLOCK, STONE: STONE_BLOCK,
+	SAND: SAND_BLOCK, SANDSTONE: SANDSTONE_BLOCK, COBBLE: COBBLE_BLOCK,
+	SLATE: SLATE_BLOCK, SNOW: SNOW_BLOCK, CHARRED: CHARRED_BLOCK,
+	MAGMA: MAGMA_BLOCK, MOSSY_COBBLE: MOSSY_COBBLE_BLOCK,
+}
 
 static func shape_of(id: int) -> String:
 	return str(info(id).get("shape", ""))
@@ -517,6 +564,7 @@ static func _static_init() -> void:
 	EXTRA[MYCELIUM] = {"name": "Mycelium", "color": Color("8a6242"),
 		"top": Color("7a6d80"), "solid": true, "opaque": true, "hard": 0}
 	_office_init()
+	_twins_init()
 	_build_lookups()
 
 ## HOW MANY IDS THERE CAN BE. A block id used to be one byte and the
@@ -563,6 +611,18 @@ static var LK_PATTERN_TOP := PackedByteArray()
 ## fit-out is made of rather than the saturated blocks the rest of the
 ## game uses — an office that looks like Lego reads as a toy, and the
 ## point of the map is that it reads as a place you have worked in.
+## THE SQUARE TWINS. Each one is its ground exactly — same colour, same
+## sound to dig, same everything — under a name that says it is a block,
+## so the only difference is that it does not bend. Copied rather than
+## written out again, because a twin that drifted from its ground would
+## be a pavement that is nearly the colour of the path beside it, which
+## is worse than either.
+static func _twins_init() -> void:
+	for ground: int in BUILT_TWIN:
+		var spec: Dictionary = info(ground).duplicate(true)
+		spec["name"] = "%s Block" % spec["name"]
+		EXTRA[BUILT_TWIN[ground]] = spec
+
 static func _office_init() -> void:
 	var flat := func(id: int, name: String, col: Color, extra: Dictionary = {}) -> void:
 		var spec := {"name": name, "color": col, "solid": true, "opaque": true,
@@ -582,9 +642,12 @@ static func _office_init() -> void:
 	# there is far less light falling on a floor than the eye assumes.
 	# These are the same hues held up two stops.
 	flat.call(OFFICE_CARPET, "Office Carpet", Color("8a8d93"), {"rough": 2.8})
-	flat.call(OFFICE_CARPET_BLUE, "Blue Carpet", Color("6f7d99"), {"rough": 2.8})
-	flat.call(OFFICE_CARPET_SAGE, "Sage Carpet", Color("7f8d7e"), {"rough": 2.8})
-	flat.call(OFFICE_CARPET_RUST, "Rust Carpet", Color("a87a63"), {"rough": 2.8})
+	# "Blue Office Carpet" rather than "Blue Carpet": 192 is the wool
+	# carpet of that name, and they are different things — this one is a
+	# floor, that one is a thin rug you lay ON a floor.
+	flat.call(OFFICE_CARPET_BLUE, "Blue Office Carpet", Color("6f7d99"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_SAGE, "Sage Office Carpet", Color("7f8d7e"), {"rough": 2.8})
+	flat.call(OFFICE_CARPET_RUST, "Rust Office Carpet", Color("a87a63"), {"rough": 2.8})
 	flat.call(OFFICE_VINYL, "Vinyl Plank", Color("a88a66"),
 		{"top": Color("b59470"), "rough": 0.7, "pattern_side": 9, "pattern_top": 9})
 
@@ -871,6 +934,9 @@ const HOTBAR: Array[int] = [
 	FLOWER_RED, FLOWER_YELLOW, SAPLING,
 	M_STEEL, M_STEEL + 1, M_STEEL + 2, M_STEEL + 3, M_STEEL + 4, M_STEEL + 5, M_STEEL + 6, M_STEEL + 7,
 	M_STONE, M_STONE + 1, M_STONE + 2, M_STONE + 3, M_STONE + 4, M_STONE + 5, M_STONE + 6, M_STONE + 7,
+	GRASS_BLOCK, DIRT_BLOCK, STONE_BLOCK, SAND_BLOCK, SANDSTONE_BLOCK,
+	COBBLE_BLOCK, SLATE_BLOCK, SNOW_BLOCK, CHARRED_BLOCK, MAGMA_BLOCK,
+	MOSSY_COBBLE_BLOCK,
 	M_SOIL, M_SOIL + 1, M_SOIL + 2, M_SOIL + 3, M_SOIL + 4, M_SOIL + 5, M_SOIL + 6, M_SOIL + 7,
 	M_SNOW, M_SNOW + 1, M_SNOW + 2, M_SNOW + 3, M_SNOW + 4, M_SNOW + 5, M_SNOW + 6, M_SNOW + 7,
 	101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116,
@@ -938,10 +1004,13 @@ static func picker_category(cat: String) -> Array:
 			out = [PLANKS, BIRCH_PLANKS, DARK_PLANKS, CHERRY_PLANKS, 129, 131,
 				WARPED_PLANKS, CRIMSON_PLANKS, MANGROVE_PLANKS, BAMBOO_BLOCK,
 				LOG, 125, 126, 127, 128, 130, WARPED_STEM,
-				COBBLE, MOSSY_COBBLE, STONE, MARBLE, SLATE, BRICK, SANDSTONE,
+				COBBLE, COBBLE_BLOCK, MOSSY_COBBLE, MOSSY_COBBLE_BLOCK,
+				STONE, STONE_BLOCK, MARBLE, SLATE, SLATE_BLOCK, BRICK,
+				SANDSTONE, SANDSTONE_BLOCK,
 				101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
 				113, 114, 115, 116, 117, 119, 121, 132, BEDROCK,
-				STEEL, CHARRED, GOLD, DIAMOND, 141, 142, 143, 144, 145, 146]
+				STEEL, CHARRED, CHARRED_BLOCK, GOLD, DIAMOND,
+				141, 142, 143, 144, 145, 146]
 			for row in [M_STEEL, M_STONE]:
 				for i in 8:
 					out.append(row + i)
@@ -959,10 +1028,11 @@ static func picker_category(cat: String) -> Array:
 			# held up: snow and mushrooms were filed under Nature when
 			# they are colours to build with, and Lights contained a
 			# ladder, a bookshelf, a chest and a bed, which do not glow.
-			out.append_array([GRASS, DIRT, PATH, SAND, 124, 118, 120, 122,
-				123, SHELL, LILY_PAD, MAGMA, MYCELIUM,
+			out.append_array([GRASS, GRASS_BLOCK, DIRT, DIRT_BLOCK, PATH,
+				SAND, SAND_BLOCK, 124, 118, 120, 122,
+				123, SHELL, LILY_PAD, MAGMA, MAGMA_BLOCK, MYCELIUM,
 				LEAVES, LEAVES_DARK, LEAVES_LIGHT, LEAVES_PINK, 133,
-				SNOW, SNOW_LAYER, ICE, 134, 135,
+				SNOW, SNOW_BLOCK, SNOW_LAYER, ICE, 134, 135,
 				PUMPKIN, 136, 137, 138, 139, 140,
 				FLOWER_RED, FLOWER_YELLOW, FLOWER_PINK, MUSHROOM, TALL_GRASS,
 				SAPLING, BERRY_BUSH, FERN, DEAD_BUSH, CATTAIL, DAISY,
