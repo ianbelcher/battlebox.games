@@ -172,7 +172,8 @@ func _mesh_worker() -> void:
 		else:
 			surfaces = Mesher.new().build(job.data, job.neighbors, job.cpos.x,
 				job.cpos.y, int(job.get("roof", -1)))
-			surfaces["foliage"] = _foliage_of(job.data, job.cpos)
+			surfaces["foliage"] = _foliage_of(job.data, job.cpos,
+				surfaces.get("roots", PackedFloat32Array()))
 		var build_ms := Time.get_ticks_msec() - t0
 		if build_ms > 500:
 			push_warning("Slow mesh build: %s took %d ms" % [job.cpos, build_ms])
@@ -572,7 +573,8 @@ func _process(_delta: float) -> void:
 			if not n.is_empty():
 				nb[off] = n
 		var sync_surfaces := Mesher.new().build(_data[spos], nb, spos.x, spos.y, roof_y)
-		sync_surfaces["foliage"] = _foliage_of(_data[spos], spos)
+		sync_surfaces["foliage"] = _foliage_of(_data[spos], spos,
+			sync_surfaces.get("roots", PackedFloat32Array()))
 		_applied_gen[spos] = int(_mesh_gen[spos])
 		_topmaps[spos] = sync_surfaces.get("topmap", PackedByteArray())
 		_apply_surfaces(spos, sync_surfaces)
@@ -815,7 +817,11 @@ func _foliage_mesh(model: String) -> Mesh:
 ## over every block of the chunk, 3-9 ms of GDScript, and on the main
 ## thread it was paid again for every chunk uploaded (three a frame while
 ## streaming) and every edit remesh.
-static func _foliage_of(data: PackedByteArray, cpos: Vector2i) -> Dictionary:
+## `roots` is how far the ground has dropped under each column (see
+## Mesher.DROP): a plant stands on corners that have moved, and one left
+## at the block's own height is standing in the air.
+static func _foliage_of(data: PackedByteArray, cpos: Vector2i,
+		roots: PackedFloat32Array) -> Dictionary:
 	# Bucketed by MODEL rather than by block, because one block can be
 	# drawn as any of several models — see GRASS_VARIANTS.
 	var buckets: Dictionary = {}
@@ -841,8 +847,12 @@ static func _foliage_of(data: PackedByteArray, cpos: Vector2i) -> Dictionary:
 				else GRASS_VARIANTS[2])
 		var size := float(FOLIAGE_SCALES.get(block, 1.2)) \
 			* (1.0 - FOLIAGE_SIZE_SPREAD * 0.35 + FOLIAGE_SIZE_SPREAD * WorldGen.hash01(wx, wz, y + 11))
+		# Down with the ground it grows out of, or it stands in the air.
+		var root := 0.0
+		if roots.size() == 256:
+			root = roots[z * 16 + x]
 		var t := Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * size),
-			Vector3(x + 0.5, y, z + 0.5))
+			Vector3(x + 0.5, float(y) - root, z + 0.5))
 		if not buckets.has(model):
 			buckets[model] = []
 		(buckets[model] as Array).append(t)

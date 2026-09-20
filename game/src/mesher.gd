@@ -35,40 +35,51 @@ const H := WorldGen.CHUNK_H
 ## trying this in the mesher alone, and the reason it is a switch.
 const SMOOTH_CORNERS := true
 
-## ROLLING GROUND: THE LATTICE BENDS.
+## ROLLING GROUND: CORNERS DROP.
 ##
-## Every corner where blocks meet is a point of a lattice shared by the
-## eight blocks around it, and each one is nudged UP or DOWN by up to
-## WARP of a block. The offset belongs to the POINT, not to any block, so
-## every block touching it draws to wherever it has landed and nothing
-## can come apart: a block is whatever shape its eight corners make of
-## it. Nothing moves sideways — a block is still exactly where it was on
-## the map, and collision never hears about any of this.
+## Every corner where blocks meet is a point shared by the eight blocks
+## around it — four above, four below — and each one is pulled DOWN by
+## between nothing and DROP of a block's height. Never up, never
+## sideways: a block is still exactly where it was on the map, and
+## collision never hears about any of this.
+##
+## The offset belongs to the POINT, not to any block, so everything
+## touching it draws to where it has landed and nothing can come apart.
+## The block below is shorter at that corner, and the block above grows
+## down by the same amount to fill the space. Drops do not stack: each
+## corner is its own number, measured from where the corner actually is,
+## so a corner that drops the whole 60% says nothing about its
+## neighbours or about the corner below it in the column.
+##
+## WHICH CORNERS DROP, by counting the eight blocks around the point:
+##
+##   eight        left alone. It is walled in, nothing there is drawn,
+##                and moving it would only bend the inside of the rock
+##   one to seven drops
+##   none         nothing to do — there is no corner there
+##
+## ...and a corner does not move at all if any of the eight is something
+## that has to stay SQUARE: anything built, a slab, a fence, a pane. A
+## building is a building, and a box cannot follow a bent corner. Water
+## and plants do not hold a corner up — the ground under a lake rolls
+## like any other ground — and neither counts as one of the eight, so a
+## lake bed with air above it and water below still drops.
 ##
 ## Flat ground stops being a floor of tiles; a step's ramp stops being
-## the same 45 degrees every time, because its four corners each have
-## their own offset and it tips along its length as well as down; and the
-## horizontal lines of a cliff stop being ruler-straight.
-##
-## A point is LOCKED — left exactly where it was — when any of the eight
-## blocks around it is something that has to stay square: anything built,
-## a plant standing on it, water, a slab, a fence. Those are drawn as
-## boxes and a box cannot follow a bent corner. A point walled in on all
-## eight sides is drawn by nobody, so it does not matter either way.
+## the same 45 degrees every time, because its four corners each drop by
+## their own amount and it tips along its length as well as down; and
+## the horizontal lines of a cliff stop being ruler-straight.
 ##
 ## From smooth noise over the world so the ground rolls rather than
-## bristles, and worked out from the point's own world position, which is
+## bristles, worked out from the point's own place in the world, which is
 ## what makes two chunks meshed on different threads agree about the seam
 ## between them. 0.0 turns the whole thing off.
 ##
-## A QUARTER OF A BLOCK WAS NOT ENOUGH TO SEE. Half a block of movement
-## between two corners is what makes a hillside read as ground rather
-## than as boxes, and the edges of a cliff wave instead of ruling
-## straight lines. It cannot go past 0.5, where two corners a block apart
-## could swap over. It is also the only thing in the game where what you
-## see is not exactly where you stand: the ground is drawn up to this far
-## from the block you are actually standing on.
-const WARP := 0.35
+## It is the one thing in the game where what you see is not exactly
+## where you stand: the ground is drawn up to this far below the block
+## you are actually standing on. That is the price of doing it in the
+## mesher alone, and why it stops well short of a whole block.
+const DROP := 0.6
 ## Blocks across one swell of the noise.
 const DIP_CELL := 4.0
 const SWELL_SALT := 7919
@@ -204,20 +215,20 @@ var _lk_smooth := PackedByteArray()
 # slope on each axis — see _surface and _axes.
 var _surface_cache: Dictionary = {}
 var _axes_cache: Dictionary = {}
-## This chunk's origin in world blocks, so the warp lines up across chunk
-## borders. And how far a lattice point may move: WARP, unless a test
-## wants the bare shape rule on its own.
+## This chunk's origin in world blocks, so the drops line up across chunk
+## borders. And how far a corner may drop: DROP, unless a test wants the
+## bare shape rule on its own.
 var _wx0 := 0
 var _wz0 := 0
-var warp := WARP
-## Each lattice point's offset, worked out once and read by the eight
-## blocks around it. A flat array rather than a dictionary: a chunk asks
+var drop := DROP
+## Each corner's drop, worked out once and read by the eight blocks
+## around it. A flat array rather than a dictionary: a chunk asks
 ## for these tens of thousands of times, and this is one multiply-add
 ## against a hashed Vector3i key. (SIZE + 1) points across, because the
 ## far edge of the last block is a point too.
 const SPAN := SIZE + 1
-var _warp_lut := PackedFloat32Array()
-var _warp_done := PackedByteArray()
+var _drop_lut := PackedFloat32Array()
+var _drop_done := PackedByteArray()
 ## And the noise, which varies with HEIGHT as well as across the map —
 ## every level of a cliff gets its own offset, or a wall of blocks moves
 ## as one piece and looks exactly as square as it did before.
@@ -253,13 +264,13 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	_data = data
 	_neighbors = neighbors
 	_surface_cache.clear()
-	if _warp_lut.is_empty():
-		_warp_lut.resize(SPAN * SPAN * (H + 1))
-		_warp_done.resize(SPAN * SPAN * (H + 1))
+	if _drop_lut.is_empty():
+		_drop_lut.resize(SPAN * SPAN * (H + 1))
+		_drop_done.resize(SPAN * SPAN * (H + 1))
 		_noise_lut.resize(CELL_SPAN * CELL_SPAN * (int(H / SWELL_RISE) + 3))
 		_noise_done.resize(CELL_SPAN * CELL_SPAN * (int(H / SWELL_RISE) + 3))
 	else:
-		_warp_done.fill(0)
+		_drop_done.fill(0)
 		_noise_done.fill(0)
 	_gx0 = floori(float(cx * SIZE) / DIP_CELL)
 	_gz0 = floori(float(cz * SIZE) / DIP_CELL)
@@ -270,6 +281,11 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	# that holds a block id.
 	var topmap := PackedByteArray()
 	topmap.resize(SIZE * SIZE * 2)
+	# How far the ground has dropped under each column's own plants, for
+	# the models ChunkView plants (see _ground_drop). Written as the
+	# columns are walked, so it costs nothing to carry.
+	var roots := PackedFloat32Array()
+	roots.resize(SIZE * SIZE)
 	for y in H:
 		# Whole-slab air check runs in C++ — skips most of the sky instantly.
 		var slab_off := y * SIZE * SIZE * 2
@@ -285,6 +301,8 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 				if Blocks.LK_CROSS[block] == 1:
 					if not MODEL_PLANTS.has(block):
 						_add_cross(block, x, y, z, cx, cz)
+					else:
+						roots[z * SIZE + x] = _ground_drop(x, y, z)
 					continue
 				var solid_key := "roof" if roof_y >= 0 and y >= roof_y else "opaque"
 				var shape := int(Blocks.LK_SHAPE[block])
@@ -371,6 +389,7 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	result["lights"] = _merged(lights)
 	result["teleporters"] = teleporters
 	result["topmap"] = topmap
+	result["roots"] = roots
 	return result
 
 func _jitter(x: int, y: int, z: int, cx: int, cz: int, rough := 0.0) -> float:
@@ -460,62 +479,52 @@ func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 	# answer: the ramp reading it as its foot, the ground beneath reading
 	# it as its top, the wall of the cliff below it. One point, one
 	# height, from every direction.
-	return _remember(key, top + _warp_at(x + cx, y + int(top), z + cz))
+	return _remember(key, top - _drop_at(x + cx, y + int(top), z + cz))
 
 func _remember(key: Vector3i, height: float) -> float:
 	_surface_cache[key] = height
 	return height
 
-## HOW FAR THIS LATTICE POINT HAS MOVED, up or down, in blocks. (vx, vz)
-## is the point and `wy` the level it sits at: the plane between the
-## block below it and the block above. See the note on WARP for what
-## locks one in place.
-func _warp_at(vx: int, wy: int, vz: int) -> float:
-	if warp <= 0.0 or wy <= 0 or wy >= H or vx < 0 or vx > SIZE or vz < 0 or vz > SIZE:
+## HOW FAR THIS CORNER HAS DROPPED, in blocks, never less than nothing
+## and never more than `drop`. (vx, vz) is the corner and `wy` the level
+## it sits at: the plane between the block below it and the block above.
+## See the note on DROP for which corners move at all.
+func _drop_at(vx: int, wy: int, vz: int) -> float:
+	if drop <= 0.0 or wy <= 0 or wy >= H or vx < 0 or vx > SIZE or vz < 0 or vz > SIZE:
 		return 0.0
 	var slot := (wy * SPAN + vz) * SPAN + vx
-	if _warp_done[slot] == 1:
-		return _warp_lut[slot]
-	var moved := warp * _swell(vx, wy, vz)
-	if vx > 0 and vx < SIZE and vz > 0 and vz < SIZE:
-		# Every one of the eight is inside this chunk: straight out of
-		# the bytes, no bounds arithmetic per block.
-		var base := ((wy * SIZE + vz) * SIZE + vx) << 1
-		for step: int in [-(SIZE * SIZE * 2), 0]:
-			for dz: int in [-(SIZE * 2), 0]:
-				for dx: int in [-2, 0]:
-					var block := _data.decode_u16(base + step + dz + dx)
-					if block == Blocks.AIR:
-						continue
-					# Natural ground bends. Everything else is a box.
-					if _lk_smooth[block] != 1 or _lk_solid[block] != 1:
-						_warp_lut[slot] = 0.0
-						_warp_done[slot] = 1
-						return 0.0   # exact either way
-	else:
-		for nx: int in [vx - 1, vx]:
-			for nz: int in [vz - 1, vz]:
-				for ny: int in [wy - 1, wy]:
-					var block := _block_at(nx, ny, nz)
-					if block == Blocks.AIR:
-						continue
-					if _lk_smooth[block] != 1 or _lk_solid[block] != 1:
-						moved = 0.0
-						break
-				if moved == 0.0:
-					break
-			if moved == 0.0:
-				break
-	_warp_lut[slot] = moved
-	_warp_done[slot] = 1
+	if _drop_done[slot] == 1:
+		return _drop_lut[slot]
+	var blocks := 0
+	var square := false
+	var inside := vx > 0 and vx < SIZE and vz > 0 and vz < SIZE
+	var base := ((wy * SIZE + vz) * SIZE + vx) << 1
+	for ny: int in [wy - 1, wy]:
+		for nz: int in [vz - 1, vz]:
+			for nx: int in [vx - 1, vx]:
+				# Inside the chunk it is straight out of the bytes; on an
+				# edge it has to go through the neighbouring chunk.
+				var block := _data.decode_u16(base
+						+ ((ny - wy) * SIZE + (nz - vz)) * SIZE * 2 + (nx - vx) * 2) \
+					if inside else _block_at(nx, ny, nz)
+				if block == Blocks.AIR or _lk_solid[block] != 1:
+					continue     # air, water, a plant: not one of the eight
+				blocks += 1
+				if _lk_smooth[block] != 1:
+					square = true
+	var fallen := 0.0
+	if blocks > 0 and blocks < 8 and not square:
+		fallen = drop * _swell(vx, wy, vz)
+	_drop_lut[slot] = fallen
+	_drop_done[slot] = 1
 	# Back out of the array, not the variable: the table holds 32-bit
-	# floats, so a point worked out here and the same point read from the
-	# table later must be the same number to the last bit. Otherwise the
-	# shape of a chunk depends on the order its blocks happened to ask,
-	# and two chunks disagree about their seam by a millionth of a block.
-	return _warp_lut[slot]
+	# floats, so a corner worked out here and the same corner read from
+	# the table later must be the same number to the last bit. Otherwise
+	# the shape of a chunk depends on the order its blocks happened to
+	# ask, and two chunks disagree about their seam by a millionth.
+	return _drop_lut[slot]
 
-## The shape of the warp, -1 .. 1, for a column of this chunk. Value
+## The shape of the drop, 0 .. 1, for a corner of this chunk. Value
 ## noise on a DIP_CELL lattice (smoothstepped, so it has no creases) with
 ## a little of the column's own hash on top. Worked out from the column's
 ## place in the WORLD, which is what makes two chunks meshed on different
@@ -543,9 +552,10 @@ func _swell(vx: int, wy: int, vz: int) -> float:
 		lerpf(_cell(gx, gy + 1, gz + 1), _cell(gx + 1, gy + 1, gz + 1), tx), tz)
 	# A little of the point's own hash on top of the swell, so a broad
 	# face is not perfectly smooth either.
-	var n := clampf(lerpf(low, high, ty) * 0.82
+	# 0 .. 1: none of the drop, or all of it. Never below nothing — a
+	# corner only ever falls.
+	return clampf(lerpf(low, high, ty) * 0.82
 		+ WorldGen.hash01(wx * 3 + wy, wz * 5 - wy, SWELL_SALT + 1) * 0.18, 0.0, 1.0)
-	return n * 2.0 - 1.0
 
 ## One corner of the noise's own lattice, hashed once per build.
 func _cell(gx: int, gy: int, gz: int) -> float:
@@ -601,9 +611,9 @@ const CORNER_XZ := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
 ## stands on and the ground on top of it. Both cross the face as straight
 ## lines — from the height at one corner to the height at the other — and
 ## the face is whatever lies between them. Neither is cut off at the
-## block's own bottom or top: a lattice point may have moved either way
-## (see WARP), so a corner can sit above the block it belongs to, and a
-## wall that stopped at the block would leave that strip open.
+## block's own bottom or top: a corner may have dropped (see DROP), so
+## the block above it grows down past its own floor to fill the space,
+## and a wall that stopped at the block would leave that strip open.
 ##
 ## Coloured from the block's side colour at the ground to its top colour
 ## at the top, so a cut runs green down to a brown foot rather than brown
@@ -702,7 +712,7 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 	var b := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 	for i in 4:
 		var c: Vector2 = CORNER_XZ[i]
-		b[i] = _warp_at(x + int(c.x), y, z + int(c.y))
+		b[i] = -_drop_at(x + int(c.x), y, z + int(c.y))
 	# Split through the diagonal whose two corners are LEVEL, so a block
 	# with one corner out of line is a flat triangle and a sloped one —
 	# flat from the midline — rather than a ridge from that corner to
@@ -824,15 +834,20 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 	var is_liquid := Blocks.LK_LIQUID[block] == 1
 	# Liquids drop their surface a bit below the block top, like Minecraft.
 	var top_y := 0.875 if is_liquid and _block_at(x, y + 1, z) != block else 1.0
-	# THE EIGHT CORNERS OF THIS BLOCK, as the lattice has them: [x][y][z],
-	# each 0 or 1 along the axis. A cube is only a cube when none of them
-	# has moved — which is the case for everything built, and for every
-	# block hemmed in by it (see WARP) — and otherwise it is drawn through
-	# whatever shape its corners make, the same as the ground around it.
+	# THE EIGHT CORNERS OF THIS BLOCK: [x][y][z], each 0 or 1 along the
+	# axis. A cube is only a cube when none of them has dropped — which
+	# is the case for everything built, and everything walled in by it
+	# (see DROP) — and otherwise it is drawn through whatever shape its
+	# corners make, the same as the ground around it.
+	#
+	# WATER KEEPS ITS SURFACE and follows the ground with its underside:
+	# its top is the flat sheet it has always been, and its bottom drops
+	# with the lake bed, so the water still reaches the ground it sits
+	# on rather than leaving a slot under its edge.
 	var corner_dy := PackedFloat32Array()
 	corner_dy.resize(8)
 	var corner_ready := 0
-	var bent := warp > 0.0 and not translucent
+	var bent := drop > 0.0
 	# The surface's arrays once, not a dictionary lookup per append.
 	# Packed arrays are shared, so these ARE the surface's arrays.
 	var verts: PackedVector3Array = _verts[key]
@@ -909,6 +924,8 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 				ao[i] = 3.0 if (s1 and s2) else float(int(s1) + int(s2) + int(c))
 
 		var start: int = verts.size()
+		# Each corner of THIS face, as it fell — for the fold below.
+		var face_dy := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 		var pattern := float(Blocks.LK_PATTERN_TOP[block] if n.y != 0
 			else Blocks.LK_PATTERN_SIDE[block])
 		var normal := Vector3(n)
@@ -931,9 +948,13 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 					var ay := (ci >> 1) & 1
 					var az := ci & 1
 					var slot := (((y + ay) * SPAN) + z + az) * SPAN + x + ax
-					corner_dy[ci] = _warp_lut[slot] if _warp_done[slot] == 1 \
-						else _warp_at(x + ax, y + ay, z + az)
+					var fell: float = _drop_lut[slot] if _drop_done[slot] == 1 \
+						else _drop_at(x + ax, y + ay, z + az)
+					# A liquid's own surface never moves; only what it
+					# stands on does.
+					corner_dy[ci] = 0.0 if (is_liquid and ay == 1) else -fell
 				vert.y += corner_dy[ci]
+				face_dy[i] = corner_dy[ci]
 			verts.append(vert)
 			normals.append(normal)
 			uvs.append(Vector2(pattern + CORNER_U[i], CORNER_V[i]))
@@ -941,11 +962,21 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 			colors.append(Color(color.r * brightness, color.g * brightness,
 				color.b * brightness, color.a))
 			uv2s.append(uv2)
-		# Flip the quad diagonal to match the AO gradient (kills the classic
-		# voxel AO anisotropy artifact).
+		# WHICH WAY THE QUAD FOLDS. Four corners that have each dropped by
+		# their own amount are not a flat shape, so the fold has to go
+		# somewhere: along the diagonal whose two corners are CLOSEST in
+		# height, which is the flattest line across the face and the
+		# smallest crease. It follows the ground, so it changes direction
+		# as the ground does rather than ruling the same way everywhere.
+		#
+		# A face nobody has dropped folds the old way instead: to match
+		# the AO gradient, which kills the classic voxel AO artefact.
 		# Godot front faces wind clockwise.
-		var order: PackedInt32Array = QUAD_ORDER if ao[0] + ao[2] <= ao[1] + ao[3] \
-			else QUAD_ORDER_FLIPPED
+		var fold := ao[0] + ao[2] <= ao[1] + ao[3]
+		var bend := absf(face_dy[0] - face_dy[2]) - absf(face_dy[1] - face_dy[3])
+		if bend != 0.0:
+			fold = bend < 0.0
+		var order: PackedInt32Array = QUAD_ORDER if fold else QUAD_ORDER_FLIPPED
 		for index in order:
 			indices.append(start + index)
 
@@ -1185,6 +1216,13 @@ func _add_shape(block: int, shape: int, x: int, y: int, z: int, cx: int, cz: int
 func _is_opaque_at(x: int, y: int, z: int) -> bool:
 	return _lk_opaque[_block_at(x, y, z)] == 1
 
+## HOW FAR THE GROUND UNDER A BLOCK HAS DROPPED, averaged over the four
+## corners it stands on. What a plant — a tuft here, a Kenney model in
+## ChunkView — has to come down by to keep its feet in the ground.
+func _ground_drop(x: int, y: int, z: int) -> float:
+	return (_drop_at(x, y, z) + _drop_at(x + 1, y, z)
+		+ _drop_at(x, y, z + 1) + _drop_at(x + 1, y, z + 1)) * 0.25
+
 ## Which cutout silhouette the plants shader draws for a cross block.
 ## 0 grass tuft · 1 flower · 2 mushroom · 3 flame · 4 leafy bush ·
 ## 5 ragged sheet (vines) · 6 grain stalks · 7 bare stick (torch/ladder
@@ -1215,6 +1253,11 @@ static func _plant_shape(block: int) -> int:
 
 func _add_cross(block: int, x: int, y: int, z: int, cx: int, cz: int) -> void:
 	var color := Blocks.LK_COLOR[block]
+	# A PLANT RIDES THE GROUND DOWN. It stands on the four corners under
+	# it, and if they have dropped and it has not, it is standing in the
+	# air. Its own average, so a tuft on a slope leans with nothing and
+	# sits at the middle of what it grows out of.
+	var root := -_ground_drop(x, y, z)
 	var jitter := _jitter(x, y, z, cx, cz)
 	var sway := Blocks.LK_SWAY[block]
 	var emit := Blocks.LK_EMIT[block]
@@ -1254,8 +1297,8 @@ func _add_cross(block: int, x: int, y: int, z: int, cx: int, cz: int) -> void:
 		var normal := Vector3.UP
 		var start: int = _verts["plants"].size()
 		var corners := [
-			Vector3(a.x, y, a.z), Vector3(b.x, y, b.z),
-			Vector3(b.x, y + tall, b.z), Vector3(a.x, y + tall, a.z),
+			Vector3(a.x, y + root, a.z), Vector3(b.x, y + root, b.z),
+			Vector3(b.x, y + root + tall, b.z), Vector3(a.x, y + root + tall, a.z),
 		]
 		var shape_id := _plant_shape(block)
 		var quad_uvs := [Vector2(shape_id, 1), Vector2(shape_id + 0.999, 1),

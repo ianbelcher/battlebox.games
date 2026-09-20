@@ -198,7 +198,7 @@ For anything you can see, take a picture of it — no screen required:
 tools/screenshot.sh /tmp/shots
 
 # The ground itself, with nobody on it: a hillside, or a sheer face, and
-# the same ground with the lattice flat (WORLD_WARP=0) to compare against
+# the same ground with the lattice flat (WORLD_DROP=0) to compare against
 WORLD_ICON_OUT=/tmp/ground.png xvfb-run -a godot --path game \
   --resolution 1200x700 --rendering-method gl_compatibility \
   res://tests/terrain_look.tscn

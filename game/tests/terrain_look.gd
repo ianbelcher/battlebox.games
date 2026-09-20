@@ -4,7 +4,7 @@ extends Node3D
 ## a fixed angle — so "does this still look like a stack of boxes" is a
 ## picture rather than a squint at a screenshot of a whole game.
 ##
-## It takes WORLD_WARP, so the same ground can be photographed bent and
+## It takes WORLD_DROP, so the same ground can be photographed bent and
 ## flat and the two held up against each other. That comparison is the
 ## only way to judge the number: at 0.25 the bend was there, and the
 ## hillside still read as boxes.
@@ -14,8 +14,8 @@ extends Node3D
 ##     --resolution 1200x700 --rendering-method gl_compatibility \
 ##     res://tests/terrain_look.tscn
 ##
-##   # a sheer face, flat for comparison (WORLD_WARP_THEME picks the world)
-##   WORLD_WARP_SCENE=wall WORLD_WARP=0 WORLD_ICON_OUT=/tmp/wall.png \
+##   # a sheer face, flat for comparison (WORLD_DROP_THEME picks the world)
+##   WORLD_DROP_SCENE=wall WORLD_DROP=0 WORLD_ICON_OUT=/tmp/wall.png \
 ##     xvfb-run -a godot --path game --resolution 1100x640 \
 ##     --rendering-method gl_compatibility res://tests/terrain_look.tscn
 var _out := ""
@@ -38,7 +38,7 @@ func _ready() -> void:
 	sun.light_energy = 1.25
 	add_child(sun)
 
-	var theme := OS.get_environment("WORLD_WARP_THEME")
+	var theme := OS.get_environment("WORLD_DROP_THEME")
 	if theme.is_empty():
 		theme = "classic"
 	var gen := WorldGen.new(4242, theme, 250)
@@ -46,9 +46,9 @@ func _ready() -> void:
 	for cz in range(-2, 3):
 		for cx in range(-2, 3):
 			chunks[Vector2i(cx, cz)] = gen.generate_chunk(cx, cz)
-	if OS.get_environment("WORLD_WARP_SCENE") == "wall":
+	if OS.get_environment("WORLD_DROP_SCENE") == "wall":
 		# A sheer face of stone with a shelf in front of it, so what the
-		# warp does to a VERTICAL surface is the whole picture.
+		# dropping corners does to a VERTICAL surface is the whole picture.
 		for key: Vector2i in chunks.keys():
 			var data: PackedByteArray = chunks[key]
 			data.fill(0)
@@ -64,9 +64,9 @@ func _ready() -> void:
 			chunks[key] = data
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/terrain.gdshader")
-	var warp := Mesher.WARP
-	if OS.has_environment("WORLD_WARP"):
-		warp = float(OS.get_environment("WORLD_WARP"))
+	var fall := Mesher.DROP
+	if OS.has_environment("WORLD_DROP"):
+		fall = float(OS.get_environment("WORLD_DROP"))
 	for cz in range(-1, 2):
 		for cx in range(-1, 2):
 			var neighbors := {}
@@ -75,7 +75,7 @@ func _ready() -> void:
 					Vector2i(1, -1), Vector2i(-1, 1)]:
 				neighbors[off] = chunks[Vector2i(cx, cz) + off]
 			var mesher := Mesher.new()
-			mesher.warp = warp
+			mesher.drop = fall
 			var built: Dictionary = mesher.build(chunks[Vector2i(cx, cz)], neighbors, cx, cz)
 			if not built.has("opaque"):
 				continue
@@ -90,7 +90,7 @@ func _ready() -> void:
 	var cam := Camera3D.new()
 	var look_at := Vector3(0, float(gen.height_at(0, 0)), 0)
 	var eye := Vector3(14, 6, 14)
-	if OS.get_environment("WORLD_WARP_SCENE") == "wall":
+	if OS.get_environment("WORLD_DROP_SCENE") == "wall":
 		look_at = Vector3(2, 36, 0)
 		eye = Vector3(-13, 3, 9)
 	cam.position = look_at + eye

@@ -11,7 +11,7 @@ extends SceneTree
 ## where a rule that is right in nine cases out of ten still leaves a
 ## hole every few hundred blocks.
 ##
-## It exists because the lattice bends (Mesher.WARP). Every corner where
+## It exists because the lattice bends (Mesher.DROP). Every corner where
 ## blocks meet is shared by up to eight of them, each drawing its own
 ## faces to it, and a rule that lets one of them move a corner while
 ## another draws it square does not error, log, or show up in anything
@@ -33,7 +33,7 @@ const AROUND := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1
 func _init() -> void:
 	var failures: Array = []
 	for theme: String in THEMES:
-		var bent := _open_edges(theme, Mesher.WARP)
+		var bent := _open_edges(theme, Mesher.DROP)
 		var flat := _open_edges(theme, 0.0)
 		print("WATERTIGHT %s: %d open edges bent, %d flat (%d triangles, %d%% of corners moved)"
 			% [theme, bent.open, flat.open, bent.tris, bent.moved])
@@ -41,7 +41,7 @@ func _init() -> void:
 			failures.append("%s: %d edges with nothing on the other side (%d with the lattice flat), e.g. %s"
 				% [theme, bent.open, flat.open, bent.samples])
 		if bent.moved < 20 and theme != "isles":
-			failures.append("%s: only %d%% of corners moved — is the warp reaching the world?"
+			failures.append("%s: only %d%% of corners moved — are the corners dropping at all?"
 				% [theme, bent.moved])
 	if failures.is_empty():
 		print("WATERTIGHT: ok")
@@ -53,7 +53,7 @@ func _init() -> void:
 
 ## One world's worth: how many edges have nothing on the other side, how
 ## many triangles there were, and how much of the lattice actually moved.
-func _open_edges(theme: String, warp: float) -> Dictionary:
+func _open_edges(theme: String, drop: float) -> Dictionary:
 	var gen := WorldGen.new(4242, theme, 250)
 	var chunks := {}
 	for cz in range(-SPAN - 1, SPAN + 2):
@@ -71,7 +71,7 @@ func _open_edges(theme: String, warp: float) -> Dictionary:
 			for off: Vector2i in AROUND:
 				neighbors[off] = chunks[here + off]
 			var mesher := Mesher.new()
-			mesher.warp = warp
+			mesher.drop = drop
 			var built: Dictionary = mesher.build(chunks[here], neighbors, cx, cz)
 			for key: String in ["opaque", "roof"]:
 				if not built.has(key):
