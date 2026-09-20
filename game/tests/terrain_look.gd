@@ -77,6 +77,20 @@ func _ready() -> void:
 					for y in top:
 						data.encode_u16(WorldGen.bidx(x, y, z), Blocks.STONE if y < top - 1 else Blocks.GRASS)
 			chunks[key] = data
+	if OS.get_environment("WORLD_DROP_SCENE") == "dug":
+		# What the digger leaves behind: a hole blown out of a hillside,
+		# so the ground UNDER the surface is what the picture is of.
+		for key: Vector2i in chunks.keys():
+			var data: PackedByteArray = chunks[key]
+			for z in 16:
+				for x in 16:
+					var wx := key.x * 16 + x
+					var wz := key.y * 16 + z
+					for y in range(20, 48):
+						var d := Vector3(wx, y, wz) - Vector3(0, 30, 0)
+						if d.length() < 5.5:
+							data.encode_u16(WorldGen.bidx(x, y, z), Blocks.AIR)
+			chunks[key] = data
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/terrain.gdshader")
 	var fall := Mesher.ROUGH
@@ -111,6 +125,9 @@ func _ready() -> void:
 	elif OS.get_environment("WORLD_DROP_SCENE") == "steps":
 		look_at = Vector3(0, 34, 0)
 		eye = Vector3(-11, 5, -11)
+	elif OS.get_environment("WORLD_DROP_SCENE") == "dug":
+		look_at = Vector3(0, 29, 0)
+		eye = Vector3(-9, 5, -9)
 	elif OS.get_environment("WORLD_DROP_SCENE") == "tree":
 		# The foot of a tree in the classic world, close up: does the
 		# ground still reach its trunk?
