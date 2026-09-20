@@ -83,18 +83,33 @@ func test_a_straight_step_is_a_ramp() -> void:
 	equal(m._heights(5, 1, 8), PackedFloat64Array([0, 0, 1, 1]),
 		"open to the north, solid to the south: the north corners drop")
 
-func test_a_lone_block_stays_a_block() -> void:
+func test_a_lone_block_of_ground_is_a_mound() -> void:
+	# THE PRICE OF A SMOOTH DIAGONAL. A corner drops when any of the four
+	# columns meeting it is open, and beside a lone block every corner
+	# has three open columns — so it comes out as a little mound rather
+	# than a cube. Locally it is the same shape as the notch in a
+	# diagonal hillside, so no rule can slope one and not the other.
+	# Anything BUILT is unaffected: those keep their corners square.
 	var m := _shaped(_ground(func(x: int, z: int) -> int: return 2 if x == 8 and z == 8 else 1))
-	equal(m._heights(8, 1, 8), PackedFloat64Array([1, 1, 1, 1]),
-		"nothing beside it slopes, so nothing pulls its corners down")
+	equal(m._heights(8, 1, 8), PackedFloat64Array([0, 0, 0, 0]),
+		"a lone block of natural ground slopes away on every side")
+	var planks := _ground(func(_x: int, _z: int) -> int: return 1)
+	planks[_at(8, 1, 8)] = Blocks.PLANKS
+	var built := _shaped(planks)
+	equal(built._heights(8, 1, 8), PackedFloat64Array([1, 1, 1, 1]),
+		"...but a block somebody placed is still a block")
 	# And the ground around it is flat: the block stands on whole corners.
 	equal(m._heights(7, 0, 8), PackedFloat64Array([1, 1, 1, 1]),
 		"the ground under a block does not dip beside it")
 
-func test_a_one_wide_hole_keeps_its_walls() -> void:
+func test_a_one_wide_hole_is_a_funnel() -> void:
+	# The same trade as the lone block above: the corners around a hole
+	# one block wide each have an open column, so they fall into it. It
+	# is the shape of a diagonal notch seen from the other side.
 	var m := _shaped(_ground(func(x: int, z: int) -> int: return 1 if x == 8 and z == 8 else 2))
-	equal(m._heights(8, 1, 7), PackedFloat64Array([1, 1, 1, 1]),
-		"a hole one block wide is a hole, not a funnel")
+	var h := m._heights(8, 1, 7)
+	equal(h[3], 0.0, "the ground falls into a hole one block wide")
+	equal(h[0], 1.0, "and is still whole on its far side")
 
 func test_anything_solid_holds_the_ground_up_beside_it() -> void:
 	# A step with a glowstone set into the lower ground right in front

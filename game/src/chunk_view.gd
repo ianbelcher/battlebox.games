@@ -788,7 +788,15 @@ const FOLIAGE_SCALES := {Blocks.TALL_GRASS: 1.0, Blocks.FERN: 1.5,
 ## every instance at its own size, so a meadow is grass of different
 ## heights with the ground showing through, and the blocks underneath
 ## stop reading as blocks.
-const GRASS_VARIANTS := ["proc:grass", "proc:clump", "proc:fine"]
+const GRASS_VARIANTS := ["proc:grass", "proc:clump", "proc:fine",
+	"proc:tall", "proc:broad", "proc:dry"]
+## GRASS GROWS IN PATCHES, not shuffled. Dealing a build per column by its
+## own hash mixes all six evenly everywhere, which from standing height
+## is one texture again — the eye reads the average, not the pieces. A
+## patch is GRASS_PATCH blocks across and is mostly one kind, with a
+## quarter of its columns taking a neighbouring patch's kind so the edges
+## interlock instead of tiling.
+const GRASS_PATCH := 7
 ## How much an instance's size wanders from the table above: 0.75 to 1.45
 ## of it.
 const FOLIAGE_SIZE_SPREAD := 0.7
@@ -842,9 +850,7 @@ static func _foliage_of(data: PackedByteArray, cpos: Vector2i,
 		var yaw := WorldGen.hash01(wx, wz, y) * TAU
 		var model := str(FOLIAGE_MODELS[block])
 		if block == Blocks.TALL_GRASS:
-			var pick := WorldGen.hash01(wx, wz, y + 7)
-			model = GRASS_VARIANTS[0] if pick < 0.55 else (GRASS_VARIANTS[1] if pick < 0.85
-				else GRASS_VARIANTS[2])
+			model = GRASS_VARIANTS[_grass_kind(wx, wz)]
 		var size := float(FOLIAGE_SCALES.get(block, 1.2)) \
 			* (1.0 - FOLIAGE_SIZE_SPREAD * 0.35 + FOLIAGE_SIZE_SPREAD * WorldGen.hash01(wx, wz, y + 11))
 		# Down with the ground it grows out of, or it stands in the air.
@@ -857,6 +863,19 @@ static func _foliage_of(data: PackedByteArray, cpos: Vector2i,
 			buckets[model] = []
 		(buckets[model] as Array).append(t)
 	return buckets
+
+## WHICH GRASS GROWS AT THIS COLUMN: its patch's kind, or a neighbouring
+## patch's for a quarter of the columns, so long grass stands with long
+## grass and the patches blur into each other at their edges.
+static func _grass_kind(wx: int, wz: int) -> int:
+	var cell_x := floori(float(wx) / float(GRASS_PATCH))
+	var cell_z := floori(float(wz) / float(GRASS_PATCH))
+	if WorldGen.hash01(wx, wz, 77) < 0.25:
+		# Borrow from whichever patch is nearest across the border.
+		cell_x += 1 if posmod(wx, GRASS_PATCH) > GRASS_PATCH / 2 else -1
+		cell_z += 1 if posmod(wz, GRASS_PATCH) > GRASS_PATCH / 2 else -1
+	return int(WorldGen.hash01(cell_x, cell_z, 41) * float(GRASS_VARIANTS.size())) \
+		% GRASS_VARIANTS.size()
 
 ## What a chunk that is NOT being meshed still has to provide (see
 ## _mesh_dirty): its top map for the radar and big map, and its warp

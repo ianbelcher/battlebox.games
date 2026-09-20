@@ -133,6 +133,41 @@ func walk_out(origin: Vector3i, radius: float) -> void:
 	if not cut.is_empty():
 		world.cl_batch.rpc(cut, Blocks.AIR)
 
+## ANYTHING ROOTED ON THESE CELLS GOES WITH THEM. A plant has no roots of
+## its own: it is a block that happens to sit on another one, and when
+## the ground under it is shot, blasted or bored away it was left
+## standing in the air. Digging has always taken the plant above with it
+## (see WorldNode.sv_edit); everything else that clears a cell now does
+## the same, through here.
+##
+## Returns the cells it cleared, for the caller to put in its own batch.
+func clear_rooted_on(cells: Array) -> Array:
+	var pulled := rooted_above(cells, func(pos: Vector3i) -> int:
+		return world.store.get_block(pos))
+	for pos: Vector3i in pulled:
+		world.store.set_block(pos, Blocks.AIR)
+	return pulled
+
+## WHICH CELLS COME OUT, given a way to read blocks: the plant standing on
+## each of these, the plant standing on that, and so on. Pure, so the rule
+## can be tested without a world to dig up.
+static func rooted_above(cells: Array, block_at: Callable) -> Array:
+	var pulled: Array = []
+	var looking: Array = cells
+	# A stack of them — bamboo, a cattail — comes out from the bottom up.
+	for _pass in 4:
+		var next: Array = []
+		for pos: Vector3i in looking:
+			var above: Vector3i = pos + Vector3i(0, 1, 0)
+			if Blocks.LK_CROSS[int(block_at.call(above))] != 1:
+				continue
+			pulled.append(above)
+			next.append(above)
+		if next.is_empty():
+			break
+		looking = next
+	return pulled
+
 func blast(origin: Vector3i, radius: float, pre_cleared: Array, impact := Vector3i(0, -999, 0)) -> void:
 	var cleared: Array = pre_cleared.duplicate()
 	var reach := int(ceil(radius))
@@ -165,6 +200,7 @@ func blast(origin: Vector3i, radius: float, pre_cleared: Array, impact := Vector
 					continue
 				world.store.set_block(pos, Blocks.AIR)
 				cleared.append(pos)
+	cleared.append_array(clear_rooted_on(cleared))
 	world.cl_batch.rpc(cleared, Blocks.AIR)
 	# Nothing moved, nothing to smooth — skip the heightmap pass for shots
 	# that hit air or bounced off diamond.

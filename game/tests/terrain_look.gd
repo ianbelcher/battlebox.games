@@ -46,6 +46,21 @@ func _ready() -> void:
 	for cz in range(-2, 3):
 		for cx in range(-2, 3):
 			chunks[Vector2i(cx, cz)] = gen.generate_chunk(cx, cz)
+	if OS.get_environment("WORLD_DROP_SCENE") == "steps":
+		# A hillside climbing DIAGONALLY, which is the shape that comes
+		# out as a staircase of notches rather than a slope.
+		for key: Vector2i in chunks.keys():
+			var data: PackedByteArray = chunks[key]
+			data.fill(0)
+			for z in 16:
+				for x in 16:
+					var wx := key.x * 16 + x
+					var wz := key.y * 16 + z
+					var top: int = clampi(34 + int(floor((wx + wz) * 0.5)), 28, 48)
+					for y in top:
+						data.encode_u16(WorldGen.bidx(x, y, z),
+							Blocks.STONE if y < top - 1 else Blocks.GRASS)
+			chunks[key] = data
 	if OS.get_environment("WORLD_DROP_SCENE") == "wall":
 		# A sheer face of stone with a shelf in front of it, so what the
 		# dropping corners does to a VERTICAL surface is the whole picture.
@@ -93,6 +108,14 @@ func _ready() -> void:
 	if OS.get_environment("WORLD_DROP_SCENE") == "wall":
 		look_at = Vector3(2, 36, 0)
 		eye = Vector3(-13, 3, 9)
+	elif OS.get_environment("WORLD_DROP_SCENE") == "steps":
+		look_at = Vector3(0, 34, 0)
+		eye = Vector3(-11, 5, -11)
+	elif OS.get_environment("WORLD_DROP_SCENE") == "tree":
+		# The foot of a tree in the classic world, close up: does the
+		# ground still reach its trunk?
+		look_at = Vector3(12.5, 30.5, -10.5)
+		eye = Vector3(-7, 1.5, 6)
 	cam.position = look_at + eye
 	cam.look_at_from_position(cam.position, look_at, Vector3.UP)
 	cam.fov = 60.0

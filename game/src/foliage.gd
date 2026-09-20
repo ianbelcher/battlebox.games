@@ -12,7 +12,10 @@ extends Object
 ## per blade, leaning out from a root, coloured darker at the root and
 ## lighter at the tip, double-sided. Three grasses of different bulk, and
 ## reeds that are what a reed is — a few near-vertical stalks two and a
-## half blocks tall with a brown seed head on some of them. Everything is
+## half blocks tall with a brown seed head on some of them. Six grasses
+## in all: the ordinary tuft, a thick tussock, a fine one, a tall narrow
+## one, broad low leaves and dry straw — a meadow is not one plant, and
+## they grow in PATCHES rather than shuffled (see ChunkView.GRASS_PATCH). Everything is
 ## built at block scale (a height of 1.0 is one block) and deterministic
 ## from a seed, so a chunk looks the same on every client.
 ##
@@ -42,6 +45,21 @@ static func build(kind: String) -> Mesh:
 		"proc:fine":
 			mesh = _blades(5, 0.3, 0.5, 0.07, 0.3, 303,
 				Color(0.34, 0.56, 0.22), Color(0.62, 0.80, 0.34))
+		"proc:tall":
+			# THE LONG STUFF: few blades, but high and narrow, the kind
+			# that stands above everything around it.
+			mesh = _blades(9, 1.05, 1.6, 0.09, 0.3, 505,
+				Color(0.28, 0.5, 0.19), Color(0.62, 0.82, 0.32))
+		"proc:broad":
+			# Wide leaves close to the ground, few of them: the low leafy
+			# cover between tussocks.
+			mesh = _blades(5, 0.35, 0.6, 0.26, 0.5, 606,
+				Color(0.24, 0.45, 0.17), Color(0.5, 0.72, 0.26))
+		"proc:dry":
+			# Straw. Thin, pale, half-fallen — the patches of a field that
+			# have gone over.
+			mesh = _blades(11, 0.4, 0.75, 0.08, 0.6, 707,
+				Color(0.47, 0.44, 0.19), Color(0.78, 0.73, 0.38))
 		"proc:reeds":
 			mesh = _reeds(6, 2.2, 2.8, 404)
 	_cache[kind] = mesh

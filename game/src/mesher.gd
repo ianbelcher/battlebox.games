@@ -85,11 +85,21 @@ const SMOOTH_CORNERS := true
 ## where you stand: the ground is drawn up to this far below the block
 ## you are actually standing on. That is the price of doing it in the
 ## mesher alone, and why it stops well short of a whole block.
-const DROP := 0.6
+const DROP := 0.75
 const SWELL_SALT := 7919
+## What counts as GROWN rather than built, and so bends with the ground.
+##
+## TREE TRUNKS ARE IN IT, and they have to be. A log that kept its corners
+## square held the four under it up while the ground a step away fell the
+## full DROP, so every tree stood on a little pedestal with the earth
+## pulled away around it — read as trees floating over the ground.
+##
+## LEAVES ARE NOT. A canopy is a loose shell of blocks, and dropping the
+## corners of blocks that only touch each other at an edge tears it into
+## scraps hanging off the top of a trunk.
 const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
 	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
-	Blocks.LEAVES, Blocks.LEAVES_DARK, Blocks.LEAVES_LIGHT, Blocks.LEAVES_PINK]
+	Blocks.LOG, 125, 126, 127, 128, Blocks.WARPED_STEM]
 
 const SHADE_TOP := 1.0
 const SHADE_BOTTOM := 0.82
@@ -436,23 +446,30 @@ func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
 	var key := Vector3i(x + cx, y, z + cz)
 	if _surface_cache.has(key):
 		return _surface_cache[key]
-	var top := 0.0
+	# THE GROUND FALLS TO WHATEVER IS MISSING. Of the four columns that
+	# meet at this corner, if any one of them is open at this level then
+	# the ground steps down here and the corner goes with it — one block,
+	# never more, so a cliff is still a cliff.
+	#
+	# It used to ask each block whether ITS OWN two axes stepped down,
+	# which cannot see the column diagonally across the corner. On ground
+	# that climbs north or east that is the same answer; on ground that
+	# climbs diagonally it is not, and half the blocks of a diagonal
+	# slope kept a flat top between two that had ramped. That is what
+	# made a diagonal hillside a field of little pyramids instead of a
+	# slope.
+	var top := 1.0
 	for dx: int in [cx - 1, cx]:
 		for dz: int in [cz - 1, cz]:
 			var nx: int = x + dx
 			var nz: int = z + dz
 			if _firm_at(nx, y + 1, nz):
-				top = 1.0          # something stands on it
-			elif _firm_at(nx, y, nz):
-				var block := _block_at(nx, y, nz)
-				if _smooth(block, nx, y, nz):
-					top = maxf(top, _opinion(nx, y, nz, cx - dx, cz - dz))
-				else:
-					top = 1.0      # built, or with something on it: whole
-			if top >= 1.0:
-				break
-		if top >= 1.0:
-			break
+				return _remember(key, 1.0 - _drop_at(x + cx, y + 1, z + cz))
+			if not _firm_at(nx, y, nz):
+				top = 0.0          # open: the ground steps down here
+			elif not _smooth(_block_at(nx, y, nz), nx, y, nz):
+				# Built, or carrying something: it keeps its corners.
+				return _remember(key, 1.0 - _drop_at(x + cx, y + 1, z + cz))
 	# WHICH LATTICE POINT this corner sits on — its own block's top, or
 	# the one below when the ground steps down here — and then that
 	# point's own offset. Everything touching the point reaches the same

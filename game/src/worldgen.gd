@@ -1958,6 +1958,19 @@ func _grass_here(wx: int, wz: int, chance: float) -> bool:
 	var clump := clampf(_detail.get_noise_2d(wx * 2.5, wz * 2.5) * 1.3 + 0.5, 0.0, 1.0)
 	return hash01(wx, wz, 9) < chance * (0.35 + 1.3 * clump)
 
+## THE SMALL STUFF GROWS IN BEDS TOO. Flowers, ferns and mushrooms were
+## each a flat roll per column, which sprinkles them one here, one there,
+## evenly over a whole biome — and a field with one daisy every nine
+## blocks reads as a field with no daisies. Same gate as the grass, at a
+## coarser scale and its own salt per plant, so each kind has its own
+## patches: a bed of bluebells, a stand of ferns, bare ground between.
+func _bed_here(wx: int, wz: int, salt: int, chance: float, scale := 1.4) -> bool:
+	var patch := clampf(_detail.get_noise_2d((wx + salt * 37) * scale,
+		(wz - salt * 53) * scale) * 1.5 + 0.5, 0.0, 1.0)
+	if patch < 0.45:
+		return false        # between the beds: bare
+	return hash01(wx, wz, salt) < chance * (0.4 + 2.4 * (patch - 0.45))
+
 ## Per-biome surface decoration. Trees only fully inside the chunk so
 ## canopies never cross borders (generation stays independent per chunk).
 func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz: int, ground: int) -> void:
@@ -1969,9 +1982,9 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 			if hash01(wx, wz, 20) < 0.14:
 				data.encode_u16(bidx(lx, ground, lz), Blocks.WATER)
 				return
-			if hash01(wx, wz, 12) < 0.03:
+			if _bed_here(wx, wz, 12, 0.10):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.MUSHROOM)
-			elif _grass_here(wx, wz, 0.3):
+			elif _grass_here(wx, wz, 0.38):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif interior and tree_roll < 0.012:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
@@ -1980,32 +1993,32 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 1)
 			elif _grass_here(wx, wz, 0.38):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
-			elif hash01(wx, wz, 12) < 0.012:
+			elif _bed_here(wx, wz, 12, 0.05):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.MUSHROOM)
-			elif hash01(wx, wz, 10) < 0.02:
+			elif _bed_here(wx, wz, 10, 0.09):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.FLOWER_PINK)
-			elif hash01(wx, wz, 14) < 0.03:
+			elif _bed_here(wx, wz, 14, 0.12):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.DAISY)
-			elif hash01(wx, wz, 15) < 0.02:
+			elif _bed_here(wx, wz, 15, 0.09):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.BLUEBELL)
 		Biome.FOREST:
 			if interior and tree_roll < 0.03:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
-			elif _grass_here(wx, wz, 0.28):
+			elif _grass_here(wx, wz, 0.37):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
-			elif hash01(wx, wz, 12) < 0.007:
+			elif _bed_here(wx, wz, 12, 0.03):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.MUSHROOM)
-			elif hash01(wx, wz, 14) < 0.08:
+			elif _bed_here(wx, wz, 14, 0.28):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.FERN)
 		Biome.PINE:
 			if lx >= 2 and lx < 14 and lz >= 2 and lz < 14 and tree_roll < 0.05:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 2)
-			elif _grass_here(wx, wz, 0.14):
+			elif _grass_here(wx, wz, 0.2):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 14) < 0.08:
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.FERN)
 		Biome.FLOWERS:
-			if hash01(wx, wz, 10) < 0.15:
+			if _bed_here(wx, wz, 10, 0.45):
 				var pick := hash01(wx, wz, 11)
 				var flower := Blocks.FLOWER_RED
 				if pick > 0.66:
@@ -2013,13 +2026,13 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 				elif pick > 0.33:
 					flower = Blocks.FLOWER_YELLOW
 				data.encode_u16(bidx(lx, ground + 1, lz), flower)
-			elif _grass_here(wx, wz, 0.26):
+			elif _grass_here(wx, wz, 0.34):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 13) < 0.01:
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.BERRY_BUSH)
-			elif hash01(wx, wz, 16) < 0.06:
+			elif _bed_here(wx, wz, 16, 0.22):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.WHEAT_PLANT)
-			elif hash01(wx, wz, 17) < 0.03:
+			elif _bed_here(wx, wz, 17, 0.12):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.BLUEBELL)
 			elif interior and tree_roll < 0.004:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
@@ -2042,7 +2055,7 @@ func _scatter_grass_column(data: PackedByteArray, lx: int, lz: int, wx: int, wz:
 			# through, which is what every child expects a field to be.
 			if interior and tree_roll < 0.006:
 				_plant_tree(data, lx, ground + 1, lz, hash01(wx, wz, 8), 0)
-			elif _grass_here(wx, wz, 0.34):
+			elif _grass_here(wx, wz, 0.44):
 				data.encode_u16(bidx(lx, ground + 1, lz), Blocks.TALL_GRASS)
 			elif hash01(wx, wz, 10) < 0.02:
 				var pick := hash01(wx, wz, 11)

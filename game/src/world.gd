@@ -743,11 +743,11 @@ func sv_edit(slot: int, pos: Vector3i, block: int) -> void:
 	cl_edit.rpc(pos, block, id)
 	if block == Blocks.AIR:
 		# Foliage has no roots of its own: dig the block it sat on and the
-		# plant above pops with it.
-		var above := pos + Vector3i(0, 1, 0)
-		if Blocks.is_cross(store.get_block(above)):
-			store.set_block(above, Blocks.AIR)
-			cl_edit.rpc(above, Blocks.AIR, id)
+		# plant above pops with it. See TerrainSim.clear_rooted_on, which
+		# is the same rule for everything that is not a dig.
+		var pulled := terrain.clear_rooted_on([pos])
+		if not pulled.is_empty():
+			cl_batch.rpc(pulled, Blocks.AIR)
 		terrain.disturb_water([pos])
 
 ## Stamp a prefab structure: only air, liquids and plants are overwritten,
@@ -881,6 +881,9 @@ func sv_shot(slot: int, cell: Vector3i, kind: int) -> void:
 					and Blocks.hardness(block) <= 2 and not Blocks.is_liquid(block):
 				store.set_block(cell, Blocks.AIR)
 				cl_edit.rpc(cell, Blocks.AIR, id)
+				var pulled := terrain.clear_rooted_on([cell])
+				if not pulled.is_empty():
+					cl_batch.rpc(pulled, Blocks.AIR)
 				terrain.disturb_water([cell])
 				cl_suck.rpc(id, block)
 			return
@@ -1053,6 +1056,7 @@ func sv_dig_tunnel(slot: int, origin: Vector3, dir: Vector3) -> void:
 						store.set_block(pos, Blocks.AIR)
 						bored.append(pos)
 	if not bored.is_empty():
+		bored.append_array(terrain.clear_rooted_on(bored))
 		cl_batch.rpc(bored, Blocks.AIR)
 		terrain.disturb_water(bored)
 
