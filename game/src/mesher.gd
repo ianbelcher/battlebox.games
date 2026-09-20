@@ -434,6 +434,26 @@ func _remember(key: Vector3i, height: float) -> float:
 	_surface_cache[key] = height
 	return height
 
+## WHICH WAY THE GROUND FACES AT THIS POINT, from the height map either
+## side of it. The ground is a surface, not a heap of facets: giving all
+## three corners of a triangle the triangle's own normal lights every one
+## of them as its own little plane, so next to each other they jump from
+## bright to nearly black and a hillside reads as a pile of shards with
+## bits missing. Sharing a normal at each point — worked out from the
+## slope of the map, which is the same from whichever block asks — lights
+## the whole surface as one piece.
+##
+## Walls are not done this way: a cliff face and the top of a block are
+## meant to look like different things.
+func _ground_normal(vx: int, wy: int, vz: int) -> Vector3:
+	var west := _sink_at(vx - 1, wy, vz)
+	var east := _sink_at(vx + 1, wy, vz)
+	var north := _sink_at(vx, wy, vz - 1)
+	var south := _sink_at(vx, wy, vz + 1)
+	# A sink is how far DOWN, so a bigger sink to the east means the
+	# ground falls that way: the normal leans west.
+	return Vector3(east - west, 2.0, south - north).normalized()
+
 ## HOW FAR THIS LATTICE POINT SITS BELOW ITS OWN LEVEL, 0 .. 1.
 ##
 ## THE POINTS ARE A HEIGHT MAP, and this is the sample. A point's height
@@ -686,6 +706,12 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		var shade := 1.0 - ao_step * ao
 		top_cols.append(Color(top_color.r * shade, top_color.g * shade,
 			top_color.b * shade, top_color.a))
+	# One normal per corner, from the slope of the map — see
+	# _ground_normal. The whole reason the ground can look smooth.
+	var corner_normals: Array = []
+	for i in 4:
+		var c2: Vector2 = CORNER_XZ[i]
+		corner_normals.append(_ground_normal(x + int(c2.x), y + 1, z + int(c2.y)))
 	for t: Array in tris:
 		var a: Vector3 = p[t[0]]
 		var bpt: Vector3 = p[t[1]]
@@ -696,7 +722,7 @@ func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
 		# Lit between a side and a top, by how far it tips.
 		var bright := lerpf((SHADE_X + SHADE_Z) * 0.5, SHADE_TOP, clampf(n.y, 0.0, 1.0)) * jitter
 		_tri("opaque", [a, bpt, c], n, [top_cols[t[0]], top_cols[t[1]], top_cols[t[2]]],
-			bright, emit)
+			bright, emit, [corner_normals[t[0]], corner_normals[t[1]], corner_normals[t[2]]])
 	for side in 4:
 		var step: Vector2i = SIDE_STEP[side]
 		if _is_opaque_at(x + step.x, y, z + step.y):
@@ -747,13 +773,19 @@ func _merged(lights: Array) -> Array:
 
 ## One triangle with a colour per vertex, wound clockwise as seen from
 ## `normal`'s side, which is the side Godot draws.
+## `normals` gives a normal per point, for a surface that should be lit as
+## one piece rather than as facets; leave it empty and all three share
+## `normal`.
 func _tri(key: String, pts: Array, normal: Vector3, cols: Array, brightness: float,
-		emit: float) -> void:
+		emit: float, normals: Array = []) -> void:
 	var a: Vector3 = pts[0]
 	var b: Vector3 = pts[1]
 	var c: Vector3 = pts[2]
 	var cb: Color = cols[1]
 	var cc: Color = cols[2]
+	var na: Vector3 = normals[0] if normals.size() == 3 else normal
+	var nb: Vector3 = normals[1] if normals.size() == 3 else normal
+	var nc: Vector3 = normals[2] if normals.size() == 3 else normal
 	if (b - a).cross(c - a).dot(normal) > 0.0:
 		var t := b
 		b = c
@@ -761,12 +793,15 @@ func _tri(key: String, pts: Array, normal: Vector3, cols: Array, brightness: flo
 		var tc := cb
 		cb = cc
 		cc = tc
+		var tn := nb
+		nb = nc
+		nc = tn
 	var start: int = _verts[key].size()
 	var i := 0
-	for pair: Array in [[a, cols[0]], [b, cb], [c, cc]]:
+	for pair: Array in [[a, cols[0], na], [b, cb, nb], [c, cc, nc]]:
 		var color: Color = pair[1]
 		_verts[key].append(pair[0])
-		_normals[key].append(normal)
+		_normals[key].append(pair[2])
 		_uvs[key].append(Vector2(0, 0))
 		_colors[key].append(Color(color.r * brightness, color.g * brightness, color.b * brightness, color.a))
 		_uv2s[key].append(Vector2(0.0, emit))
@@ -878,6 +913,13 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 		var pattern := float(Blocks.LK_PATTERN_TOP[block] if n.y != 0
 			else Blocks.LK_PATTERN_SIDE[block])
 		var normal := Vector3(n)
+		# THE TOP OF NATURAL GROUND IS LIT AS GROUND, even when the block
+		# happens to be square: one normal per corner from the slope of
+		# the map (see _ground_normal), the same as the shaped blocks
+		# around it. Without it, a flat block among sloped ones is a
+		# bright tile in the middle of a hillside.
+		var smooth_top := n.y == 1 and not translucent and not is_liquid \
+			and _lk_smooth[block] == 1 and _block_at(x, y + 1, z) == Blocks.AIR
 		# Leaves sway everywhere; liquids wave only on their surface.
 		var vertex_sway := sway
 		if is_liquid:
@@ -905,7 +947,10 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 				vert.y += corner_dy[ci]
 				face_dy[i] = corner_dy[ci]
 			verts.append(vert)
-			normals.append(normal)
+			if smooth_top:
+				normals.append(_ground_normal(int(vert.x), y + 1, int(vert.z)))
+			else:
+				normals.append(normal)
 			uvs.append(Vector2(pattern + CORNER_U[i], CORNER_V[i]))
 			var brightness := shade * jitter * (1.0 - ao_step * ao[i])
 			colors.append(Color(color.r * brightness, color.g * brightness,
