@@ -826,7 +826,7 @@ func _foliage_mesh(model: String) -> Mesh:
 ## thread it was paid again for every chunk uploaded (three a frame while
 ## streaming) and every edit remesh.
 ## `roots` is how far the ground has dropped under each column (see
-## Mesher.DROP): a plant stands on corners that have moved, and one left
+## Mesher.ROUGH): a plant stands on points that have moved, and one left
 ## at the block's own height is standing in the air.
 static func _foliage_of(data: PackedByteArray, cpos: Vector2i,
 		roots: PackedFloat32Array) -> Dictionary:

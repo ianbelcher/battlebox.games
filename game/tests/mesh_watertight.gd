@@ -35,14 +35,31 @@ func _init() -> void:
 	for theme: String in THEMES:
 		var bent := _open_edges(theme, Mesher.ROUGH)
 		var flat := _open_edges(theme, 0.0)
-		print("WATERTIGHT %s: %d open edges bent, %d flat (%d triangles, %d%% of corners moved)"
-			% [theme, bent.open, flat.open, bent.tris, bent.moved])
+		print("WATERTIGHT %s: %d open edges bent, %d flat (%d triangles, %d%% of corners moved, %d%% flat, %d points worked)"
+			% [theme, bent.open, flat.open, bent.tris, bent.moved, flat.moved, bent.worked])
 		if bent.open > 0 or flat.open > 0:
 			failures.append("%s: %d edges with nothing on the other side (%d with the lattice flat), e.g. %s"
 				% [theme, bent.open, flat.open, bent.samples])
-		if bent.moved < 20 and theme != "isles":
+		# ARE THE CORNERS DROPPING AT ALL? A share of every vertex, so
+		# the number is low where most of the mesh is underground: in
+		# Caverns nearly all of it is the inside of a cave, drawn as the
+		# blocks it is. What matters is that the lattice moves, and that
+		# it moves BECAUSE of the roughness — with it turned off the only
+		# corners off the lattice are the ones a slope averages.
+		if bent.moved < 10:
 			failures.append("%s: only %d%% of corners moved — are the corners dropping at all?"
 				% [theme, bent.moved])
+		# EVERY POINT IS WORKED OUT ONCE. A column asks for some thirty of
+		# them and nearly all are its neighbours' too, so they are cached
+		# — and a change that breaks the cache does not fail anything, it
+		# just doubles how long meshing a chunk takes, which is a frame
+		# rate nobody can trace back to it. A chunk has 324 columns.
+		if bent.worked > 1200:
+			failures.append("%s: %d points worked out for one chunk — the corner cache is not working"
+				% [theme, bent.worked])
+		if bent.moved <= flat.moved:
+			failures.append("%s: %d%% of corners moved with the lattice bent and %d%% with it flat — roughness is doing nothing"
+				% [theme, bent.moved, flat.moved])
 	if failures.is_empty():
 		print("WATERTIGHT: ok")
 		quit(0)
@@ -62,6 +79,7 @@ func _open_edges(theme: String, rough: float) -> Dictionary:
 	_chunks = chunks
 	var edges := {}
 	var tris := 0
+	var worked := 0
 	var moved := 0
 	var seen := 0
 	for cz in range(-SPAN, SPAN + 1):
@@ -73,6 +91,7 @@ func _open_edges(theme: String, rough: float) -> Dictionary:
 			var mesher := Mesher.new()
 			mesher.rough = rough
 			var built: Dictionary = mesher.build(chunks[here], neighbors, cx, cz)
+			worked = maxi(worked, mesher.corners_worked)
 			for key: String in ["opaque", "roof"]:
 				if not built.has(key):
 					continue
@@ -118,7 +137,7 @@ func _open_edges(theme: String, rough: float) -> Dictionary:
 		open += 1
 		if samples.size() < 4:
 			samples.append(edge)
-	return {"open": open, "tris": tris, "samples": samples,
+	return {"open": open, "tris": tris, "samples": samples, "worked": worked,
 		"moved": int(100.0 * float(moved) / maxf(float(seen), 1.0))}
 
 ## The world this run is counting, for _drawn_loose_beside.

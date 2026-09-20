@@ -14,6 +14,55 @@ extends RefCounted
 const SIZE := WorldGen.CHUNK_SIZE
 const H := WorldGen.CHUNK_H
 
+## THE GROUND IS A SURFACE, NOT A PILE OF LIDS.
+##
+## Every place four columns of ground meet is a POINT, and the ground is
+## drawn through those points: one piece of skin per column, stretched
+## over the four corners it shares with the columns around it. The blocks
+## say where the points are and how high; what happens between them is
+## the skin's business, and it does not care whether there is a block
+## under any particular part of it.
+##
+## That is the whole idea, and everything below follows from it:
+##
+##   - A step of ONE level has no vertical face. Both columns read the
+##     same height for the corners between them, so the two pieces meet
+##     edge to edge and the step is a slope.
+##   - A diagonal hillside is ONE PLANE. It used to be a field of little
+##     pyramids with holes between them, because a cell with no block in
+##     it had no face to draw.
+##   - A wall is drawn only where the ground falls TWO levels or more —
+##     a cliff, which is the one place a vertical face belongs. There the
+##     points stay on the lattice and the blocks are drawn as the blocks
+##     they are, so a cliff is square and a cave in its face is open.
+##   - Anything standing on the ground — a trunk, a wall, a crate — holds
+##     its column's points where the blocks are, and is drawn as a whole
+##     box sitting on the skin rather than welded into it.
+##
+## THE SHAPE IS ONLY A PICTURE. A block is still a whole block to walk on
+## and to dig; nothing here moves a block, and collision never hears
+## about any of it.
+##
+## ROUGH is how far a point may fall below where the blocks put it: a
+## little per-point noise, so ground the map says is flat is not a plane.
+## It is the only knob, and 0.0 leaves the lattice alone.
+const ROUGH := 0.3
+const SWELL_SALT := 7919
+
+## What counts as GROWN rather than built, and so bends with the ground.
+##
+## TREE TRUNKS ARE IN IT, and they have to be. A log that kept its corners
+## square held the points under it up while the ground a step away fell
+## the full roughness, so every tree stood on a little pedestal with the
+## earth pulled away around it — read as trees floating over the ground.
+##
+## LEAVES ARE NOT. A canopy is a loose shell of blocks, and dropping the
+## corners of blocks that only touch each other at an edge tears it into
+## scraps hanging off the top of a trunk.
+const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
+	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
+	Blocks.CHARRED]
+
 ## Baked face shading kept subtle - the sun and SSAO do the heavy lifting.
 ## Per-face shading, BAKED into the vertex colour as a stand-in for the
 ## sun. Gentler than it was (bottom faces were 0.62): the bake multiplies
@@ -21,64 +70,6 @@ const H := WorldGen.CHUNK_H
 ## of the brightness of the floor under it, which read as lamps that only
 ## shone upward. The sun still tells the faces apart; the lamps no longer
 ## lose on the underside.
-## SMOOTHED GROUND, an experiment that can be switched off here.
-##
-## Natural ground with nothing on it is drawn from a height at each top
-## corner rather than as a box — see _heights for the rule — so steps
-## are ramps, ridges are ramps with caps and outer corners are rounded
-## off, without a single block moving. Buildings are untouched (only
-## SMOOTH_BLOCKS qualify) and a block with a plant on top stays square
-## so the plant has ground under it.
-##
-## THE SHAPE IS ONLY A PICTURE. The block is still a whole block to walk
-## on and dig — the lowered part can be stood on. That is the price of
-## trying this in the mesher alone, and the reason it is a switch.
-const SMOOTH_CORNERS := true
-
-## THE GROUND IS A HEIGHT MAP, AND THE CORNERS ARE ITS SAMPLES.
-##
-## Every corner where blocks meet is a point shared by the eight blocks
-## around it, and its height is HOW MUCH GROUND IS UNDER IT: of the four
-## blocks directly below, each one missing takes a quarter off. Nothing
-## moves sideways — a block is still exactly where it was on the map, and
-## collision never hears about any of this.
-##
-## The offset belongs to the POINT, not to any block, so everything
-## touching it draws to where it lands and nothing can come apart. See
-## _sink_at, which is the whole rule.
-##
-## Thinking in blocks is what made the ground pointy. A corner was up, or
-## a whole block down, so a step fell its full height at one edge, a lone
-## block was a pyramid, a hole was a funnel and a diagonal hillside was a
-## field of spikes. Thinking in POINTS, each one carrying the average of
-## what is beneath it, makes those the same shapes a height map would
-## give: a step is a ramp two blocks wide, a lone block is a low mound, a
-## diagonal is a diagonal.
-##
-## ROUGH is what is added on top: a little per-point noise so that ground
-## which the map says is flat is not a plane, and so the bands of a cliff
-## face are not ruler-straight. It is the only knob, and 0.0 leaves the
-## map alone.
-const ROUGH := 0.3
-## The sliver a corner always leaves between itself and its own block's
-## floor. See _sink_at.
-const FLOOR_GAP := 0.004
-const SWELL_SALT := 7919
-
-## What counts as GROWN rather than built, and so bends with the ground.
-##
-## TREE TRUNKS ARE IN IT, and they have to be. A log that kept its corners
-## square held the four under it up while the ground a step away fell the
-## full DROP, so every tree stood on a little pedestal with the earth
-## pulled away around it — read as trees floating over the ground.
-##
-## LEAVES ARE NOT. A canopy is a loose shell of blocks, and dropping the
-## corners of blocks that only touch each other at an edge tears it into
-## scraps hanging off the top of a trunk.
-const SMOOTH_BLOCKS := [Blocks.GRASS, Blocks.DIRT, Blocks.STONE, Blocks.SAND,
-	Blocks.SANDSTONE, Blocks.SNOW, Blocks.MYCELIUM, Blocks.COBBLE,
-	Blocks.LOG, 125, 126, 127, 128, Blocks.WARPED_STEM]
-
 const SHADE_TOP := 1.0
 const SHADE_BOTTOM := 0.82
 const SHADE_X := 0.9
@@ -203,24 +194,13 @@ func _occludes(x: int, y: int, z: int) -> bool:
 var _lk_opaque := PackedByteArray()
 var _lk_solid := PackedByteArray()
 var _lk_smooth := PackedByteArray()
-# Per build: the shared height of every ground vertex, and every block's
-# slope on each axis — see _surface and _axes.
-var _surface_cache: Dictionary = {}
-var _axes_cache: Dictionary = {}
-## This chunk's origin in world blocks, so the drops line up across chunk
-## borders. And how far a corner may drop: DROP, unless a test wants the
-## bare shape rule on its own.
+var _lk_cross := PackedByteArray()
+## This chunk's origin in world blocks, so the roughness lines up across
+## chunk borders. And how far a point may fall: ROUGH, unless a test
+## wants the bare lattice on its own.
 var _wx0 := 0
 var _wz0 := 0
 var rough := ROUGH
-## Each corner's drop, worked out once and read by the eight blocks
-## around it. A flat array rather than a dictionary: a chunk asks
-## for these tens of thousands of times, and this is one multiply-add
-## against a hashed Vector3i key. (SIZE + 1) points across, because the
-## far edge of the last block is a point too.
-const SPAN := SIZE + 1
-var _drop_lut := PackedFloat32Array()
-var _drop_done := PackedByteArray()
 
 ## THE CUTAWAY LINE. Solid cubes at or above this y go into the "roof"
 ## surface instead of "opaque", so a camera can decline to draw them —
@@ -234,17 +214,13 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	_lk_opaque = Blocks.LK_OPAQUE
 	_lk_solid = Blocks.LK_SOLID
 	_lk_smooth = _smooth_lk
+	_lk_cross = Blocks.LK_CROSS
 	_data = data
 	_neighbors = neighbors
-	_surface_cache.clear()
-	if _drop_lut.is_empty():
-		_drop_lut.resize(SPAN * SPAN * (H + 1))
-		_drop_done.resize(SPAN * SPAN * (H + 1))
-	else:
-		_drop_done.fill(0)
-	_axes_cache.clear()
 	_wx0 = cx * SIZE
 	_wz0 = cz * SIZE
+	_corner_cache.clear()
+	_fill_column_tops()
 	# The minimap's block per column, two bytes each like everything else
 	# that holds a block id.
 	var topmap := PackedByteArray()
@@ -254,6 +230,11 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 	# columns are walked, so it costs nothing to carry.
 	var roots := PackedFloat32Array()
 	roots.resize(SIZE * SIZE)
+	# Which block each column's skin is made of, once the walk has found
+	# it: the skin is drawn after, in one pass over the columns.
+	var skin_here := PackedInt32Array()
+	skin_here.resize(SIZE * SIZE)
+	skin_here.fill(0)
 	for y in H:
 		# Whole-slab air check runs in C++ — skips most of the sky instantly.
 		var slab_off := y * SIZE * SIZE * 2
@@ -303,7 +284,13 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 				# ground, so skipping the call (its jitter hash, six face
 				# lookups, the smoothing test) is most of the build. Its
 				# lamp and warp stone still count.
-				if x > 0 and x < SIZE - 1 and z > 0 and z < SIZE - 1 \
+				# ...but never the top of a column of ground, however
+				# boxed in it looks. Under a tree trunk every one of its
+				# six neighbours is solid, and skipping it left the
+				# column with no skin, so the trunk's foot had nothing to
+				# stand on and the ground beside it stopped short.
+				if float(y + 1) != _top_of(x, z) \
+						and x > 0 and x < SIZE - 1 and z > 0 and z < SIZE - 1 \
 						and y > 0 and y < H - 1 \
 						and _buried(((y * SIZE + z) * SIZE + x) << 1):
 					if block == Blocks.TELEPORT:
@@ -322,14 +309,17 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 					draw = Blocks.disguise_of([
 						_block_at(x - 1, y, z), _block_at(x + 1, y, z),
 						_block_at(x, y, z - 1), _block_at(x, y, z + 1)])
-				var shaped := false
-				if _smooth(block, x, y, z):
-					var h := _heights(x, y, z)
-					if h[0] != 1.0 or h[1] != 1.0 or h[2] != 1.0 or h[3] != 1.0:
-						_add_shaped(draw, x, y, z, cx, cz, h)
-						shaped = true
-				if not shaped:
-					_add_cube(draw, x, y, z, cx, cz, solid_key)
+				# THE TOP OF A COLUMN OF GROUND KEEPS EVERYTHING BUT ITS
+				# LID. The skin draws its surface, and the wall under its
+				# edge where the ground beside it has fallen away (see
+				# _add_skin) — but the block is still a block from
+				# underneath and from inside: the ceiling of a cave below
+				# it, the wall of one beside it. Dropping it whole took
+				# the roof off every cave that ran under the surface.
+				var is_skin := float(y + 1) == _top_of(x, z)
+				if is_skin:
+					skin_here[z * SIZE + x] = draw
+				_add_cube(draw, x, y, z, cx, cz, solid_key, is_skin)
 				if block == Blocks.TELEPORT:
 					teleporters.append(Vector3i(x, y, z))
 				var light := Blocks.LK_LIGHT[block]
@@ -340,6 +330,11 @@ func build(data: PackedByteArray, neighbors: Dictionary, cx: int, cz: int,
 						"color": Blocks.LK_COLOR[block],
 						"flicker": block == Blocks.CAMPFIRE or block == Blocks.FIRE,
 					})
+	for z in SIZE:
+		for x in SIZE:
+			var ground := skin_here[z * SIZE + x]
+			if ground != Blocks.AIR:
+				_add_skin(x, z, _top_of(x, z), ground)
 	var result := {}
 	for key in SURFACES:
 		if _indices[key].is_empty():
@@ -364,30 +359,6 @@ func _jitter(x: int, y: int, z: int, cx: int, cz: int, rough := 0.0) -> float:
 	var amp := 0.09 * (1.0 + rough)
 	return 1.0 - amp * 0.6 + amp * WorldGen.hash01(cx * SIZE + x, cz * SIZE + z, y * 31)
 
-## THE SHAPE OF THE GROUND. Every top corner of a block of ground is a
-## VERTEX THE GROUND SHARES: up to four blocks meet at it, and they all
-## read the same height for it — so nothing here can leave a seam, a
-## spike, or a sliver of wall between two blocks that are both ground.
-## A block's top is drawn through the four heights at its corners, and
-## its open sides up to the line the surface makes across them. A vertex
-## is UP (a whole block) if anything at all stands on it, or if any block
-## touching it that is not ground says so; a block of ground's own
-## opinion of its corner is: on each axis, one side open and the other
-## solid means it slopes down toward the open side; both solid or both
-## open, it is flat; the corner takes the lower axis. Solid means solid
-## — a glowstone or a pane of glass holds a corner up like stone does.
-##
-## A step's edge is a ramp. A stair is a slope, because each tread's
-## back corners are held up by the tread above. A plateau's outer corner
-## drops its outer corner and keeps the rest of its top flat, from the
-## midline. A lone block, a one-wide ridge and a one-wide hole all stay
-## square, because nothing beside them slopes. Every corner is a whole
-## block up or down: a rise is always one block over one block. Only
-## natural ground with nothing above it is shaped; anything built, and
-## anything with something on it, is whole.
-func _smooth(block: int, x: int, y: int, z: int) -> bool:
-	return SMOOTH_CORNERS and _smoothable()[block] == 1 and _block_at(x, y + 1, z) == Blocks.AIR
-
 ## SMOOTH_BLOCKS as a table by id: `in` on the array was a linear search,
 ## run for every solid block and again for every corner test.
 ##
@@ -403,347 +374,291 @@ static func _build_smooth_lk() -> PackedByteArray:
 		table[id] = 1
 	return table
 
-static func _smoothable() -> PackedByteArray:
-	return _smooth_lk
-
-## Corner heights [NW, NE, SE, SW] of a block's top, relative to its
-## bottom: 1 is its own top, 0 its bottom.
-func _heights(x: int, y: int, z: int) -> PackedFloat64Array:
-	# FULL PRECISION, all the way to the vertex. Through a 32-bit array a
-	# corner one level up reads `1 + offset`, rounded around 1, while the
-	# block above reads the same point as `0 + offset`, rounded around
-	# nothing — and the two land a millionth of a block apart. Every
-	# height here is rounded exactly once: when it becomes a vertex.
-	return PackedFloat64Array([_surface(x, y, z, 0, 0), _surface(x, y, z, 1, 0),
-		_surface(x, y, z, 1, 1), _surface(x, y, z, 0, 1)])
-
-## The shared height of the vertex at the (cx, cz) corner of block (x, z)
-## on level y — cx and cz each 0 or 1. Cached per vertex and level: four
-## blocks ask for each one.
-func _surface(x: int, y: int, z: int, cx: int, cz: int) -> float:
-	var key := Vector3i(x + cx, y, z + cz)
-	if _surface_cache.has(key):
-		return _surface_cache[key]
-	# A BLOCK'S TOP CORNER IS THE LATTICE POINT ABOVE IT, and where that
-	# point sits is decided by _sink_at — how much ground is actually
-	# under it — not by this block. Its bottom corners are the points
-	# below it, which _add_shaped reads the same way.
-	return _remember(key, 1.0 - _sink_at(x + cx, y + 1, z + cz))
-
-func _remember(key: Vector3i, height: float) -> float:
-	_surface_cache[key] = height
-	return height
-
-## WHICH WAY THE GROUND FACES AT THIS POINT, from the height map either
-## side of it. The ground is a surface, not a heap of facets: giving all
-## three corners of a triangle the triangle's own normal lights every one
-## of them as its own little plane, so next to each other they jump from
-## bright to nearly black and a hillside reads as a pile of shards with
-## bits missing. Sharing a normal at each point — worked out from the
-## slope of the map, which is the same from whichever block asks — lights
-## the whole surface as one piece.
+# ---- the skin over the ground ------------------------------------------
+#
+## THE GROUND IS ONE SKIN, NOT A PILE OF LIDS.
 ##
-## Walls are not done this way: a cliff face and the top of a block are
-## meant to look like different things.
-func _ground_normal(vx: int, wy: int, vz: int) -> Vector3:
-	var west := _sink_at(vx - 1, wy, vz)
-	var east := _sink_at(vx + 1, wy, vz)
-	var north := _sink_at(vx, wy, vz - 1)
-	var south := _sink_at(vx, wy, vz + 1)
-	# A sink is how far DOWN, so a bigger sink to the east means the
-	# ground falls that way: the normal leans west.
-	return Vector3(east - west, 2.0, south - north).normalized()
+## Drawing a top face per block is what puts holes and walls in a
+## hillside: a cell with no block in it has no face, so you see down into
+## the gap between its neighbours, and a step of one level leaves the side
+## of the upper block standing there as a wall. Neither is anything to do
+## with how it is lit or how rough it is; it is what "every face belongs
+## to a block" means.
+##
+## So the ground is drawn as a surface in its own right, one piece per
+## COLUMN, through four corner heights it shares with the columns around
+## it. Where two columns differ by a single level their shared corners
+## come out at the same height, so the two pieces meet edge to edge and
+## the step is a slope with nothing vertical in it. A gap between stepped
+## blocks is spanned rather than left open, because the skin does not
+## care whether there is a block under any particular part of it. And a
+## diagonal staircase, which used to be a field of little pyramids, comes
+## out as one flat plane.
+##
+## A wall is only drawn where the ground drops TWO levels or more at once
+## — see _add_skin — because that is the only place a block face has
+## nothing touching it.
 
-## HOW FAR THIS LATTICE POINT SITS BELOW ITS OWN LEVEL, 0 .. 1.
+## The top of each column of natural ground in this chunk and one ring
+## around it, as an absolute height: the y above its highest solid block.
+## -1 where there is no ground at all, and for anything built, which is
+## drawn as the boxes it is.
+var _column_top := PackedFloat32Array()
+var _column_held := PackedByteArray()
+const COLUMNS := SIZE + 2
+
+func _fill_column_tops() -> void:
+	if _column_top.is_empty():
+		_column_top.resize(COLUMNS * COLUMNS)
+		_column_held.resize(COLUMNS * COLUMNS)
+	for iz in COLUMNS:
+		for ix in COLUMNS:
+			var nx := ix - 1
+			var nz := iz - 1
+			var found := -1.0
+			var held := 0
+			# Down from the sky to the first ground. What holds the
+			# ground square is what is RESTING on it — the run of solid
+			# blocks reaching right down to it, a trunk or a wall — and
+			# a gap of air below something breaks that run. A canopy of
+			# leaves three blocks up is not standing on anything, and
+			# counting it flattened the ground under every tree.
+			var standing := 0
+			# ...all the way to y = 0. Stopping at 1 left the floor of a
+			# flat test world with no top at all, and every rule here
+			# reading -1 for it.
+			for y in range(H - 1, -1, -1):
+				var block := _block_at(nx, y, nz)
+				if block == Blocks.AIR or _lk_cross[block] == 1:
+					standing = 0
+					continue
+				if _lk_smooth[block] == 1:
+					found = float(y + 1)
+					held = standing
+					break
+				standing = 1 if _lk_solid[block] == 1 else 0
+			_column_top[iz * COLUMNS + ix] = found
+			_column_held[iz * COLUMNS + ix] = held
+
+## Is something standing on this column's ground — a trunk, a wall, a
+## floor somebody laid? Then its corners stay where the blocks are.
+func _held_at(nx: int, nz: int) -> bool:
+	var ix := nx + 1
+	var iz := nz + 1
+	if ix < 0 or ix >= COLUMNS or iz < 0 or iz >= COLUMNS:
+		return false
+	return _column_held[iz * COLUMNS + ix] == 1
+
+func _top_of(nx: int, nz: int) -> float:
+	var ix := nx + 1
+	var iz := nz + 1
+	if ix < 0 or ix >= COLUMNS or iz < 0 or iz >= COLUMNS:
+		return -1.0
+	return _column_top[iz * COLUMNS + ix]
+
+## THE HEIGHT OF ONE CORNER OF ONE COLUMN'S PIECE OF SKIN.
 ##
-## THE POINTS ARE A HEIGHT MAP, and this is the sample. A point's height
-## is how much ground is underneath it: of the four blocks directly
-## below, each one missing takes a QUARTER off. Three missing and it
-## sits a quarter of a block above the level below, not a whole block
-## down.
+## The average of the columns meeting at that corner — but only the ones
+## within a level of this column, so a cliff does not drag the ground
+## over the edge of it. Two columns a single level apart therefore agree
+## about the corner between them (each has the other inside its reach),
+## which is what makes a one-level step a slope; across a cliff they do
+## not, and the gap between their answers is the wall.
+func _skin_corner(x: int, z: int, cx: int, cz: int, mine: float) -> float:
+	# WORKED OUT ONCE PER POINT. Every column asks for its four corners,
+	# for the slope at each of them (four more points each), and again for
+	# the two it shares with each neighbour — some thirty calls per
+	# column, nearly all of them for a point another column has already
+	# asked about. Without this the sort below runs seven thousand times a
+	# chunk and meshing one takes twice as long.
+	#
+	# Keyed by the point AND by who is asking, because that is what the
+	# answer depends on: across a tear the two sides read it differently,
+	# and a cache that forgot the asker would weld a cliff shut.
+	var key := (((z + cz + 2) * CORNER_KEYS + x + cx + 2) << 8) | (int(mine) & 0xFF)
+	var hit: Variant = _corner_cache.get(key)
+	if hit != null:
+		return hit
+	var value := _corner_height(x, z, cx, cz, mine)
+	corners_worked += 1
+	_corner_cache[key] = value
+	return value
+
+## The points of this chunk plus two rings either side, for the key above.
+const CORNER_KEYS := SIZE + 6
+var _corner_cache: Dictionary = {}
+## How many points this build actually worked out, as opposed to looked
+## up. Read by tests/mesh_watertight.gd, which is where the cache is kept
+## honest: without a bound on this nothing notices when a change starts
+## asking for the same point over and over again.
+var corners_worked := 0
+
+func _corner_height(x: int, z: int, cx: int, cz: int, mine: float) -> float:
+	# THE COLUMNS THAT CAN REACH EACH OTHER SHARE THE CORNER. Sort the
+	# four tops meeting here and walk up them: while each is within a
+	# step of the one below, they are the same piece of ground and the
+	# corner they share is their average. Where the walk has to jump more
+	# than a step, the ground is torn — that is a cliff — and the columns
+	# above the tear keep their own corner, with the wall between.
+	#
+	# Asking from either side of a one-level step gives the same answer,
+	# which is what makes it a slope with nothing vertical in it. A tall
+	# column nearby cannot spoil that: it is simply on the other side of
+	# a tear, and has no say in this corner.
+	var tops := PackedFloat64Array()
+	for dx: int in [cx - 1, cx]:
+		for dz: int in [cz - 1, cz]:
+			var other := _top_of(x + dx, z + dz)
+			if other >= 0.0:
+				tops.append(other)
+	if tops.is_empty():
+		return mine
+	tops.sort()
+	var low := tops[0]
+	var high := tops[0]
+	var total := tops[0]
+	var count := 1
+	for i in range(1, tops.size()):
+		if tops[i] - high > 1.001:
+			if mine <= high + 0.001:
+				break          # our group ends here
+			low = tops[i]
+			total = 0.0
+			count = 0
+		high = tops[i]
+		total += tops[i]
+		count += 1
+	if mine < low - 0.001 or mine > high + 0.001:
+		return mine            # not in any group of ours
+	# ANYTHING STANDING ON THE GROUND HOLDS THIS CORNER WHERE THE BLOCKS
+	# ARE. A trunk, a wall, a floor somebody laid, a crate: they are drawn
+	# as the boxes they are, with flat square faces, and ground that had
+	# smoothed away from one would leave a slot down the join — or set it
+	# standing over a dip. It holds the corner at ITS OWN column's top,
+	# not the tallest column in the group, or a trunk in a hollow would be
+	# left standing in a hole.
+	var held := -1.0
+	for dx: int in [cx - 1, cx]:
+		for dz: int in [cz - 1, cz]:
+			var top := _top_of(x + dx, z + dz)
+			if top >= low - 0.001 and top <= high + 0.001 \
+					and _held_at(x + dx, z + dz):
+				held = maxf(held, top)
+	if held >= 0.0:
+		return held
+	# A CLIFF IS A CLIFF. Where one of the columns at this corner is torn
+	# from the rest — two levels or more, which is the one place a
+	# vertical face belongs — the ground each side of the tear is drawn
+	# as the blocks it is, square faces down the whole height of it, and
+	# this corner stays on the lattice so the skin meets them exactly.
+	# Smoothing it would leave a lip over the cliff and a seam under it,
+	# and a cave coming out of the cliff face would be walled up.
+	var west_north := _top_of(x + cx - 1, z + cz - 1)
+	var east_north := _top_of(x + cx, z + cz - 1)
+	var west_south := _top_of(x + cx - 1, z + cz)
+	var east_south := _top_of(x + cx, z + cz)
+	if _torn(west_north, east_north) or _torn(west_south, east_south) \
+			or _torn(west_north, west_south) or _torn(east_north, east_south):
+		return mine
+	return total / float(count) - rough * _swell(x + cx, int(high), z + cz)
+
+## Is the ground between these two columns a cliff rather than a step?
+## Side by side only — a hillside falls two levels across the diagonal of
+## every corner on it, and that is a slope, not a tear.
+func _torn(a: float, b: float) -> bool:
+	return a >= 0.0 and b >= 0.0 and absf(a - b) > 1.001
+
+## WHERE THE GROUND FACES AT THIS CORNER. The slope of the skin either
+## side of it, so the light runs across the surface instead of stopping
+## at every triangle. Both columns of a shared corner work out the same
+## answer, so neighbouring pieces cannot disagree.
+func _skin_normal(x: int, z: int, cx: int, cz: int, mine: float) -> Vector3:
+	var west := _skin_corner(x - 1, z, cx, cz, mine)
+	var east := _skin_corner(x + 1, z, cx, cz, mine)
+	var north := _skin_corner(x, z - 1, cx, cz, mine)
+	var south := _skin_corner(x, z + 1, cx, cz, mine)
+	return Vector3(west - east, 2.0, north - south).normalized()
+
+## ONE COLUMN'S PIECE OF SKIN: the surface over it, and a wall under its
+## edge only where the ground beside it falls away by more than a level.
 ##
-## That one line is what makes the ground smooth rather than pointy. The
-## rule before it was all-or-nothing — a corner was up, or a whole block
-## down — so the edge of a step fell its whole height in one go, a lone
-## block became a pyramid, a hole became a funnel, and a diagonal
-## hillside came out as a field of spikes. Quarters turn all of those
-## into slopes: a one-block step is a ramp two blocks wide, a lone block
-## is a low mound, a diagonal is a diagonal.
-##
-## It is capped at a whole block, so a cliff is still a cliff: what is
-## further down than that is drawn by the blocks further down.
-##
-## SOMETHING STANDING ON THE POINT holds it up — otherwise the floor of
-## whatever stands there would part from the ground it stands on — and so
-## does anything built, a slab, a fence or a pane among the eight blocks
-## around it: those are drawn as boxes and a box cannot follow a bent
-## corner. The roughness is added even under a standing block, because
-## that is the line between two blocks of a cliff face and a cliff with
-## ruler-straight bands reads as brickwork.
-func _sink_at(vx: int, wy: int, vz: int) -> float:
-	if wy <= 0 or wy >= H or vx < 0 or vx > SIZE or vz < 0 or vz > SIZE:
-		return 0.0
-	var slot := (wy * SPAN + vz) * SPAN + vx
-	if _drop_done[slot] == 1:
-		return _drop_lut[slot]
-	var missing := 0
-	var square := false
-	var covered := false
-	for nx: int in [vx - 1, vx]:
-		for nz: int in [vz - 1, vz]:
-			# What is under the point decides its height...
-			var below := _block_at(nx, wy - 1, nz)
-			if below == Blocks.AIR or _lk_solid[below] != 1:
-				missing += 1
-			elif _lk_smooth[below] != 1:
-				square = true
-			# ...and what is over it can hold it up.
-			var above := _block_at(nx, wy, nz)
-			if above != Blocks.AIR and _lk_solid[above] == 1:
-				covered = true
-				if _lk_smooth[above] != 1:
-					square = true
-	var sank := 0.0
-	if not square:
-		if not covered:
-			sank = float(missing) * 0.25
-		# The roughness is DOWNWARD like everything else here, and a point
-		# with solid ground over it takes it too: that line is where two
-		# blocks of a cliff face meet, and a cliff whose bands all rule
-		# straight reads as brickwork.
-		#
-		# Down only, and that is not a style choice. A point that rose
-		# above its own level could end up higher than the point above
-		# it — a block inside out, its top below its bottom — and the
-		# face of such a block has to be clipped where the two cross,
-		# which leaves a vertex in the middle of a neighbour's edge and a
-		# seam you can see the sky through. Falling only, that cannot
-		# happen: every bottom is at or below zero and every top at or
-		# above it.
-		# NEVER THE WHOLE BLOCK. A corner that fell exactly to its own
-		# block's floor met a floor that had itself fallen a hair, which
-		# is a block inside out by a thousandth — and the face of one has
-		# to be clipped where its top and bottom cross, leaving a vertex
-		# in the middle of a neighbour's edge and a seam. A sliver of a
-		# block left over costs nothing to look at and cannot invert.
-		sank = clampf(sank + rough * _swell(vx, wy, vz), 0.0, 1.0 - FLOOR_GAP)
-	_drop_lut[slot] = sank
-	_drop_done[slot] = 1
-	# Back out of the array, not the variable: the table holds 32-bit
-	# floats, so a point worked out here and the same point read from the
-	# table later must be the same number to the last bit. Otherwise the
-	# shape of a chunk depends on the order its blocks happened to ask,
-	# and two chunks disagree about their seam by a millionth.
-	return _drop_lut[slot]
+## `top` is the height of the ground here — the y above the column's
+## highest block — and `block` what that block is, for its colour.
+func _add_skin(x: int, z: int, top: float, block: int) -> void:
+	var colour := Blocks.LK_TOP[block]
+	var side_colour := Blocks.LK_COLOR[block]
+	var jitter := _jitter(x, int(top) - 1, z, _wx0 / SIZE, _wz0 / SIZE,
+		Blocks.LK_ROUGH[block])
+	var emit := Blocks.LK_EMIT[block]
+	var corners := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
+	var normals: Array = []
+	var points: Array = []
+	for i in 4:
+		var c: Vector2 = CORNER_XZ[i]
+		var height := _skin_corner(x, z, int(c.x), int(c.y), top)
+		corners[i] = height
+		normals.append(_skin_normal(x, z, int(c.x), int(c.y), top))
+		var point := Vector3(x + c.x, 0.0, z + c.y)
+		point.y = height
+		points.append(point)
+	# Fold along the diagonal whose corners are closest in height: the
+	# flattest line across the piece, and the smallest crease.
+	var through_02 := absf(corners[0] - corners[2]) <= absf(corners[1] - corners[3])
+	var tris: Array = [[0, 1, 2], [0, 2, 3]] if through_02 else [[1, 2, 3], [1, 3, 0]]
+	for t: Array in tris:
+		var a: Vector3 = points[t[0]]
+		var b: Vector3 = points[t[1]]
+		var c2: Vector3 = points[t[2]]
+		var flat := (b - a).cross(c2 - a).normalized()
+		if flat.y < 0.0:
+			flat = -flat
+		_tri("opaque", [a, b, c2], flat, [colour, colour, colour],
+			SHADE_TOP * jitter, emit,
+			[normals[t[0]], normals[t[1]], normals[t[2]]])
+	# THE ONLY VERTICAL FACES ABOVE GROUND. Where the neighbour shares our
+	# corners — a step of one level, or flat — there is nothing between us
+	# to close. Where it is torn away below us, the wall runs from our
+	# corners down to ITS corners, exactly, so the two pieces of skin meet
+	# along the bottom of it. Blocks do not draw these faces at all: see
+	# the note in _add_cube about a face above the ground beside it.
+	for side in 4:
+		var step: Vector2i = SIDE_STEP[side]
+		var beyond := _top_of(x + step.x, z + step.y)
+		if beyond < 0.0:
+			continue      # no ground there at all: nothing to meet
+		if beyond < top - 1.001:
+			continue      # a cliff: the blocks draw their own faces
+		var pair: Array = SIDE_CORNERS[side]
+		var a: Vector3 = points[pair[0]]
+		var b: Vector3 = points[pair[1]]
+		# The same two corners, as the column over there reads them.
+		var theirs: Array = SIDE_CORNERS[(side + 2) % 4]
+		var their_a := _skin_corner(x + step.x, z + step.y,
+			int(CORNER_XZ[theirs[1]].x), int(CORNER_XZ[theirs[1]].y), beyond)
+		var their_b := _skin_corner(x + step.x, z + step.y,
+			int(CORNER_XZ[theirs[0]].x), int(CORNER_XZ[theirs[0]].y), beyond)
+		if their_a >= a.y - 0.001 and their_b >= b.y - 0.001:
+			continue      # they meet us, or stand over us
+		var normal := Vector3(step.x, 0.0, step.y)
+		var low_a := Vector3(a.x, minf(their_a, a.y), a.z)
+		var low_b := Vector3(b.x, minf(their_b, b.y), b.z)
+		var shade := (SHADE_Z if side % 2 == 0 else SHADE_X) * jitter
+		_tri("opaque", [a, b, low_b], normal,
+			[colour, colour, side_colour], shade, emit)
+		_tri("opaque", [a, low_b, low_a], normal,
+			[colour, side_colour, side_colour], shade, emit)
 
 ## How much of the drop this corner takes, 0 .. 1. One hash of where the
 ## corner is: its own number, unrelated to the corners beside it, which
-## is the whole point (see DROP).
+## is the whole point.
 func _swell(vx: int, wy: int, vz: int) -> float:
 	return WorldGen.hash01((_wx0 + vx) * 31 + wy, (_wz0 + vz) * 17 - wy, SWELL_SALT)
-
-## One block of ground's own view of one of its corners, 1 up or 0 down.
-func _opinion(x: int, y: int, z: int, cx: int, cz: int) -> float:
-	var axes := _axes(x, y, z)
-	return minf(axes[2 + cx], axes[cz])
-
-## A block's slope on each axis from its four side neighbours alone:
-## [north edge, south edge, west edge, east edge], each 1 up or 0 down.
-func _axes(x: int, y: int, z: int) -> PackedFloat32Array:
-	var key := Vector3i(x, y, z)
-	if _axes_cache.has(key):
-		return _axes_cache[key]
-	var n := _firm_at(x, y, z - 1)
-	var e := _firm_at(x + 1, y, z)
-	var s := _firm_at(x, y, z + 1)
-	var w := _firm_at(x - 1, y, z)
-	var axes := PackedFloat32Array([
-		0.0 if (not n and s) else 1.0, 0.0 if (not s and n) else 1.0,
-		0.0 if (not w and e) else 1.0, 0.0 if (not e and w) else 1.0])
-	_axes_cache[key] = axes
-	return axes
-
-## Solid, for the shape of the ground: stone, but also glowstone, glass,
-## a fence — anything a body cannot pass. Ground next to a glowstone
-## used to slope toward it as if it were air, and the glowstone, which
-## draws no face against an opaque neighbour, was then open on that side.
-func _firm_at(x: int, y: int, z: int) -> bool:
-	return _lk_solid[_block_at(x, y, z)] == 1
 
 ## Sides 0 N, 1 E, 2 S, 3 W; each runs between two corners, clockwise
 ## seen from above: N is NW→NE, E is NE→SE, S is SE→SW, W is SW→NW.
 const SIDE_CORNERS := [[0, 1], [1, 2], [2, 3], [3, 0]]
 const SIDE_STEP := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]
 const CORNER_XZ := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
-
-## One side of a block, against air: the part of it between the ground it
-## stands on and the ground on top of it. Both cross the face as straight
-## lines — from the height at one corner to the height at the other — and
-## the face is whatever lies between them. Neither is cut off at the
-## block's own bottom or top: a corner may have dropped (see DROP), so
-## the block above it grows down past its own floor to fill the space,
-## and a wall that stopped at the block would leave that strip open.
-##
-## Coloured from the block's side colour at the ground to its top colour
-## at the top, so a cut runs green down to a brown foot rather than brown
-## all over.
-func _side_face(x: int, y: int, z: int, side: int, top0: float, top1: float,
-		bot0: float, bot1: float,
-		base_color: Color, top_color: Color, brightness: float, emit: float) -> void:
-	if top0 <= bot0 and top1 <= bot1:
-		return
-	var d := top1 - top0
-	var db := bot1 - bot0
-	# Where the two lines cross, if they do inside the face: past that the
-	# ground above has sunk below the ground beneath and there is nothing
-	# of the block left to draw.
-	var s0 := 0.0
-	var s1 := 1.0
-	var gap := d - db
-	if gap != 0.0:
-		var cross := (bot0 - top0) / gap
-		if cross > 0.0 and cross < 1.0:
-			if top0 <= bot0:
-				s0 = cross
-			else:
-				s1 = cross
-	# Around the face: along the ground below, up the far end, back along
-	# the surface line, down the near end.
-	# AT AN END OF THE FACE, the height IS the corner's height — not the
-	# line evaluated there. `a + (b - a) * 1` is not b to the last bit,
-	# and the top face of this same block puts its corner at b: a
-	# millionth of a block apart is still two faces that do not meet.
-	var along := PackedFloat64Array([s0, s1, s1, s0])
-	var heights := PackedFloat64Array([
-		bot0 if s0 == 0.0 else bot0 + db * s0,
-		bot1 if s1 == 1.0 else bot0 + db * s1,
-		top1 if s1 == 1.0 else top0 + d * s1,
-		top0 if s0 == 0.0 else top0 + d * s0])
-	var pair: Array = SIDE_CORNERS[side]
-	var c0: Vector2 = CORNER_XZ[pair[0]]
-	var c1: Vector2 = CORNER_XZ[pair[1]]
-	var o := Vector3(x, y, z)
-	var step: Vector2i = SIDE_STEP[side]
-	var normal := Vector3(step.x, 0, step.y)
-	# ANY point that lands on one already there is dropped, not just one
-	# following it. Where the ground above meets the ground below — a
-	# ramp's foot, a face that has closed to nothing — two corners of
-	# this shape are the same place, and a triangle between them is a
-	# sliver with no area: nothing to see, two edges into the mesh that
-	# nothing matches, and something for the depth buffer to argue with.
-	var world: Array = []
-	var cols: Array = []
-	for i in along.size():
-		var q: float = along[i]
-		var at := o + Vector3(lerpf(c0.x, c1.x, q), 0.0, lerpf(c0.y, c1.y, q))
-		at.y = float(y) + heights[i]    # once, as in _add_shaped
-		var seen := false
-		for other: Vector3 in world:
-			if other.distance_squared_to(at) < 0.000001:
-				seen = true
-				break
-		if seen:
-			continue
-		world.append(at)
-		cols.append(base_color.lerp(top_color, float(heights[i])))
-	for i in range(1, world.size() - 1):
-		var ab: Vector3 = world[i] - world[0]
-		var ac: Vector3 = world[i + 1] - world[0]
-		if ab.cross(ac).length_squared() < 0.00000001:
-			continue      # three points in a line: no face, only edges
-		_tri("opaque", [world[0], world[i], world[i + 1]], normal,
-			[cols[0], cols[i], cols[i + 1]], brightness, emit)
-
-## A shaped block: the top as two triangles split through its higher
-## diagonal, each open side up to the surface line, and a bottom when
-## there is nothing beneath. Sides against another solid block draw
-## nothing: the surface is shared, so there is nothing left bare.
-func _add_shaped(block: int, x: int, y: int, z: int, cx: int, cz: int,
-		h: PackedFloat64Array) -> void:
-	var base_color := Blocks.LK_COLOR[block]
-	var top_color := Blocks.LK_TOP[block]
-	var jitter := _jitter(x, y, z, cx, cz, Blocks.LK_ROUGH[block])
-	var emit := Blocks.LK_EMIT[block]
-	var o := Vector3(x, y, z)
-	var p: Array = []
-	for i in 4:
-		var c: Vector2 = CORNER_XZ[i]
-		# THE HEIGHT GOES IN ONCE, at the height it lands. Building
-		# Vector3(c.x, h, c.y) and adding the block's corner rounds the
-		# height twice — once around 1, once around 31 — and a cube face
-		# meeting this one rounds once, so the two put the same point two
-		# millionths of a block apart and the mesh has a seam in it.
-		var point := o + Vector3(c.x, 0.0, c.y)
-		point.y = float(y) + h[i]
-		p.append(point)
-	# ITS FLOOR IS THE LATTICE TOO: the four points under the block, each
-	# with its own offset, exactly as the ground below them draws its top.
-	var b := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
-	for i in 4:
-		var c: Vector2 = CORNER_XZ[i]
-		b[i] = -_sink_at(x + int(c.x), y, z + int(c.y))
-	# Split through the diagonal whose two corners are LEVEL, so a block
-	# with one corner out of line is a flat triangle and a sloped one —
-	# flat from the midline — rather than a ridge from that corner to
-	# the far one. Where neither is level, or both are, the higher.
-	var d02 := absf(h[0] - h[2])
-	var d13 := absf(h[1] - h[3])
-	var through_02 := d02 < d13 if d02 != d13 else h[0] + h[2] >= h[1] + h[3]
-	var tris: Array = [[0, 1, 2], [0, 2, 3]] if through_02 else [[1, 2, 3], [1, 3, 0]]
-	# The same corner shading a cube's top gets. Shaped tops had none,
-	# which did not show while they were only the edges of steps — but
-	# with rolling ground most of a field is shaped, and ground running up
-	# to a wall lost the dark line along its foot.
-	var top_cols: Array = []
-	for i in 4:
-		var c: Vector2 = CORNER_XZ[i]
-		var sx := 1 if c.x > 0.5 else -1
-		var sz := 1 if c.y > 0.5 else -1
-		var s1 := _occludes(x + sx, y + 1, z)
-		var s2 := _occludes(x, y + 1, z + sz)
-		var sc := _occludes(x + sx, y + 1, z + sz)
-		var ao := 3.0 if (s1 and s2) else float(int(s1) + int(s2) + int(sc))
-		var shade := 1.0 - ao_step * ao
-		top_cols.append(Color(top_color.r * shade, top_color.g * shade,
-			top_color.b * shade, top_color.a))
-	# One normal per corner, from the slope of the map — see
-	# _ground_normal. The whole reason the ground can look smooth.
-	var corner_normals: Array = []
-	for i in 4:
-		var c2: Vector2 = CORNER_XZ[i]
-		corner_normals.append(_ground_normal(x + int(c2.x), y + 1, z + int(c2.y)))
-	for t: Array in tris:
-		var a: Vector3 = p[t[0]]
-		var bpt: Vector3 = p[t[1]]
-		var c: Vector3 = p[t[2]]
-		var n := (bpt - a).cross(c - a).normalized()
-		if n.y < 0.0:
-			n = -n
-		# Lit between a side and a top, by how far it tips.
-		var bright := lerpf((SHADE_X + SHADE_Z) * 0.5, SHADE_TOP, clampf(n.y, 0.0, 1.0)) * jitter
-		_tri("opaque", [a, bpt, c], n, [top_cols[t[0]], top_cols[t[1]], top_cols[t[2]]],
-			bright, emit, [corner_normals[t[0]], corner_normals[t[1]], corner_normals[t[2]]])
-	for side in 4:
-		var step: Vector2i = SIDE_STEP[side]
-		if _is_opaque_at(x + step.x, y, z + step.y):
-			continue
-		var pair: Array = SIDE_CORNERS[side]
-		var shade := SHADE_Z if side % 2 == 0 else SHADE_X
-		_side_face(x, y, z, side, h[pair[0]], h[pair[1]], b[pair[0]], b[pair[1]],
-			base_color, top_color, shade * jitter, emit)
-	if not _is_opaque_at(x, y - 1, z):
-		# Through the same four corners as the sides start from, or the
-		# underside would part from them.
-		var u: Array = []
-		for i in 4:
-			var c: Vector2 = CORNER_XZ[i]
-			var point := o + Vector3(c.x, 0.0, c.y)
-			point.y = float(y) + b[i]   # once, as above
-			u.append(point)
-		_tri("opaque", [u[0], u[1], u[2]], Vector3.DOWN,
-			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
-		_tri("opaque", [u[0], u[2], u[3]], Vector3.DOWN,
-			[base_color, base_color, base_color], SHADE_BOTTOM * jitter, emit)
 
 ## LAMPS CLOSE TOGETHER BECOME ONE, and the strongest come first. A dense
 ## floor of glowstone used to keep the first lamps in walking order — all
@@ -808,7 +723,10 @@ func _tri(key: String, pts: Array, normal: Vector3, cols: Array, brightness: flo
 		i += 1
 	_indices[key].append_array([start, start + 1, start + 2])
 
-func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String) -> void:
+## `skinned` means the ground's own skin draws this block's top: the block
+## still draws everything else it owes — see the note where it is called.
+func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String,
+		skinned := false) -> void:
 	var base_color := Blocks.LK_COLOR[block]
 	var top_color := Blocks.LK_TOP[block]
 	var jitter := _jitter(x, y, z, cx, cz, Blocks.LK_ROUGH[block])
@@ -818,20 +736,6 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 	var is_liquid := Blocks.LK_LIQUID[block] == 1
 	# Liquids drop their surface a bit below the block top, like Minecraft.
 	var top_y := 0.875 if is_liquid and _block_at(x, y + 1, z) != block else 1.0
-	# THE EIGHT CORNERS OF THIS BLOCK: [x][y][z], each 0 or 1 along the
-	# axis. A cube is only a cube when none of them has dropped — which
-	# is the case for everything built, and everything walled in by it
-	# (see DROP) — and otherwise it is drawn through whatever shape its
-	# corners make, the same as the ground around it.
-	#
-	# WATER KEEPS ITS SURFACE and follows the ground with its underside:
-	# its top is the flat sheet it has always been, and its bottom drops
-	# with the lake bed, so the water still reaches the ground it sits
-	# on rather than leaving a slot under its edge.
-	var corner_dy := PackedFloat32Array()
-	corner_dy.resize(8)
-	var corner_ready := 0
-	var bent := true
 	# The surface's arrays once, not a dictionary lookup per append.
 	# Packed arrays are shared, so these ARE the surface's arrays.
 	var verts: PackedVector3Array = _verts[key]
@@ -846,10 +750,15 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 	var interior := x > 0 and x < SIZE - 1 and z > 0 and z < SIZE - 1 \
 		and y > 0 and y < H - 1
 	var here := (y * SIZE + z) * SIZE + x
+	# Is this block standing on the ground rather than part of it? Its
+	# underside is exactly the top of this column of ground.
+	var standing := _lk_smooth[block] != 1 and float(y) == _top_of(x, z)
 
 	for face_index in 6:
 		var face: Array = FACES[face_index]
 		var n: Vector3i = face[0]
+		if skinned and n.y == 1:
+			continue          # the skin is this block's lid
 		var ahead := here + (n.y * SIZE + n.z) * SIZE + n.x
 		var neighbor := _data.decode_u16(ahead << 1) if interior \
 			else _block_at(x + n.x, y + n.y, z + n.z)
@@ -876,8 +785,31 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 			if is_liquid and neighbor == Blocks.ICE:
 				continue
 		else:
-			if Blocks.LK_OPAQUE[neighbor] == 1:
-				continue
+			# ANYTHING STANDING ON THE GROUND IS A WHOLE BOX. A trunk, a
+			# wall, a crate: where it touches ground it used to cull, and
+			# the two of them shared their sides. They cannot any more —
+			# the ground's face there is not a face, it is the skin, a
+			# surface that runs on past this block, under it and up the
+			# slope beside it. So a block standing on the skin draws all
+			# of itself and sits ON the ground rather than being welded
+			# into it, and the ground can slope up over its foot without
+			# tearing a hole in its side. Hidden faces, six per trunk.
+			if not (standing and _lk_smooth[neighbor] == 1):
+				if Blocks.LK_OPAQUE[neighbor] == 1:
+					continue
+			# A FACE ABOVE THE GROUND BESIDE IT IS THE SKIN'S, NOT THIS
+			# BLOCK'S. Where a column of ground is cut away, the wall down
+			# the side of it is drawn by the skin, which knows where the
+			# ground over there actually is (see _add_skin); this block
+			# drawing it too would put two faces in the same place, out by
+			# whatever the skin had smoothed. Underground — a cave, a
+			# tunnel, a cellar — there is no skin, and the block draws its
+			# own face as it always has.
+			if n.y == 0 and _lk_smooth[block] == 1:
+				var beside := _top_of(x + n.x, z + n.z)
+				if beside >= _top_of(x, z) - 1.001 \
+						and float(y) >= beside - 0.001:
+					continue
 		var u: Vector3i = face[1]
 		var v: Vector3i = face[2]
 		var shade: float = face[3]
@@ -908,18 +840,9 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 				ao[i] = 3.0 if (s1 and s2) else float(int(s1) + int(s2) + int(c))
 
 		var start: int = verts.size()
-		# Each corner of THIS face, as it fell — for the fold below.
-		var face_dy := PackedFloat64Array([0.0, 0.0, 0.0, 0.0])
 		var pattern := float(Blocks.LK_PATTERN_TOP[block] if n.y != 0
 			else Blocks.LK_PATTERN_SIDE[block])
 		var normal := Vector3(n)
-		# THE TOP OF NATURAL GROUND IS LIT AS GROUND, even when the block
-		# happens to be square: one normal per corner from the slope of
-		# the map (see _ground_normal), the same as the shaped blocks
-		# around it. Without it, a flat block among sloped ones is a
-		# bright tile in the middle of a hillside.
-		var smooth_top := n.y == 1 and not translucent and not is_liquid \
-			and _lk_smooth[block] == 1 and _block_at(x, y + 1, z) == Blocks.AIR
 		# Leaves sway everywhere; liquids wave only on their surface.
 		var vertex_sway := sway
 		if is_liquid:
@@ -930,47 +853,18 @@ func _add_cube(block: int, x: int, y: int, z: int, cx: int, cz: int, key: String
 			var vert := center + half_u * float(cs.x) + half_v * float(cs.y)
 			if top_y != 1.0 and vert.y > y + top_y:
 				vert.y = y + top_y
-			if bent:
-				var ci := ((int(vert.x) - x) << 2) | ((int(vert.y) - y) << 1) \
-					| (int(vert.z) - z)
-				if (corner_ready >> ci) & 1 == 0:
-					corner_ready |= 1 << ci
-					var ax := (ci >> 2) & 1
-					var ay := (ci >> 1) & 1
-					var az := ci & 1
-					var slot := (((y + ay) * SPAN) + z + az) * SPAN + x + ax
-					var fell: float = _drop_lut[slot] if _drop_done[slot] == 1 \
-						else _sink_at(x + ax, y + ay, z + az)
-					# A liquid's own surface never moves; only what it
-					# stands on does.
-					corner_dy[ci] = 0.0 if (is_liquid and ay == 1) else -fell
-				vert.y += corner_dy[ci]
-				face_dy[i] = corner_dy[ci]
 			verts.append(vert)
-			if smooth_top:
-				normals.append(_ground_normal(int(vert.x), y + 1, int(vert.z)))
-			else:
-				normals.append(normal)
+			normals.append(normal)
 			uvs.append(Vector2(pattern + CORNER_U[i], CORNER_V[i]))
 			var brightness := shade * jitter * (1.0 - ao_step * ao[i])
 			colors.append(Color(color.r * brightness, color.g * brightness,
 				color.b * brightness, color.a))
 			uv2s.append(uv2)
-		# WHICH WAY THE QUAD FOLDS. Four corners that have each dropped by
-		# their own amount are not a flat shape, so the fold has to go
-		# somewhere: along the diagonal whose two corners are CLOSEST in
-		# height, which is the flattest line across the face and the
-		# smallest crease. It follows the ground, so it changes direction
-		# as the ground does rather than ruling the same way everywhere.
-		#
-		# A face nobody has dropped folds the old way instead: to match
-		# the AO gradient, which kills the classic voxel AO artefact.
-		# Godot front faces wind clockwise.
-		var fold := ao[0] + ao[2] <= ao[1] + ao[3]
-		var bend := absf(face_dy[0] - face_dy[2]) - absf(face_dy[1] - face_dy[3])
-		if bend != 0.0:
-			fold = bend < 0.0
-		var order: PackedInt32Array = QUAD_ORDER if fold else QUAD_ORDER_FLIPPED
+		# WHICH WAY THE QUAD FOLDS: along the AO gradient, which kills the
+		# classic voxel artefact where a corner's shadow bends the wrong
+		# way across the diagonal. Godot front faces wind clockwise.
+		var order: PackedInt32Array = QUAD_ORDER \
+			if ao[0] + ao[2] <= ao[1] + ao[3] else QUAD_ORDER_FLIPPED
 		for index in order:
 			indices.append(start + index)
 
@@ -1214,8 +1108,14 @@ func _is_opaque_at(x: int, y: int, z: int) -> bool:
 ## corners it stands on. What a plant — a tuft here, a Kenney model in
 ## ChunkView — has to come down by to keep its feet in the ground.
 func _ground_drop(x: int, y: int, z: int) -> float:
-	return (_sink_at(x, y, z) + _sink_at(x + 1, y, z)
-		+ _sink_at(x, y, z + 1) + _sink_at(x + 1, y, z + 1)) * 0.25
+	var top := _top_of(x, z)
+	if top < 0.0 or absf(top - float(y)) > 0.001:
+		return 0.0      # not standing on the skin: a ledge, a pot plant
+	var sum := 0.0
+	for i in 4:
+		var c: Vector2 = CORNER_XZ[i]
+		sum += _skin_corner(x, z, int(c.x), int(c.y), top)
+	return top - sum * 0.25
 
 ## Which cutout silhouette the plants shader draws for a cross block.
 ## 0 grass tuft · 1 flower · 2 mushroom · 3 flame · 4 leafy bush ·
