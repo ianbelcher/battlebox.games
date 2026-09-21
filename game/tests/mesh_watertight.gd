@@ -49,14 +49,12 @@ func _init() -> void:
 		if bent.moved < 10:
 			failures.append("%s: only %d%% of corners moved — are the corners dropping at all?"
 				% [theme, bent.moved])
-		# EVERY POINT IS WORKED OUT ONCE. Four points per block face, and
-		# nearly all of them are the faces beside it asking for the same
-		# ones — a chunk of caverns draws twenty thousand faces and works
-		# out two and a half thousand points. A change that breaks the
-		# cache does not fail anything, it just multiplies how long
-		# meshing a chunk takes by thirty, which is a frame rate nobody
-		# can trace back to it.
-		if bent.worked > 6000:
+		# EVERY POINT IS WORKED OUT ONCE. A column asks for some thirty of
+		# them and nearly all are its neighbours' too, so they are cached
+		# — and a change that breaks the cache does not fail anything, it
+		# just doubles how long meshing a chunk takes, which is a frame
+		# rate nobody can trace back to it. A chunk has 324 columns.
+		if bent.worked > 1200:
 			failures.append("%s: %d points worked out for one chunk — the corner cache is not working"
 				% [theme, bent.worked])
 		if bent.moved <= flat.moved:
@@ -126,18 +124,13 @@ func _open_edges(theme: String, rough: float) -> Dictionary:
 			continue
 		# The rim of the meshed patch, and the world's floor: what would
 		# close those was never meshed.
-		#
-		# A BLOCK OF SLACK at the rim, because a point of the surface is
-		# not on the lattice — it slides along one axis (Mesher._point),
-		# so the edges down the cut face of the patch do not sit exactly
-		# on the plane the cut was made at.
 		var a := _point(pair[0])
 		var b := _point(pair[1])
 		if (a.y <= 0.001 and b.y <= 0.001) \
-				or (a.x <= low + 1.001 and b.x <= low + 1.001) \
-				or (a.x >= high - 1.001 and b.x >= high - 1.001) \
-				or (a.z <= low + 1.001 and b.z <= low + 1.001) \
-				or (a.z >= high - 1.001 and b.z >= high - 1.001):
+				or (a.x <= low + 0.001 and b.x <= low + 0.001) \
+				or (a.x >= high - 0.001 and b.x >= high - 0.001) \
+				or (a.z <= low + 0.001 and b.z <= low + 0.001) \
+				or (a.z >= high - 0.001 and b.z >= high - 0.001):
 			continue
 		if _drawn_loose_beside(a, b):
 			continue
