@@ -42,10 +42,18 @@ func _ready() -> void:
 	if theme.is_empty():
 		theme = "classic"
 	var gen := WorldGen.new(4242, theme, 250)
+	# WORLD_DROP_CHUNK="cx,cz" photographs somewhere other than the
+	# origin — an island with a tree on it, say, which in Isles is a long
+	# way out.
+	var middle := Vector2i.ZERO
+	var where := OS.get_environment("WORLD_DROP_CHUNK")
+	if where.contains(","):
+		middle = Vector2i(int(where.split(",")[0]), int(where.split(",")[1]))
 	var chunks := {}
 	for cz in range(-2, 3):
 		for cx in range(-2, 3):
-			chunks[Vector2i(cx, cz)] = gen.generate_chunk(cx, cz)
+			chunks[Vector2i(cx, cz)] = gen.generate_chunk(
+				middle.x + cx, middle.y + cz)
 	if OS.get_environment("WORLD_DROP_SCENE") == "steps":
 		# A hillside climbing DIAGONALLY, which is the shape that comes
 		# out as a staircase of notches rather than a slope.
