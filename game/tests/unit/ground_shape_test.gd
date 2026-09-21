@@ -1,17 +1,23 @@
 extends TestCase
-## The shape of the ground, point by point. See Mesher's header and
-## Mesher._skin_corner.
+## The shape of the ground, point by point. See the note at the top of
+## Mesher, and Mesher._point.
 ##
 ## Worth a test because it is a picture, and a wrong picture fails no
-## other check: a diagonal hillside was a field of pyramids with holes
-## between them for a while, then a row of half-height panels with walls
-## between them, and the world was "correct" throughout.
+## other check. Every one of these started as something visible and
+## wrong: a diagonal hillside as a field of pyramids with holes between
+## them; then as rows of half-height panels; then as a washboard of hard
+## chevron ridges; then as even ground covered in little dark notches
+## where every step had reopened by a hair.
 ##
-## The rules pinned here are the ones the shape is FOR:
-##   - a step of one level has nothing vertical in it,
-##   - a diagonal hillside is a single plane,
-##   - a fall of two levels or more is a square cliff,
-##   - everything touching a point agrees about where it is,
+## The rules the shape is FOR:
+##   - flat ground is flat, and exactly where the blocks put it,
+##   - a step of one level closes into a ramp, with the two points
+##     either side of it landing on the SAME spot,
+##   - a hillside rises evenly, whichever way it runs,
+##   - a cliff is a flat vertical wall,
+##   - the same is true UNDER the ground — a cave roof, the inside of a
+##     hole somebody dug — because none of it is a special case,
+##   - anything built keeps its corners and the ground meets them,
 ##   - and the whole thing is closed.
 
 const SIZE := 16
@@ -40,220 +46,228 @@ func _built(data: PackedByteArray, rough := 0.0, neighbors := {}, cx := 0) -> Me
 	mesher.build(data, neighbors, cx, 0)
 	return mesher
 
-## The four corners of one column's piece of skin, NW, NE, SE, SW, as
-## absolute heights — which is how the mesher itself reads them.
-func _corners(m: Mesher, x: int, z: int) -> PackedFloat64Array:
-	var top := m._top_of(x, z)
-	var out := PackedFloat64Array()
-	for c: Vector2 in Mesher.CORNER_XZ:
-		out.append(m._skin_corner(x, z, int(c.x), int(c.y), top))
-	return out
-
-## A hillside rising one block per step diagonally: solid at level y
-## where x + z >= 8 + y, so every tread's edge is a diagonal of blocks
-## each open on two sides.
-func _diagonal(x: int, z: int) -> int:
-	return clampi(x + z - 7, 1, 6)
-
 # ---- the shape the blocks ask for ---------------------------------------
 
-func test_a_step_of_one_level_has_nothing_vertical_in_it() -> void:
-	# The rule the whole surface exists for. Two columns a single level
-	# apart read the SAME height for the corners between them — halfway
-	# — so their two pieces of skin meet edge to edge and the step is a
-	# ramp two columns wide with no face standing in it.
-	var m := _built(_ground(func(_x: int, z: int) -> int: return 2 if z >= 8 else 1))
-	var high := _corners(m, 5, 8)       # ground to y = 2
-	var low := _corners(m, 5, 7)        # ground to y = 1, one level down
-	equal(high[0], 1.5, "the high column's northern corners are halfway down")
-	equal(high[1], 1.5, "...both of them")
-	equal(high[2], 2.0, "and its southern corners are still up")
-	equal(low[3], 1.5, "the low column's southern corners come up to meet them")
-	equal(low[2], 1.5, "...both of them")
-	equal(high[0], low[3], "so the two columns agree about the corner they share")
-	equal(high[1], low[2], "...and about the other one")
-
-func test_a_diagonal_hillside_is_one_plane() -> void:
-	# The picture that gave this away: ground climbing diagonally used to
-	# come out as a field of little pyramids with holes between them,
-	# because a cell with no block in it had no face to draw. Down the
-	# fall line the points simply climb, by the same amount each time.
-	# A clean diagonal with no floor and no ceiling in the way, so the
-	# fall line is a straight climb from end to end.
-	var m := _built(_ground(func(x: int, z: int) -> int: return clampi(x + z - 4, 1, 14)))
-	var steps: Array = []
-	for i in range(4, 10):
-		steps.append(m._skin_corner(i, i, 0, 0, m._top_of(i, i)))
-	# Two levels per step down the diagonal, because a step diagonally is
-	# a step along both axes at once.
-	for i in range(1, steps.size()):
-		var rise: float = steps[i] - steps[i - 1]
-		check(absf(rise - 2.0) < 0.001,
-			"the hillside climbs evenly, with no tread flat and none doubled: %s" % [steps])
-
-func test_a_fall_of_two_levels_is_a_square_cliff() -> void:
-	# The one place a vertical face belongs. The points on both lips stay
-	# on the lattice, so the wall is a wall and the blocks of it are the
-	# blocks they are — and a cave coming out of a cliff face is open
-	# rather than plastered over.
-	var m := _built(_ground(func(_x: int, z: int) -> int: return 4 if z >= 8 else 1))
-	var top := _corners(m, 5, 8)
-	var foot := _corners(m, 5, 7)
-	equal(top[0], 4.0, "the top of the cliff keeps its corner")
-	equal(top[1], 4.0, "...both of them")
-	equal(foot[3], 1.0, "and the ground at its foot keeps its own")
-	equal(foot[2], 1.0, "...both of them")
-
-func test_a_hillside_falling_two_levels_across_a_corner_is_still_a_slope() -> void:
-	# ...but only side by side. Any hillside falls two levels across the
-	# diagonal of a corner — 3, 2, 2, 1 around one point — and reading
-	# that as a cliff would square off every slope in the world.
-	var m := _built(_ground(func(x: int, z: int) -> int: return 3 - mini(x, 1) - mini(z, 1)))
-	var mid := m._skin_corner(1, 1, 0, 0, m._top_of(1, 1))
-	check(absf(mid - 2.0) < 0.001,
-		"the point in the middle of the fall is the average of it: %s" % mid)
-
-func test_anything_standing_on_the_ground_stands_flush_on_it() -> void:
-	# A trunk, a wall, a crate: the column under it keeps its points
-	# where the blocks are, so the thing sits flat on the ground instead
-	# of over a dip — and the ground beside it comes up to meet its foot.
-	var data := _ground(func(_x: int, _z: int) -> int: return 3)
-	for y in range(3, 7):
-		data.encode_u16(_at(8, y, 8), Blocks.LOG)
-	var m := _built(data, Mesher.ROUGH)
-	check(m._held_at(8, 8), "the column under the trunk is held")
-	for c in _corners(m, 8, 8):
-		equal(c, 3.0, "every corner under the trunk is at the block's top")
-	check(not m._held_at(8, 5), "a column with nothing on it is not")
-
-func test_a_canopy_overhead_does_not_hold_the_ground_down() -> void:
-	# Only what RESTS on the ground holds it square. Leaves three blocks
-	# up are standing on nothing, and counting them flattened the ground
-	# under every tree in the world.
-	var data := _ground(func(_x: int, _z: int) -> int: return 3)
-	for z in range(6, 11):
-		for x in range(6, 11):
-			data.encode_u16(_at(x, 7, z), Blocks.LEAVES)
-	var m := _built(data, Mesher.ROUGH)
-	check(not m._held_at(8, 8), "the ground under a canopy is ordinary ground")
-
-func test_the_ground_beside_something_square_stays_on_the_lattice() -> void:
-	# A glowstone standing on otherwise flat ground. It is not ground, so
-	# it is drawn as the box it is, with flat square faces — and the
-	# ground NEXT to it has to come up to meet them, or there is a slot
-	# down the join.
-	var data := _ground(func(_x: int, _z: int) -> int: return 3)
-	data.encode_u16(_at(8, 3, 8), Blocks.GLOWSTONE)
-	var m := _built(data, Mesher.ROUGH)
-	var beside := _corners(m, 7, 8)
-	equal(beside[1], 3.0, "the point the glowstone shares with the ground beside it")
-	equal(beside[2], 3.0, "...both of them")
-	check(beside[0] < 3.0, "while the ground away from it still rolls")
-
-func test_anything_built_is_not_ground() -> void:
-	var data := _ground(func(_x: int, _z: int) -> int: return 2)
-	data.encode_u16(_at(8, 1, 8), Blocks.PLANKS)
-	var m := _built(data)
-	equal(m._top_of(8, 8), 1.0,
-		"a floor somebody laid is not the top of a column of ground")
-
-# ---- every point is shared -----------------------------------------------
-
-func test_every_column_touching_a_point_reads_the_same_height_for_it() -> void:
-	# The property that makes a seam impossible. Up to four columns meet
-	# at a point and all of them draw to it; if any two disagree there is
-	# a slit between them, whatever the rest of the rules say.
-	for rough: float in [0.0, Mesher.ROUGH]:
-		var m := _built(_ground(_diagonal), rough)
-		var seams := 0
-		for z in range(2, SIZE - 2):
-			for x in range(2, SIZE - 2):
-				var mine := _corners(m, x, z)
-				var east := _corners(m, x + 1, z)
-				var south := _corners(m, x, z + 1)
-				# Torn columns are allowed to disagree: that IS the cliff.
-				if not m._torn(m._top_of(x, z), m._top_of(x + 1, z)):
-					if mine[1] != east[0] or mine[2] != east[3]:
-						seams += 1
-				if not m._torn(m._top_of(x, z), m._top_of(x, z + 1)):
-					if mine[3] != south[0] or mine[2] != south[1]:
-						seams += 1
-		equal(seams, 0, "every column agrees about every point it touches (rough %.2f)" % rough)
-
-func test_points_line_up_across_a_chunk_border() -> void:
-	# Ground that repeats every 16 columns across, so the two chunks meet
-	# as one hillside rather than at a cliff.
-	var data := _ground(func(x: int, z: int) -> int:
-		return 3 + (1 if x % 4 == 0 else 0) + (1 if z % 5 == 0 else 0))
-	var west := _built(data, Mesher.ROUGH, {Vector2i(1, 0): data}, 0)
-	var east := _built(data, Mesher.ROUGH, {Vector2i(-1, 0): data}, 1)
+func test_flat_ground_is_flat_and_where_the_blocks_put_it() -> void:
+	# Four blocks under a point and four empty over it is exactly half
+	# full, and half full is where the surface is — so nothing moves.
+	var m := _built(_ground(func(_x: int, _z: int) -> int: return 4))
 	for z in range(2, SIZE - 2):
-		var a := _corners(west, SIZE - 1, z)
-		var b := _corners(east, 0, z)
-		equal(a[1], b[0], "the border point at z=%d reads the same from both chunks" % z)
-		equal(a[2], b[3], "...and its southern neighbour")
+		for x in range(2, SIZE - 2):
+			equal(m._fullness(x, 4, z), 0.5, "a point on a plain is half full")
+			equal(m._point(x, 4, z), Vector3(x, 4, z),
+				"...so it stays exactly where the blocks put it")
+
+func test_a_step_of_one_level_closes_into_a_ramp() -> void:
+	# THE RULE THE WHOLE SURFACE EXISTS FOR, and the one that was hardest
+	# to keep. The point above the step and the point below it both slide
+	# toward each other along the line between them, read the same two
+	# fullnesses, and stop at the SAME place. Anything that leaves them a
+	# hair apart reopens the step as a sliver of vertical face — which is
+	# what covered the ground in little dark notches.
+	for rough: float in [0.0, Mesher.ROUGH]:
+		var m := _built(_ground(func(_x: int, z: int) -> int:
+			return 12 if z < 8 else 11), rough)
+		var above := m._point(5, 12, 8)
+		var below := m._point(5, 11, 8)
+		equal(above, below,
+			"the two points either side of the step land on the same spot (rough %.2f)" % rough)
+		check(above.y > 11.0 and above.y < 12.0,
+			"...somewhere between the two levels: %s" % above)
+
+func test_a_hillside_rises_evenly() -> void:
+	# Ground climbing diagonally: a step in x AND a step in z at once,
+	# which is the shape that came out as a washboard for the longest.
+	# Down any line across it the surface has to rise by the same amount
+	# every time; a rise that alternates is a field of ridges.
+	var m := _built(_ground(func(x: int, z: int) -> int:
+		return clampi(20 + int(floor((x + z) * 0.5)), 4, 40)))
+	var last := 0.0
+	for x in range(4, 12):
+		var top: int = clampi(20 + int(floor((x + 8) * 0.5)), 4, 40)
+		var here := m._point(x, top, 8).y
+		if x > 4:
+			check(absf((here - last) - 0.5) < 0.001,
+				"the hillside rises half a level per column, evenly (at x=%d: %+.3f)"
+					% [x, here - last])
+		last = here
+
+func test_a_cliff_is_a_flat_vertical_wall() -> void:
+	# The one place a vertical face belongs. All the way up the face the
+	# surface stays in the plane of the blocks; only the lip at the top
+	# and the foot at the bottom round off.
+	var m := _built(_ground(func(_x: int, z: int) -> int: return 16 if z < 8 else 8))
+	for y in range(10, 15):
+		equal(m._point(5, y, 8).z, 8.0,
+			"the face of the cliff is flat at y=%d" % y)
+
+func test_the_roof_of_a_cave_is_smoothed_TOO() -> void:
+	# NOTHING HERE KNOWS WHICH WAY IS UP. The surface is the boundary
+	# between matter and nothing, so the underside of the rock over a
+	# cave is the same kind of surface as the hillside above it — which
+	# is the whole reason for drawing it this way rather than as a height
+	# map. A square roof with a step in it comes out sloped.
+	var data := _ground(func(_x: int, _z: int) -> int: return 20)
+	for z in range(4, 12):
+		for x in range(4, 12):
+			for y in range(6, 12 if z < 8 else 13):
+				data.encode_u16(_at(x, y, z), Blocks.AIR)
+	var m := _built(data)
+	var above := m._point(6, 12, 8)
+	var below := m._point(6, 13, 8)
+	equal(above, below, "the two points either side of the step in the roof meet")
+	check(above.y > 12.0 and above.y < 13.0,
+		"...between the two levels, so the roof slopes: %s" % above)
+
+func test_anything_built_keeps_the_ground_square_against_it() -> void:
+	# A plank floor laid on the ground. It is drawn as the box it is, and
+	# ground that had smoothed away from its flat square faces would
+	# leave a slot down the join.
+	var data := _ground(func(_x: int, _z: int) -> int: return 4)
+	data.encode_u16(_at(8, 4, 8), Blocks.PLANKS)
+	var m := _built(data, Mesher.ROUGH)
+	for corner: Vector2i in [Vector2i(8, 8), Vector2i(9, 8), Vector2i(9, 9), Vector2i(8, 9)]:
+		check(m._square_at(corner.x, 4, corner.y),
+			"the points under the planks are held")
+		equal(m._point(corner.x, 4, corner.y), Vector3(corner.x, 4, corner.y),
+			"...so they do not move at all")
+
+func test_a_steep_flank_is_not_crushed() -> void:
+	# THE ISLANDS. A cone whose sides fall several levels per column,
+	# which is most of an island in Isles and was the shape that came out
+	# as green and brown splinters.
+	#
+	# Every point chased the surface as far as it could reach. On a slope
+	# that steep the crossing lands ON the point above or below, so three
+	# points in one column were all hauled onto the middle one: the
+	# two-block risers between them crushed to nothing and every quad
+	# around them stretched into a spike. Points two apart have to stay
+	# apart — a point never goes further than CROSS_LIMIT, so two of them
+	# keep at least what is left over.
+	var m := _built(_ground(func(x: int, z: int) -> int:
+		return clampi(30 - 3 * maxi(absi(x - 8), absi(z - 8)), 2, 30)), Mesher.ROUGH)
+	var pairs := 0
+	var crushed := 0
+	var room := 2.0 - 2.0 * Mesher.CROSS_LIMIT
+	for z in range(3, 14):
+		for x in range(3, 14):
+			for y in range(3, 30):
+				if not (_surface_point(m, x, y, z) and _surface_point(m, x, y + 2, z)):
+					continue
+				pairs += 1
+				if m._point(x, y + 2, z).y - m._point(x, y, z).y < room - 0.001:
+					crushed += 1
+	check(pairs > 30, "there are pairs of points to check on the flank (%d)" % pairs)
+	equal(crushed, 0, "%d of %d pairs two apart were crushed together" % [crushed, pairs])
+
+func test_a_point_never_leaves_the_blocks_that_made_it() -> void:
+	var m := _built(_ground(func(x: int, z: int) -> int:
+		return clampi(30 - 3 * maxi(absi(x - 8), absi(z - 8)), 2, 30)), Mesher.ROUGH)
+	for z in range(3, 14):
+		for x in range(3, 14):
+			for y in range(3, 31):
+				if not _surface_point(m, x, y, z):
+					continue
+				var moved := m._point(x, y, z) - Vector3(x, y, z)
+				check(moved.length() <= Mesher.CROSS_LIMIT + 0.001,
+					"the point at %d,%d,%d moved %s" % [x, y, z, moved])
+
+## Is the ground's surface drawn through this point — between one and
+## seven of the eight blocks meeting here have matter in them, and one of
+## them is ground?
+func _surface_point(m: Mesher, x: int, y: int, z: int) -> bool:
+	var filled := 0
+	var bends := false
+	for dx in [-1, 0]:
+		for dy in [-1, 0]:
+			for dz in [-1, 0]:
+				var b := m._block_at(x + dx, y + dy, z + dz)
+				if Blocks.LK_SOLID[b] == 1 or Blocks.LK_OPAQUE[b] == 1:
+					filled += 1
+				if b in Mesher.SMOOTH_BLOCKS:
+					bends = true
+	return bends and filled > 0 and filled < 8
 
 # ---- the roughness -------------------------------------------------------
 
-func test_flat_ground_is_roughened_but_not_by_much() -> void:
-	var m := _built(_ground(func(_x: int, _z: int) -> int: return 3), Mesher.ROUGH)
-	var lowest := 3.0
-	var highest := 0.0
+func test_the_roughness_moves_the_ground_but_not_much() -> void:
+	var m := _built(_ground(func(_x: int, _z: int) -> int: return 4), Mesher.ROUGH)
+	var lowest := 4.0
+	var highest := 4.0
 	for z in range(2, SIZE - 2):
 		for x in range(2, SIZE - 2):
-			for c in _corners(m, x, z):
-				check(c <= 3.0 and c >= 3.0 - Mesher.ROUGH - 0.0001,
-					"a point of flat ground falls at most the roughness: %s" % c)
-				lowest = minf(lowest, c)
-				highest = maxf(highest, c)
-	check(lowest < 2.98 and highest > 2.99,
-		"and it is not a plane (%.3f .. %.3f)" % [lowest, highest])
+			var here := m._point(x, 4, z)
+			equal(here.x, float(x), "flat ground only ever moves up and down")
+			equal(here.z, float(z), "...on both of the other axes")
+			check(absf(here.y - 4.0) <= 1.0, "and not by much: %s" % here)
+			lowest = minf(lowest, here.y)
+			highest = maxf(highest, here.y)
+	check(highest - lowest > 0.05,
+		"...but it is not a plane (%.3f .. %.3f)" % [lowest, highest])
 
-func test_with_the_roughness_off_the_ground_is_exactly_what_the_map_says() -> void:
-	var m := _built(_ground(func(_x: int, _z: int) -> int: return 3), 0.0)
+func test_with_the_roughness_off_the_ground_is_what_the_map_says() -> void:
+	var m := _built(_ground(func(_x: int, _z: int) -> int: return 4), 0.0)
 	for z in range(2, SIZE - 2):
 		for x in range(2, SIZE - 2):
-			for c in _corners(m, x, z):
-				equal(c, 3.0, "flat ground with no roughness is a plane")
+			equal(m._point(x, 4, z), Vector3(x, 4, z),
+				"flat ground with no roughness is a plane")
 
-func test_the_roughness_does_not_move_a_cliff_off_the_lattice() -> void:
-	# A wall of ground with open ground in front of it: the lip has to
-	# stay square or the blocks of the wall show through it.
-	var data := _ground(func(x: int, _z: int) -> int: return 8 if x >= 8 else 1)
-	var m := _built(data, Mesher.ROUGH)
+# ---- every point is shared -----------------------------------------------
+
+func test_points_line_up_across_a_chunk_border() -> void:
+	# A point on the border is worked out twice, once by each chunk, from
+	# its own blocks and nothing else. The two answers have to be the
+	# same number — not nearly, exactly, or the two pieces of ground are
+	# not the same edge and there is a hole between them.
+	var data := _ground(func(x: int, z: int) -> int:
+		return 4 + (1 if x % 4 == 0 else 0) + (1 if z % 5 == 0 else 0))
+	var west := _built(data, Mesher.ROUGH, {Vector2i(1, 0): data}, 0)
+	var east := _built(data, Mesher.ROUGH, {Vector2i(-1, 0): data}, 1)
 	for z in range(2, SIZE - 2):
-		var lip := _corners(m, 8, z)
-		equal(lip[0], 8.0, "the lip of the cliff is on the lattice")
-		equal(lip[3], 8.0, "...both corners of it")
+		for y in range(3, 7):
+			equal(west._point(SIZE, y, z) + Vector3(-SIZE, 0, 0),
+				east._point(0, y, z),
+				"the border point at y=%d z=%d reads the same from both chunks" % [y, z])
 
 # ---- and it is closed ----------------------------------------------------
 
 ## Every edge of the mesh is shared by exactly two faces: a seam, a
 ## missing face or a stray sliver all show up here as an edge with
 ## nothing on its other side. The same property is checked on real
-## generated terrain, at scale, by tests/mesh_watertight.gd.
+## generated terrain, at scale and in four worlds, by
+## tests/mesh_watertight.gd.
 func test_the_ground_has_no_holes_in_it() -> void:
 	for rough: float in [0.0, Mesher.ROUGH]:
-		var data := _ground(_diagonal)
+		var data := _ground(func(x: int, z: int) -> int:
+			return clampi(6 + int(floor((x + z) * 0.5)), 3, 14))
 		# Things that are not ground, on it, beside it and under it.
-		data.encode_u16(_at(3, 1, 12), Blocks.GLOWSTONE)
-		data.encode_u16(_at(9, 2, 3), Blocks.GLOWSTONE)
-		data.encode_u16(_at(12, 4, 12), Blocks.PLANKS)
-		data.encode_u16(_at(10, 3, 10), Blocks.TALL_GRASS)
-		data.encode_u16(_at(5, 1, 5), Blocks.AIR)
-		data.encode_u16(_at(2, 1, 2), Blocks.WATER)
-		for y in range(6, 10):
+		data.encode_u16(_at(3, 6, 12), Blocks.GLOWSTONE)
+		data.encode_u16(_at(9, 7, 3), Blocks.GLASS)
+		data.encode_u16(_at(12, 9, 12), Blocks.PLANKS)
+		data.encode_u16(_at(10, 8, 10), Blocks.TALL_GRASS)
+		data.encode_u16(_at(5, 4, 5), Blocks.AIR)
+		data.encode_u16(_at(2, 4, 2), Blocks.WATER)
+		for y in range(9, 13):
 			data.encode_u16(_at(11, y, 11), Blocks.LOG)
 		_equal_no_holes(data, rough)
 
-func test_a_cliff_with_a_cave_in_its_face_has_no_holes_either() -> void:
-	# The shape that kept tearing: a tall column of ground beside a low
-	# one, with a hollow in the tall one at the height of the face.
-	var data := _ground(func(x: int, _z: int) -> int: return 10 if x >= 8 else 3)
-	for z in range(4, 12):
-		for x in range(8, 12):
-			data.encode_u16(_at(x, 5, z), Blocks.AIR)
-			data.encode_u16(_at(x, 6, z), Blocks.AIR)
+func test_a_hole_dug_in_the_ground_has_no_holes_in_it() -> void:
+	# What the digger leaves: a crater blown out of a hillside, which is
+	# all underside and wall and was a heap of cubes before any of this.
+	var data := _ground(func(_x: int, _z: int) -> int: return 16)
+	for z in SIZE:
+		for x in SIZE:
+			for y in range(4, 20):
+				if Vector3(x, y, z).distance_to(Vector3(8, 16, 8)) < 5.5:
+					data.encode_u16(_at(x, y, z), Blocks.AIR)
+	_equal_no_holes(data, Mesher.ROUGH)
+
+func test_a_cave_under_the_ground_has_no_holes_in_it() -> void:
+	var data := _ground(func(_x: int, _z: int) -> int: return 20)
+	for z in range(3, 13):
+		for x in range(3, 13):
+			for y in range(6, 12 if (x + z) % 5 < 2 else 13):
+				data.encode_u16(_at(x, y, z), Blocks.AIR)
 	_equal_no_holes(data, Mesher.ROUGH)
 
 func _equal_no_holes(data: PackedByteArray, rough: float) -> void:
@@ -268,47 +282,48 @@ func _equal_no_holes(data: PackedByteArray, rough: float) -> void:
 		for k in 3:
 			var a := verts[index[i + k]].snapped(Vector3.ONE * 0.00002)
 			var b := verts[index[i + (k + 1) % 3]].snapped(Vector3.ONE * 0.00002)
-			var key := "%s>%s" % [a, b]
-			edges[key] = int(edges.get(key, 0)) + 1
+			edges["%s>%s" % [a, b]] = int(edges.get("%s>%s" % [a, b], 0)) + 1
 	var open: Array = []
 	for key: String in edges.keys():
 		var parts := key.split(">")
-		var back := "%s>%s" % [parts[1], parts[0]]
-		if int(edges.get(back, 0)) == int(edges[key]):
+		if int(edges.get("%s>%s" % [parts[1], parts[0]], 0)) == int(edges[key]):
 			continue
 		# The rim of the chunk and the floor of the world: what would
-		# close those was never meshed.
-		var a := _point(parts[0])
-		var b := _point(parts[1])
+		# close those was never meshed. A block of slack because a point
+		# is not on the lattice — it slides.
+		var a := _point_of(parts[0])
+		var b := _point_of(parts[1])
 		if (a.y <= 0.001 and b.y <= 0.001) \
-				or (a.x <= 0.001 and b.x <= 0.001) \
-				or (a.x >= SIZE - 0.001 and b.x >= SIZE - 0.001) \
-				or (a.z <= 0.001 and b.z <= 0.001) \
-				or (a.z >= SIZE - 0.001 and b.z >= SIZE - 0.001):
+				or (a.x <= 1.001 and b.x <= 1.001) \
+				or (a.x >= SIZE - 1.001 and b.x >= SIZE - 1.001) \
+				or (a.z <= 1.001 and b.z <= 1.001) \
+				or (a.z >= SIZE - 1.001 and b.z >= SIZE - 1.001):
 			continue
 		open.append(key)
 	equal(open.size(), 0, "edges with nothing on the other side (rough %.2f): %s"
-		% [rough, open.slice(0, 8)])
+		% [rough, open.slice(0, 6)])
 
-func _point(text: String) -> Vector3:
+func _point_of(text: String) -> Vector3:
 	var bits := text.substr(1, text.length() - 2).split(", ")
 	return Vector3(float(bits[0]), float(bits[1]), float(bits[2]))
 
 # ---- what stands on it ---------------------------------------------------
 
 func test_a_plant_comes_down_with_the_ground_it_stands_on() -> void:
-	# Ground with a tuft on it: the tuft's feet are at the average of
-	# the four points under it, not at the block's own top.
-	var data := _ground(func(_x: int, _z: int) -> int: return 3)
-	data.encode_u16(_at(8, 3, 8), Blocks.TALL_GRASS)
+	# Ground with a tuft on it: the tuft's feet are at the average of the
+	# four points under it, not at the block's own top, or it stands in
+	# the air over a dip.
+	var data := _ground(func(_x: int, _z: int) -> int: return 4)
+	data.encode_u16(_at(8, 4, 8), Blocks.TALL_GRASS)
 	var m := _built(data, Mesher.ROUGH)
-	var under := m._ground_drop(8, 3, 8)
-	check(under > 0.0, "the ground under the tuft has fallen (%.3f)" % under)
-	var built: Dictionary = Mesher.new().build(data, {}, 0, 0)
-	var arrays: Array = built["plants"]
-	var lowest := 99.0
-	for v in (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array):
-		if absf(v.x - 8.5) < 0.6 and absf(v.z - 8.5) < 0.6:
-			lowest = minf(lowest, v.y)
-	check(lowest < 3.0 - 0.001,
-		"so the tuft's feet are in it, not above it (%.3f)" % lowest)
+	check(absf(m._ground_drop(8, 4, 8)) > 0.0,
+		"the ground under the tuft has moved (%.3f)" % m._ground_drop(8, 4, 8))
+	# A tuft is one of the plants ChunkView stands as a MODEL rather than
+	# as crossed quads, so what the mesher hands over is how far the
+	# ground under its column has come down — see Mesher._ground_drop.
+	var mesher := Mesher.new()
+	mesher.rough = Mesher.ROUGH
+	var built: Dictionary = mesher.build(data, {}, 0, 0)
+	var roots: PackedFloat32Array = built["roots"]
+	check(absf(roots[8 * SIZE + 8]) > 0.0,
+		"and the tuft is told about it (%.3f)" % roots[8 * SIZE + 8])
